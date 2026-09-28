@@ -11,6 +11,21 @@ import { MessageService } from '@/server/services/message';
 
 const log = debug('lobe-server:context-compaction');
 
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (!signal?.aborted) return;
+  const error = new Error('Context compaction cancelled');
+  error.name = 'AbortError';
+  throw error;
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  const message = (error as { message?: unknown } | undefined)?.message;
+  if (typeof message === 'string' && message) return message;
+  return `Context compaction stream failed: ${JSON.stringify(error)}`;
+};
+
 export interface CompactContextParams {
   agentId: string;
   groupId?: string | null;
@@ -48,7 +63,11 @@ export class ContextCompactionService {
     this.messageService = new MessageService(db, userId, workspaceId);
   }
 
-  async compact(params: CompactContextParams): Promise<CompactContextResult> {
+  async compact(
+    params: CompactContextParams,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CompactContextResult> {
+    const { signal } = options;
     const { agentId, groupId, threadId, topicId } = params;
     const scope = { agentId, groupId, threadId, topicId };
 
@@ -89,9 +108,12 @@ export class ContextCompactionService {
         messages: messagesToSummarize,
         model,
         provider,
+        signal,
       });
 
       if (!summary) throw new Error('Context compaction produced an empty summary');
+      // A caller that gave up must not see its cancelled compaction reappear on refresh.
+      throwIfAborted(signal);
 
       const finalized = await this.messageService.finalizeCompression(messageGroupId, summary, {
         ...scope,
@@ -113,24 +135,35 @@ export class ContextCompactionService {
     messages: UIChatMessage[];
     model: string;
     provider: string;
+    signal?: AbortSignal;
   }): Promise<string> {
-    const { existingSummary, messages, model, provider } = params;
+    const { existingSummary, messages, model, provider, signal } = params;
     const payload = chainCompressContext(messages, existingSummary);
     const runtime = await initModelRuntimeFromDB(this.db, this.userId, provider, this.workspaceId);
 
     let content = '';
+    let streamError: unknown;
     const response = await runtime.chat(
       { messages: payload.messages as any[], model, stream: true },
       {
         callback: {
+          // In-band stream errors do not reject the stream; without this a truncated
+          // partial summary would be finalized and replace the earlier groups.
+          onError: (error) => {
+            streamError = error;
+          },
           onText: (text) => {
             content += text;
           },
         },
         metadata: { trigger: RequestTrigger.ContextCompression },
+        signal,
       },
     );
     await consumeStreamUntilDone(response);
+
+    throwIfAborted(signal);
+    if (streamError) throw new Error(getErrorMessage(streamError));
 
     return content.trim();
   }

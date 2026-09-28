@@ -123,6 +123,40 @@ describe('ContextCompactionService', () => {
     expect(mocks.finalizeCompression).not.toHaveBeenCalled();
   });
 
+  it('rolls back when the stream reports an in-band error after partial text', async () => {
+    mocks.chat.mockImplementation(async (_payload, options) => {
+      options.callback.onText('Partial summ');
+      options.callback.onError({ message: 'upstream overloaded' });
+      return new Response('');
+    });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await expect(service.compact({ agentId: 'agent-1', topicId: 'topic-1' })).rejects.toThrow(
+      'upstream overloaded',
+    );
+
+    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
+    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+  });
+
+  it('forwards cancellation to the model call and never finalizes a cancelled compaction', async () => {
+    const controller = new AbortController();
+    mocks.chat.mockImplementation(async (_payload, options) => {
+      options.callback.onText('Complete summary');
+      controller.abort();
+      return new Response('');
+    });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await expect(
+      service.compact({ agentId: 'agent-1', topicId: 'topic-1' }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(mocks.chat.mock.calls[0][1].signal).toBe(controller.signal);
+    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
+    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+  });
+
   it('rolls back instead of persisting an empty summary', async () => {
     streamSummary('   ');
     const service = new ContextCompactionService({} as never, 'user-1');
