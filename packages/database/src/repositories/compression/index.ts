@@ -278,9 +278,14 @@ export class CompressionRepository {
   }
 
   /**
-   * Narrow compression groups to those whose members belong to the given thread
-   * scope (`threadId` null = the topic's main line). Group rows only carry a
+   * Narrow compression groups to those that belong to the given thread scope
+   * (`threadId` null = the topic's main line). Group rows only carry a
    * `topicId`, so a topic-wide group list mixes the main line with its threads.
+   *
+   * A thread group may also hold the main-line parents the thread branched
+   * from, so ownership is decided by thread membership, not by any single row:
+   * a group belongs to thread T when any member is in T, and to the main line
+   * only when none of its members is in a thread.
    */
   async filterGroupIdsByThread(
     groupIds: string[],
@@ -290,19 +295,25 @@ export class CompressionRepository {
 
     const { threadId, topicId } = params;
     const rows = await this.db
-      .selectDistinct({ messageGroupId: messages.messageGroupId })
+      .selectDistinct({ messageGroupId: messages.messageGroupId, threadId: messages.threadId })
       .from(messages)
       .where(
         and(
           this.messagesOwnership(),
           eq(messages.topicId, topicId),
           inArray(messages.messageGroupId, groupIds),
-          threadId ? eq(messages.threadId, threadId) : isNull(messages.threadId),
         ),
       );
-    const inScope = new Set(rows.map((row) => row.messageGroupId));
 
-    return groupIds.filter((id) => inScope.has(id));
+    const inScope = new Set<string>();
+    const inAnyThread = new Set<string>();
+    for (const row of rows) {
+      if (!row.messageGroupId) continue;
+      if (row.threadId) inAnyThread.add(row.messageGroupId);
+      if (threadId ? row.threadId === threadId : !row.threadId) inScope.add(row.messageGroupId);
+    }
+
+    return groupIds.filter((id) => inScope.has(id) && (!!threadId || !inAnyThread.has(id)));
   }
 
   /**

@@ -1,4 +1,6 @@
-import { consumeStreamUntilDone } from '@lobechat/model-runtime';
+import { getCompressionThreshold } from '@lobechat/agent-runtime';
+import { countContextTokens } from '@lobechat/context-engine';
+import { consumeStreamUntilDone, getModelPropertyWithFallback } from '@lobechat/model-runtime';
 import { chainCompressContext } from '@lobechat/prompts';
 import type { UIChatMessage } from '@lobechat/types';
 import { RequestTrigger } from '@lobechat/types';
@@ -23,6 +25,36 @@ const throwIfAborted = (signal?: AbortSignal) => {
   const error = new Error('Context compaction cancelled');
   error.name = 'AbortError';
   throw error;
+};
+
+const estimateTokens = (message: UIChatMessage): number =>
+  countContextTokens({ messages: [message] }).adjustedTotal;
+
+/**
+ * Split messages, in order, into chunks whose estimated size stays within
+ * `budget`. A single message larger than the budget becomes its own chunk.
+ */
+export const chunkByTokenBudget = (
+  messages: UIChatMessage[],
+  budget: number,
+): UIChatMessage[][] => {
+  const chunks: UIChatMessage[][] = [];
+  let current: UIChatMessage[] = [];
+  let currentTokens = 0;
+
+  for (const message of messages) {
+    const tokens = estimateTokens(message);
+    if (current.length > 0 && currentTokens + tokens > budget) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    current.push(message);
+    currentTokens += tokens;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  return chunks;
 };
 
 const getErrorMessage = (error: unknown): string => {
@@ -83,7 +115,13 @@ export class ContextCompactionService {
     const messages = await this.queryFullHistory(scope);
 
     const topicGroups = messages.filter((message) => message.role === 'compressedGroup');
-    const liveMessages = messages.filter((message) => message.role !== 'compressedGroup');
+    // A thread read also returns the main-line parents it branched from; those
+    // belong to the main line and must stay there, so only the thread's own
+    // messages are compacted (and summarized) here.
+    const liveMessages = messages.filter(
+      (message) =>
+        message.role !== 'compressedGroup' && (!threadId || message.threadId === threadId),
+    );
     const messageIds = liveMessages.map((message) => message.id);
 
     if (messageIds.length === 0) {
@@ -123,7 +161,7 @@ export class ContextCompactionService {
     });
 
     try {
-      const summary = await this.summarize({
+      const summary = await this.summarizeInChunks({
         existingSummary: existingSummary || undefined,
         messages: liveMessages,
         model,
@@ -195,6 +233,41 @@ export class ContextCompactionService {
     throw new Error(
       `Context compaction aborted: topic ${scope.topicId} exceeds ${MAX_HISTORY_PAGES} history pages`,
     );
+  }
+
+  /**
+   * A whole multi-page history can far exceed the model's window, so it is
+   * summarized as a rolling chain: each chunk stays within the same budget the
+   * runtime uses to trigger compaction, and carries the previous summary forward.
+   */
+  private async summarizeInChunks(params: {
+    existingSummary?: string;
+    messages: UIChatMessage[];
+    model: string;
+    provider: string;
+    signal?: AbortSignal;
+  }): Promise<string> {
+    const { messages, model, provider, signal } = params;
+    const contextWindowTokens = await getModelPropertyWithFallback<number | undefined>(
+      model,
+      'contextWindowTokens',
+      provider,
+    ).catch(() => undefined);
+    const budget = getCompressionThreshold({ maxWindowToken: contextWindowTokens || undefined });
+
+    let summary = params.existingSummary;
+    for (const chunk of chunkByTokenBudget(messages, budget)) {
+      summary = await this.summarize({
+        existingSummary: summary,
+        messages: chunk,
+        model,
+        provider,
+        signal,
+      });
+      if (!summary) return '';
+    }
+
+    return summary ?? '';
   }
 
   private async summarize(params: {

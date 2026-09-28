@@ -295,6 +295,37 @@ describe('CompressionRepository', () => {
         await compressionRepo.filterGroupIdsByThread(groupIds, { threadId: 'thread-1', topicId }),
       ).toEqual([threadGroupId]);
     });
+
+    it('assigns a thread group that also holds main-line parents to the thread only', async () => {
+      await serverDB
+        .insert(threads)
+        .values({ id: 'thread-1', topicId, type: 'standalone', userId });
+      await serverDB.insert(messages).values([
+        { content: 'Parent', id: 'msg-parent', role: 'user', topicId, userId },
+        {
+          content: 'Reply',
+          id: 'msg-reply',
+          role: 'assistant',
+          threadId: 'thread-1',
+          topicId,
+          userId,
+        },
+      ]);
+      const mixedGroupId = await compressionRepo.createCompressionGroup({
+        content: 'Thread summary',
+        messageIds: ['msg-parent', 'msg-reply'],
+        metadata: { originalMessageCount: 2 },
+        topicId,
+      });
+
+      expect(await compressionRepo.filterGroupIdsByThread([mixedGroupId], { topicId })).toEqual([]);
+      expect(
+        await compressionRepo.filterGroupIdsByThread([mixedGroupId], {
+          threadId: 'thread-1',
+          topicId,
+        }),
+      ).toEqual([mixedGroupId]);
+    });
   });
 
   describe('updateMetadata', () => {

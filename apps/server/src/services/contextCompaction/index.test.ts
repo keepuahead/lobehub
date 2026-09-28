@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   filterGroupIdsByThread: vi.fn(),
   finalizeCompressionGroup: vi.fn(),
   getAgentConfigById: vi.fn(),
+  getModelPropertyWithFallback: vi.fn(),
   initModelRuntimeFromDB: vi.fn(),
   queryMessages: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock('@/server/modules/ModelRuntime', () => ({
 }));
 vi.mock('@lobechat/model-runtime', () => ({
   consumeStreamUntilDone: vi.fn(async () => {}),
+  getModelPropertyWithFallback: mocks.getModelPropertyWithFallback,
 }));
 
 const scope = { agentId: 'agent-1', groupId: undefined, threadId: undefined, topicId: 'topic-1' };
@@ -71,6 +73,7 @@ describe('ContextCompactionService', () => {
     mocks.finalizeCompressionGroup.mockResolvedValue(undefined);
     mocks.deleteCompressionGroup.mockResolvedValue(undefined);
     mocks.filterGroupIdsByThread.mockImplementation(async (ids: string[]) => ids);
+    mocks.getModelPropertyWithFallback.mockResolvedValue(128_000);
     streamSummary('  New summary  ');
   });
 
@@ -110,7 +113,8 @@ describe('ContextCompactionService', () => {
     serveHistory(() => [
       { content: 'Main-line summary', id: 'cg-main', role: 'compressedGroup' },
       { content: 'Thread summary', id: 'cg-thread', role: 'compressedGroup' },
-      { content: 'Thread question', id: 'msg-t1', role: 'user' },
+      { content: 'Main-line parent', id: 'msg-parent', role: 'user' },
+      { content: 'Thread question', id: 'msg-t1', role: 'user', threadId: 'thread-1' },
     ]);
     mocks.filterGroupIdsByThread.mockResolvedValue(['cg-thread']);
     const service = new ContextCompactionService({} as never, 'user-1');
@@ -121,11 +125,52 @@ describe('ContextCompactionService', () => {
       threadId: 'thread-1',
       topicId: 'topic-1',
     });
+    // The thread read also returns its main-line parent; that stays on the main line.
+    expect(mocks.createCompressionGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ messageIds: ['msg-t1'] }),
+    );
     const prompt = JSON.stringify(mocks.chat.mock.calls[0][0].messages);
     expect(prompt).toContain('Thread summary');
     expect(prompt).not.toContain('Main-line summary');
+    expect(prompt).not.toContain('Main-line parent');
     expect(mocks.finalizeCompressionGroup).toHaveBeenCalledWith(
       expect.objectContaining({ sourceGroupIds: ['cg-thread'] }),
+    );
+  });
+
+  it('summarizes a history larger than the model budget as a rolling chain of chunks', async () => {
+    // 200-token window → 100-token budget; each message alone takes most of it.
+    mocks.getModelPropertyWithFallback.mockResolvedValue(200);
+    serveHistory(() => [
+      { content: 'alpha '.repeat(60), id: 'msg-a', role: 'user' },
+      { content: 'bravo '.repeat(60), id: 'msg-b', role: 'assistant' },
+    ]);
+    let call = 0;
+    mocks.chat.mockImplementation(async (_payload, options) => {
+      call += 1;
+      options.callback.onText(`Summary ${call}`);
+      return new Response('');
+    });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
+
+    expect(mocks.getModelPropertyWithFallback).toHaveBeenCalledWith(
+      'gpt-5',
+      'contextWindowTokens',
+      'openai',
+    );
+    expect(mocks.chat).toHaveBeenCalledTimes(2);
+    const first = JSON.stringify(mocks.chat.mock.calls[0][0].messages);
+    const second = JSON.stringify(mocks.chat.mock.calls[1][0].messages);
+    expect(first).toContain('alpha');
+    expect(first).not.toContain('bravo');
+    // The second chunk carries the first chunk's summary forward.
+    expect(second).toContain('Summary 1');
+    expect(second).toContain('bravo');
+    expect(second).not.toContain('alpha');
+    expect(mocks.finalizeCompressionGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Summary 2' }),
     );
   });
 
