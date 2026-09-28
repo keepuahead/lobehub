@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   chat: vi.fn(),
   createCompressionGroup: vi.fn(),
   deleteCompressionGroup: vi.fn(),
+  filterGroupIdsByThread: vi.fn(),
   finalizeCompressionGroup: vi.fn(),
   getAgentConfigById: vi.fn(),
   initModelRuntimeFromDB: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/database/repositories/compression', () => ({
   CompressionRepository: class {
     createCompressionGroup = mocks.createCompressionGroup;
     deleteCompressionGroup = mocks.deleteCompressionGroup;
+    filterGroupIdsByThread = mocks.filterGroupIdsByThread;
     finalizeCompressionGroup = mocks.finalizeCompressionGroup;
   },
 }));
@@ -68,6 +70,7 @@ describe('ContextCompactionService', () => {
     mocks.createCompressionGroup.mockResolvedValue('cg-new');
     mocks.finalizeCompressionGroup.mockResolvedValue(undefined);
     mocks.deleteCompressionGroup.mockResolvedValue(undefined);
+    mocks.filterGroupIdsByThread.mockImplementation(async (ids: string[]) => ids);
     streamSummary('  New summary  ');
   });
 
@@ -101,6 +104,29 @@ describe('ContextCompactionService', () => {
       topicId: 'topic-1',
     });
     expect(result).toEqual({ messageGroupId: 'cg-new', messages: settled, skipped: false });
+  });
+
+  it('never folds in or supersedes compression groups of another thread', async () => {
+    serveHistory(() => [
+      { content: 'Main-line summary', id: 'cg-main', role: 'compressedGroup' },
+      { content: 'Thread summary', id: 'cg-thread', role: 'compressedGroup' },
+      { content: 'Thread question', id: 'msg-t1', role: 'user' },
+    ]);
+    mocks.filterGroupIdsByThread.mockResolvedValue(['cg-thread']);
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await service.compact({ agentId: 'agent-1', threadId: 'thread-1', topicId: 'topic-1' });
+
+    expect(mocks.filterGroupIdsByThread).toHaveBeenCalledWith(['cg-main', 'cg-thread'], {
+      threadId: 'thread-1',
+      topicId: 'topic-1',
+    });
+    const prompt = JSON.stringify(mocks.chat.mock.calls[0][0].messages);
+    expect(prompt).toContain('Thread summary');
+    expect(prompt).not.toContain('Main-line summary');
+    expect(mocks.finalizeCompressionGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceGroupIds: ['cg-thread'] }),
+    );
   });
 
   it('compacts history older than the newest query page', async () => {

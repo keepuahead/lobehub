@@ -278,6 +278,34 @@ export class CompressionRepository {
   }
 
   /**
+   * Narrow compression groups to those whose members belong to the given thread
+   * scope (`threadId` null = the topic's main line). Group rows only carry a
+   * `topicId`, so a topic-wide group list mixes the main line with its threads.
+   */
+  async filterGroupIdsByThread(
+    groupIds: string[],
+    params: { threadId?: string | null; topicId: string },
+  ): Promise<string[]> {
+    if (groupIds.length === 0) return [];
+
+    const { threadId, topicId } = params;
+    const rows = await this.db
+      .selectDistinct({ messageGroupId: messages.messageGroupId })
+      .from(messages)
+      .where(
+        and(
+          this.messagesOwnership(),
+          eq(messages.topicId, topicId),
+          inArray(messages.messageGroupId, groupIds),
+          threadId ? eq(messages.threadId, threadId) : isNull(messages.threadId),
+        ),
+      );
+    const inScope = new Set(rows.map((row) => row.messageGroupId));
+
+    return groupIds.filter((id) => inScope.has(id));
+  }
+
+  /**
    * Get messages that are not compressed (for sending to LLM)
    */
   async getUncompressedMessages(topicId: string) {

@@ -532,8 +532,13 @@ export class ConversationLifecycleActionImpl {
       ) {
         // Server-runtime agents compact on the server; only the client runtime
         // (e.g. browser-reachable local models) still summarizes from here.
+        // Gateway mode leaves `heterogeneousProvider` unset for legacy agents that
+        // only carry a CLI model id — the server model runtime cannot serve those.
         await this.executeCompression(compressContext, '', {
-          serverSide: runtimeType === 'gateway' && !heterogeneousProvider,
+          serverSide:
+            runtimeType === 'gateway' &&
+            !heterogeneousProvider &&
+            !isHeterogeneousAgentModelId(agentConfig?.model),
         });
       }
       return;

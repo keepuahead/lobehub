@@ -82,7 +82,7 @@ export class ContextCompactionService {
 
     const messages = await this.queryFullHistory(scope);
 
-    const sourceGroups = messages.filter((message) => message.role === 'compressedGroup');
+    const topicGroups = messages.filter((message) => message.role === 'compressedGroup');
     const liveMessages = messages.filter((message) => message.role !== 'compressedGroup');
     const messageIds = liveMessages.map((message) => message.id);
 
@@ -100,7 +100,13 @@ export class ContextCompactionService {
       return { messages, skipped: true };
     }
 
-    const sourceGroupIds = sourceGroups.map((message) => message.id);
+    // Group nodes are listed per topic, not per thread: fold in and supersede
+    // only the groups of the scope being compacted, never a sibling thread's.
+    const sourceGroupIds = await this.compressionRepository.filterGroupIdsByThread(
+      topicGroups.map((message) => message.id),
+      { threadId, topicId },
+    );
+    const sourceGroups = topicGroups.filter((message) => sourceGroupIds.includes(message.id));
     const existingSummary = sourceGroups
       .map((message) => (typeof message.content === 'string' ? message.content.trim() : ''))
       .filter(Boolean)
