@@ -147,6 +147,22 @@ describe('ContextCompactionService', () => {
     expect(mocks.createCompressionGroup).not.toHaveBeenCalled();
   });
 
+  it('compacts a history that ends exactly on the page cap', async () => {
+    // 20 one-row pages, then the sentinel read comes back empty.
+    serveHistory((before) => {
+      const index = before ? Number(before.id.slice(4)) - 1 : 20;
+      return index >= 1
+        ? [{ content: 'row', createdAt: index, id: `msg-${index}`, role: 'user' }]
+        : [];
+    });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    const result = await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
+
+    expect(result.skipped).toBe(false);
+    expect(mocks.createCompressionGroup.mock.calls[0][0].messageIds).toHaveLength(20);
+  });
+
   it('skips when every message is already compacted', async () => {
     serveHistory(() => [history[0]]);
     const service = new ContextCompactionService({} as never, 'user-1');

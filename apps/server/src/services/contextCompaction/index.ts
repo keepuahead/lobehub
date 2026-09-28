@@ -164,7 +164,9 @@ export class ContextCompactionService {
     const seen = new Set<string>();
     let before: { createdAt: Date; id: string } | undefined;
 
-    for (let pageIndex = 0; pageIndex < MAX_HISTORY_PAGES; pageIndex++) {
+    // One read past the cap is the sentinel: exhaustion is only observable by
+    // asking the cursor once more, so a history of exactly the cap still passes.
+    for (let pageIndex = 0; pageIndex <= MAX_HISTORY_PAGES; pageIndex++) {
       const page = await this.messageService.queryMessages(
         { ...scope, before },
         { skipToolProjection: true },
@@ -174,9 +176,13 @@ export class ContextCompactionService {
 
       // Each page is ascending, so its first raw row is the next cursor.
       const oldest = fresh.find((message) => message.role !== 'compressedGroup');
-      if (fresh.length > 0) pages.unshift(fresh);
-      if (!oldest) return pages.flat();
+      if (!oldest) {
+        if (fresh.length > 0) pages.unshift(fresh);
+        return pages.flat();
+      }
+      if (pageIndex === MAX_HISTORY_PAGES) break;
 
+      pages.unshift(fresh);
       before = { createdAt: new Date(oldest.createdAt), id: oldest.id };
     }
 
