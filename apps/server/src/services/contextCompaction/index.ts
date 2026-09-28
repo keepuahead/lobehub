@@ -4,12 +4,19 @@ import type { UIChatMessage } from '@lobechat/types';
 import { RequestTrigger } from '@lobechat/types';
 import debug from 'debug';
 
+import { CompressionRepository } from '@/database/repositories/compression';
 import type { LobeChatDatabase } from '@/database/type';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { AgentService } from '@/server/services/agent';
 import { MessageService } from '@/server/services/message';
 
 const log = debug('lobe-server:context-compaction');
+
+/**
+ * `MessageModel.query` returns the newest page only (1,000 rows). Walking older
+ * pages is capped so a runaway topic fails loudly instead of being compacted in part.
+ */
+const MAX_HISTORY_PAGES = 20;
 
 const throwIfAborted = (signal?: AbortSignal) => {
   if (!signal?.aborted) return;
@@ -52,6 +59,7 @@ export interface CompactContextResult {
  */
 export class ContextCompactionService {
   private readonly agentService: AgentService;
+  private readonly compressionRepository: CompressionRepository;
   private readonly messageService: MessageService;
 
   constructor(
@@ -60,6 +68,7 @@ export class ContextCompactionService {
     private readonly workspaceId?: string,
   ) {
     this.agentService = new AgentService(db, userId, workspaceId);
+    this.compressionRepository = new CompressionRepository(db, userId, workspaceId);
     this.messageService = new MessageService(db, userId, workspaceId);
   }
 
@@ -71,13 +80,11 @@ export class ContextCompactionService {
     const { agentId, groupId, threadId, topicId } = params;
     const scope = { agentId, groupId, threadId, topicId };
 
-    // Full tool payloads: the summary must see what the model saw.
-    const messages = await this.messageService.queryMessages(scope, { skipToolProjection: true });
+    const messages = await this.queryFullHistory(scope);
 
     const sourceGroups = messages.filter((message) => message.role === 'compressedGroup');
-    const messageIds = messages
-      .filter((message) => message.role !== 'compressedGroup')
-      .map((message) => message.id);
+    const liveMessages = messages.filter((message) => message.role !== 'compressedGroup');
+    const messageIds = liveMessages.map((message) => message.id);
 
     if (messageIds.length === 0) {
       log('skip topic=%s: no uncompressed messages', topicId);
@@ -99,13 +106,20 @@ export class ContextCompactionService {
       .filter(Boolean)
       .join('\n\n');
 
-    const { messageGroupId, messagesToSummarize } =
-      await this.messageService.createCompressionGroup(topicId, messageIds, scope);
+    // Write through the repository: the MessageService wrappers re-read the list
+    // after every write, outside this rollback, and their reads cover only the
+    // newest page anyway. The summary comes from the full history collected above.
+    const messageGroupId = await this.compressionRepository.createCompressionGroup({
+      content: '...',
+      messageIds,
+      metadata: { originalMessageCount: messageIds.length },
+      topicId,
+    });
 
     try {
       const summary = await this.summarize({
         existingSummary: existingSummary || undefined,
-        messages: messagesToSummarize,
+        messages: liveMessages,
         model,
         provider,
         signal,
@@ -115,19 +129,60 @@ export class ContextCompactionService {
       // A caller that gave up must not see its cancelled compaction reappear on refresh.
       throwIfAborted(signal);
 
-      const finalized = await this.messageService.finalizeCompression(messageGroupId, summary, {
-        ...scope,
+      await this.compressionRepository.finalizeCompressionGroup({
+        content: summary,
+        groupId: messageGroupId,
         sourceGroupIds,
+        topicId,
       });
 
-      return { messageGroupId, messages: finalized.messages ?? [], skipped: false };
+      // Read the settled list inside the rollback: a group the read path cannot
+      // render must not stay persisted and make the whole topic unreadable.
+      const settled = await this.messageService.queryMessages(scope);
+
+      return { messageGroupId, messages: settled, skipped: false };
     } catch (error) {
-      // Never leave the conversation behind a placeholder `...` group.
-      await this.messageService.cancelCompression(messageGroupId, scope).catch((rollbackError) => {
-        console.error('[ContextCompaction] rollback failed: %O', rollbackError);
-      });
+      // Never leave the conversation behind a placeholder `...` group. Deleting
+      // the group returns its members, including any merged from earlier groups,
+      // to the live history.
+      await this.compressionRepository
+        .deleteCompressionGroup(messageGroupId)
+        .catch((rollbackError) => {
+          console.error('[ContextCompaction] rollback failed: %O', rollbackError);
+        });
       throw error;
     }
+  }
+
+  /**
+   * Every top-level message in scope, oldest first. Walks the round cursor
+   * (`before`) from the newest page back until a page adds nothing older.
+   * Full tool payloads: the summary must see what the model saw.
+   */
+  private async queryFullHistory(scope: CompactContextParams): Promise<UIChatMessage[]> {
+    const pages: UIChatMessage[][] = [];
+    const seen = new Set<string>();
+    let before: { createdAt: Date; id: string } | undefined;
+
+    for (let pageIndex = 0; pageIndex < MAX_HISTORY_PAGES; pageIndex++) {
+      const page = await this.messageService.queryMessages(
+        { ...scope, before },
+        { skipToolProjection: true },
+      );
+      const fresh = page.filter((message) => !seen.has(message.id));
+      for (const message of fresh) seen.add(message.id);
+
+      // Each page is ascending, so its first raw row is the next cursor.
+      const oldest = fresh.find((message) => message.role !== 'compressedGroup');
+      if (fresh.length > 0) pages.unshift(fresh);
+      if (!oldest) return pages.flat();
+
+      before = { createdAt: new Date(oldest.createdAt), id: oldest.id };
+    }
+
+    throw new Error(
+      `Context compaction aborted: topic ${scope.topicId} exceeds ${MAX_HISTORY_PAGES} history pages`,
+    );
   }
 
   private async summarize(params: {

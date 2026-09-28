@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContextCompactionService } from './index';
 
 const mocks = vi.hoisted(() => ({
-  cancelCompression: vi.fn(),
   chat: vi.fn(),
   createCompressionGroup: vi.fn(),
-  finalizeCompression: vi.fn(),
+  deleteCompressionGroup: vi.fn(),
+  finalizeCompressionGroup: vi.fn(),
   getAgentConfigById: vi.fn(),
   initModelRuntimeFromDB: vi.fn(),
   queryMessages: vi.fn(),
@@ -15,10 +15,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/server/services/message', () => ({
   MessageService: class {
-    cancelCompression = mocks.cancelCompression;
-    createCompressionGroup = mocks.createCompressionGroup;
-    finalizeCompression = mocks.finalizeCompression;
     queryMessages = mocks.queryMessages;
+  },
+}));
+vi.mock('@/database/repositories/compression', () => ({
+  CompressionRepository: class {
+    createCompressionGroup = mocks.createCompressionGroup;
+    deleteCompressionGroup = mocks.deleteCompressionGroup;
+    finalizeCompressionGroup = mocks.finalizeCompressionGroup;
   },
 }));
 vi.mock('@/server/services/agent', () => ({
@@ -34,6 +38,14 @@ vi.mock('@lobechat/model-runtime', () => ({
 }));
 
 const scope = { agentId: 'agent-1', groupId: undefined, threadId: undefined, topicId: 'topic-1' };
+const settled = [{ content: 'New summary', id: 'cg-new', role: 'compressedGroup' }];
+
+/** History reads walk the `before` cursor; the settled read after finalize has no options. */
+const serveHistory = (pages: (before?: { id: string }) => unknown[]) =>
+  mocks.queryMessages.mockImplementation(
+    async (params: { before?: { id: string } }, options?: { skipToolProjection?: boolean }) =>
+      options?.skipToolProjection ? pages(params.before) : settled,
+  );
 
 const history = [
   { content: 'Earlier summary', id: 'cg-old', role: 'compressedGroup' },
@@ -50,17 +62,12 @@ const streamSummary = (text: string) =>
 describe('ContextCompactionService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.queryMessages.mockResolvedValue(history);
+    serveHistory(() => history);
     mocks.getAgentConfigById.mockResolvedValue({ model: 'gpt-5', provider: 'openai' });
     mocks.initModelRuntimeFromDB.mockResolvedValue({ chat: mocks.chat });
-    mocks.createCompressionGroup.mockResolvedValue({
-      messageGroupId: 'cg-new',
-      messagesToSummarize: history.slice(1),
-    });
-    mocks.finalizeCompression.mockResolvedValue({
-      messages: [{ content: 'New summary', id: 'cg-new', role: 'compressedGroup' }],
-    });
-    mocks.cancelCompression.mockResolvedValue({ messages: history });
+    mocks.createCompressionGroup.mockResolvedValue('cg-new');
+    mocks.finalizeCompressionGroup.mockResolvedValue(undefined);
+    mocks.deleteCompressionGroup.mockResolvedValue(undefined);
     streamSummary('  New summary  ');
   });
 
@@ -69,9 +76,17 @@ describe('ContextCompactionService', () => {
 
     const result = await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
 
-    expect(mocks.queryMessages).toHaveBeenCalledWith(scope, { skipToolProjection: true });
+    expect(mocks.queryMessages).toHaveBeenCalledWith(
+      { ...scope, before: undefined },
+      { skipToolProjection: true },
+    );
     // Only live rows move into the new group; the old group is folded in by summary.
-    expect(mocks.createCompressionGroup).toHaveBeenCalledWith('topic-1', ['msg-1', 'msg-2'], scope);
+    expect(mocks.createCompressionGroup).toHaveBeenCalledWith({
+      content: '...',
+      messageIds: ['msg-1', 'msg-2'],
+      metadata: { originalMessageCount: 2 },
+      topicId: 'topic-1',
+    });
 
     const [payload, options] = mocks.chat.mock.calls[0];
     expect(payload.model).toBe('gpt-5');
@@ -79,19 +94,61 @@ describe('ContextCompactionService', () => {
     expect(options.metadata).toEqual({ trigger: RequestTrigger.ContextCompression });
     expect(mocks.initModelRuntimeFromDB).toHaveBeenCalledWith({}, 'user-1', 'openai', undefined);
 
-    expect(mocks.finalizeCompression).toHaveBeenCalledWith('cg-new', 'New summary', {
-      ...scope,
+    expect(mocks.finalizeCompressionGroup).toHaveBeenCalledWith({
+      content: 'New summary',
+      groupId: 'cg-new',
       sourceGroupIds: ['cg-old'],
+      topicId: 'topic-1',
     });
-    expect(result).toEqual({
-      messageGroupId: 'cg-new',
-      messages: [{ content: 'New summary', id: 'cg-new', role: 'compressedGroup' }],
-      skipped: false,
+    expect(result).toEqual({ messageGroupId: 'cg-new', messages: settled, skipped: false });
+  });
+
+  it('compacts history older than the newest query page', async () => {
+    const olderPage = [
+      { content: 'Kickoff: why migrate', createdAt: 1000, id: 'msg-0a', role: 'user' },
+      { content: 'Constraints recap', createdAt: 2000, id: 'msg-0b', role: 'assistant' },
+    ];
+    const newestPage = history.map((message, index) => ({ ...message, createdAt: 3000 + index }));
+    serveHistory((before) => {
+      if (!before) return newestPage;
+      if (before.id === 'msg-1') return olderPage;
+      return [];
     });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
+
+    // Walks the round cursor from the oldest raw row of each page.
+    const historyReads = mocks.queryMessages.mock.calls.filter(([, options]) => options);
+    expect(historyReads.map(([params]) => params.before)).toEqual([
+      undefined,
+      { createdAt: new Date(3001), id: 'msg-1' },
+      { createdAt: new Date(1000), id: 'msg-0a' },
+    ]);
+    expect(mocks.createCompressionGroup.mock.calls[0][0].messageIds).toEqual([
+      'msg-0a',
+      'msg-0b',
+      'msg-1',
+      'msg-2',
+    ]);
+    expect(JSON.stringify(mocks.chat.mock.calls[0][0].messages)).toContain('Kickoff: why migrate');
+  });
+
+  it('fails instead of compacting part of a topic that exceeds the page cap', async () => {
+    let createdAt = 1_000_000;
+    serveHistory(() => [
+      { content: 'more', createdAt: createdAt--, id: `msg-${createdAt}`, role: 'user' },
+    ]);
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await expect(service.compact({ agentId: 'agent-1', topicId: 'topic-1' })).rejects.toThrow(
+      'exceeds 20 history pages',
+    );
+    expect(mocks.createCompressionGroup).not.toHaveBeenCalled();
   });
 
   it('skips when every message is already compacted', async () => {
-    mocks.queryMessages.mockResolvedValue([history[0]]);
+    serveHistory(() => [history[0]]);
     const service = new ContextCompactionService({} as never, 'user-1');
 
     const result = await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
@@ -119,8 +176,8 @@ describe('ContextCompactionService', () => {
       'provider down',
     );
 
-    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
-    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+    expect(mocks.deleteCompressionGroup).toHaveBeenCalledWith('cg-new');
+    expect(mocks.finalizeCompressionGroup).not.toHaveBeenCalled();
   });
 
   it('rolls back when the stream reports an in-band error after partial text', async () => {
@@ -135,8 +192,8 @@ describe('ContextCompactionService', () => {
       'upstream overloaded',
     );
 
-    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
-    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+    expect(mocks.deleteCompressionGroup).toHaveBeenCalledWith('cg-new');
+    expect(mocks.finalizeCompressionGroup).not.toHaveBeenCalled();
   });
 
   it('forwards cancellation to the model call and never finalizes a cancelled compaction', async () => {
@@ -153,8 +210,24 @@ describe('ContextCompactionService', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(mocks.chat.mock.calls[0][1].signal).toBe(controller.signal);
-    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
-    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+    expect(mocks.deleteCompressionGroup).toHaveBeenCalledWith('cg-new');
+    expect(mocks.finalizeCompressionGroup).not.toHaveBeenCalled();
+  });
+
+  it('deletes the finalized group when the settled list cannot be read back', async () => {
+    mocks.queryMessages.mockImplementation(async (_params, options) => {
+      if (options?.skipToolProjection) return history;
+      throw new RangeError('Maximum call stack size exceeded');
+    });
+    const service = new ContextCompactionService({} as never, 'user-1');
+
+    await expect(service.compact({ agentId: 'agent-1', topicId: 'topic-1' })).rejects.toThrow(
+      'Maximum call stack size exceeded',
+    );
+
+    // The topic must stay readable: the unrenderable group does not survive.
+    expect(mocks.finalizeCompressionGroup).toHaveBeenCalled();
+    expect(mocks.deleteCompressionGroup).toHaveBeenCalledWith('cg-new');
   });
 
   it('rolls back instead of persisting an empty summary', async () => {
@@ -165,7 +238,7 @@ describe('ContextCompactionService', () => {
       'empty summary',
     );
 
-    expect(mocks.cancelCompression).toHaveBeenCalledWith('cg-new', scope);
-    expect(mocks.finalizeCompression).not.toHaveBeenCalled();
+    expect(mocks.deleteCompressionGroup).toHaveBeenCalledWith('cg-new');
+    expect(mocks.finalizeCompressionGroup).not.toHaveBeenCalled();
   });
 });
