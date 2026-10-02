@@ -48,6 +48,8 @@ export interface CreateAgentAccountParams {
 export interface ProvisionAgentAccountParams {
   agentId: string;
   displayName?: string;
+  /** Preferred handle for the new account, when the provider can honour one. */
+  prefix?: string;
   provider: string;
 }
 
@@ -160,6 +162,7 @@ export class AgentAccountService {
       displayName: params.displayName,
       isIdentifierHeld: (identifier) =>
         AgentAccountModel.isRoutingKeyHeld(this.db, provider.provider, identifier),
+      prefix: params.prefix,
       userId: this.userId,
       workspaceId: this.options.workspaceId,
     });
@@ -175,6 +178,11 @@ export class AgentAccountService {
         kind: provider.kind,
         metadata: issued.metadata ?? {},
         provider: provider.provider,
+        // A provider opens the account synchronously: `provision` only returns
+        // once the handle exists and is reachable, so the row is live from the
+        // first read. Leaving it `provisioning` would tell the user their new
+        // address is still opening while it is already able to receive.
+        status: 'active',
       });
     } catch (error) {
       const conflict = this.toConflictError(error, provider.provider, issued.identifier);
