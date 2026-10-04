@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessengerInstallationModel } from '@/database/models/messengerInstallation';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import { completeOAuthBind } from '@/server/services/messenger/bind/oauthBind';
 import { exchangeCode } from '@/server/services/messenger/oauth/slackOAuth';
 import { consumeOAuthState } from '@/server/services/messenger/oauth/stateStore';
 
@@ -22,6 +23,10 @@ vi.mock('@/database/models/messengerInstallation', () => ({
 
 vi.mock('@/server/services/messenger/oauth/stateStore', () => ({
   consumeOAuthState: vi.fn(),
+}));
+
+vi.mock('@/server/services/messenger/bind/oauthBind', () => ({
+  completeOAuthBind: vi.fn(),
 }));
 
 vi.mock('@/server/services/messenger/oauth/slackOAuth', () => ({
@@ -385,5 +390,77 @@ describe('GET /api/agent/messenger/:platform/oauth/callback', () => {
       expect(loc.pathname).toBe('/settings/messenger/discord');
       expect(loc.searchParams.get('installed')).toBe('ok');
     });
+  });
+});
+
+describe('one-click bind on the OAuth callback', () => {
+  beforeEach(() => {
+    vi.mocked(consumeOAuthState).mockResolvedValue({
+      bindPollId: 'poll-1',
+      lobeUserId: 'lobe-user-1',
+      ts: Date.now(),
+    });
+  });
+
+  it('links the approving user and hands off to the Slack DM', async () => {
+    vi.mocked(completeOAuthBind).mockResolvedValue({
+      linkedAt: 1,
+      platformUserId: 'U_INSTALLER',
+      status: 'linked',
+    });
+
+    const res = await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    expect(completeOAuthBind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        install: expect.objectContaining({
+          installedByPlatformUserId: 'U_INSTALLER',
+          tenantId: 'T_ACME',
+        }),
+        platform: 'slack',
+        pollId: 'poll-1',
+        userId: 'lobe-user-1',
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('slack.com/app/open');
+  });
+
+  it('still links the user when the workspace was installed by someone else', async () => {
+    vi.mocked(MessengerInstallationModel.findByTenant).mockResolvedValue({
+      installedByPlatformUserId: 'U_FIRST',
+      installedByUserId: 'lobe-user-other',
+    } as any);
+    vi.mocked(completeOAuthBind).mockResolvedValue({
+      linkedAt: 1,
+      platformUserId: 'U_INSTALLER',
+      status: 'linked',
+    });
+
+    const res = await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    const loc = new URL(res.headers.get('location')!);
+    expect(loc.searchParams.get('error')).not.toBe('already_installed');
+  });
+
+  it('surfaces a refused bind on the settings page', async () => {
+    vi.mocked(completeOAuthBind).mockResolvedValue({
+      reason: 'already_linked_to_other',
+      status: 'failed',
+    });
+
+    const res = await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    const loc = new URL(res.headers.get('location')!);
+    expect(loc.pathname).toBe('/settings/messenger/slack');
+    expect(loc.searchParams.get('error')).toBe('bind_already_linked_to_other');
+  });
+
+  it('leaves a plain install (no bind) untouched', async () => {
+    vi.mocked(consumeOAuthState).mockResolvedValue({ lobeUserId: 'lobe-user-1', ts: Date.now() });
+
+    await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    expect(completeOAuthBind).not.toHaveBeenCalled();
   });
 });

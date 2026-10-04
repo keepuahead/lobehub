@@ -33,6 +33,20 @@ export default {
   'messenger.error.pickDefaultAgent': 'Select a default agent before confirming.',
   'messenger.error.platformNotConfigured':
     "This messenger platform isn't available right now. Please try again later.",
+  'messenger.bind.expired': 'This link has expired.',
+  'messenger.bind.failed.alreadyLinkedToOther':
+    'This {{platform}} account is already connected to a different LobeHub account.',
+  'messenger.bind.failed.identityUnavailable':
+    "{{platform}} didn't say who approved the install. Please try again.",
+  'messenger.bind.failed.unlinkBeforeRelink':
+    'Your LobeHub account is already connected to another {{platform}} account. Disconnect it first, then try again.',
+  'messenger.bind.linked.description':
+    'Your agent just said hi in {{platform}} — reply there anytime.',
+  'messenger.bind.linked.title': 'Connected to {{platform}}',
+  'messenger.bind.retry': 'Get a new link',
+  'messenger.bind.telegram.hint':
+    'Scan with your phone, or open Telegram on this device. Tap Start in the chat and you’re connected.',
+  'messenger.bind.waiting': 'Waiting for you to finish in {{platform}}…',
   'messenger.linkCta': 'Connect',
   'messenger.linkModal.continueIn': 'Continue setup on {{platform}}',
   'messenger.linkModal.instructions':

@@ -5,6 +5,7 @@ import { getServerDB } from '@/database/core/db-adaptor';
 import { MessengerInstallationModel } from '@/database/models/messengerInstallation';
 import { appEnv } from '@/envs/app';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import { completeOAuthBind } from '@/server/services/messenger/bind/oauthBind';
 import { consumeOAuthState } from '@/server/services/messenger/oauth/stateStore';
 import { messengerPlatformRegistry } from '@/server/services/messenger/platforms';
 
@@ -173,10 +174,33 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
     return errorRedirect(url.origin, platform, 'persist_failed');
   }
 
-  // 5. Branch on outcome. Takeover attempts get bounced to settings with a
+  // 5. One-click bind: the person who approved the install is linked on the
+  // spot and the page that started it stops polling. A tenant already owned
+  // by someone else does not block this — the personal link is theirs to make.
+  let bindLinked = false;
+  if (statePayload.bindPollId && (platform === 'slack' || platform === 'discord')) {
+    try {
+      const bind = await completeOAuthBind({
+        install,
+        platform,
+        pollId: statePayload.bindPollId,
+        serverDB,
+        userId: statePayload.lobeUserId,
+      });
+      bindLinked = bind.status === 'linked';
+      if (bind.status === 'failed') {
+        return errorRedirect(url.origin, platform, `bind_${bind.reason}`);
+      }
+    } catch (error) {
+      log('callback[%s]: one-click bind failed: %O', platform, error);
+      return errorRedirect(url.origin, platform, 'bind_failed');
+    }
+  }
+
+  // 6. Branch on outcome. Takeover attempts get bounced to settings with a
   // dedicated error so the page can render a Modal explaining the situation
   // (tenant name lets the UI name the workspace/guild).
-  if (isTakeoverAttempt) {
+  if (isTakeoverAttempt && !bindLinked) {
     log(
       'callback[%s]: refreshed credentials for tenant=%s but preserved owner=%s (blocked takeover by user=%s)',
       platform,
@@ -189,7 +213,7 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
     return errorRedirect(url.origin, platform, 'already_installed', extra);
   }
 
-  // 6. Hand off to the platform's deep-link if it provides one, otherwise
+  // 7. Hand off to the platform's deep-link if it provides one, otherwise
   // fall back to the settings page with a `<platform>_installed=ok` flag.
   const deepLink = definition.oauth.buildPostInstallRedirect?.(install, url.origin);
   if (deepLink) {

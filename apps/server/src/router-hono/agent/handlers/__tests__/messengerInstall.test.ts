@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { auth } from '@/auth';
+import { peekBindSession } from '@/server/services/messenger/bind/sessionStore';
 import { issueOAuthState } from '@/server/services/messenger/oauth/stateStore';
 
 import { messengerInstall } from '../messengerInstall';
@@ -17,6 +18,10 @@ vi.mock('@/auth', () => ({
 
 vi.mock('@/server/services/messenger/oauth/stateStore', () => ({
   issueOAuthState: vi.fn(),
+}));
+
+vi.mock('@/server/services/messenger/bind/sessionStore', () => ({
+  peekBindSession: vi.fn(),
 }));
 
 vi.mock('@/config/messenger', () => ({
@@ -140,6 +145,57 @@ describe('GET /api/agent/messenger/:platform/install', () => {
         lobeUserId: 'lobe-user-1',
         returnTo: '/settings/messenger',
       });
+    });
+  });
+
+  describe('one-click bind', () => {
+    const pendingBind = {
+      agentId: 'agent-toby',
+      createdAt: 0,
+      kind: 'oauth',
+      platform: 'slack',
+      pollId: 'poll-1',
+      result: { status: 'pending' },
+      userId: 'lobe-user-1',
+      workspaceId: null,
+    } as const;
+
+    it("carries the caller's own pending bind into the OAuth state", async () => {
+      vi.mocked(peekBindSession).mockResolvedValue(pendingBind);
+
+      await messengerInstall(
+        buildContext('slack', '/api/agent/messenger/slack/install?bind=poll-1'),
+      );
+
+      expect(peekBindSession).toHaveBeenCalledWith('poll-1', 'lobe-user-1');
+      expect(issueOAuthState).toHaveBeenCalledWith({
+        bindPollId: 'poll-1',
+        lobeUserId: 'lobe-user-1',
+        returnTo: undefined,
+      });
+    });
+
+    it('drops a bind id that belongs to another platform (or nobody)', async () => {
+      vi.mocked(peekBindSession).mockResolvedValue({ ...pendingBind, platform: 'discord' });
+
+      await messengerInstall(
+        buildContext('slack', '/api/agent/messenger/slack/install?bind=poll-1'),
+      );
+
+      expect(vi.mocked(issueOAuthState).mock.calls[0][0].bindPollId).toBeUndefined();
+    });
+
+    it('keeps the bind id through the sign-in bounce', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(null);
+
+      const res = await messengerInstall(
+        buildContext('slack', '/api/agent/messenger/slack/install?bind=poll-1'),
+      );
+
+      const loc = new URL(res.headers.get('location')!);
+      expect(loc.searchParams.get('callbackUrl')).toBe(
+        '/api/agent/messenger/slack/install?bind=poll-1',
+      );
     });
   });
 

@@ -9,6 +9,13 @@ import { messengerRouter } from '../messenger';
 
 const {
   mockAcquireWechatQrFinalizeLock,
+  mockFetchQrCode,
+  mockGreetAfterBind,
+  mockIssueLinkCode,
+  mockIssueWechatQrSession,
+  mockPeekBindSession,
+  mockPeekLinkCodeStatus,
+  mockSaveBindSession,
   mockAssertBotFeatureAccess,
   mockConsumeLinkToken,
   mockConsumeWechatQrSession,
@@ -47,6 +54,13 @@ const {
   mockUpsertForPlatform,
 } = vi.hoisted(() => ({
   mockAcquireWechatQrFinalizeLock: vi.fn(),
+  mockFetchQrCode: vi.fn(),
+  mockGreetAfterBind: vi.fn(),
+  mockIssueLinkCode: vi.fn(),
+  mockIssueWechatQrSession: vi.fn(),
+  mockPeekBindSession: vi.fn(),
+  mockPeekLinkCodeStatus: vi.fn(),
+  mockSaveBindSession: vi.fn(),
   mockAssertBotFeatureAccess: vi.fn(),
   mockConsumeLinkToken: vi.fn(),
   mockConsumeWechatQrSession: vi.fn(),
@@ -86,7 +100,7 @@ const {
 }));
 
 vi.mock('@lobechat/chat-adapter-wechat', () => ({
-  fetchQrCode: vi.fn(),
+  fetchQrCode: mockFetchQrCode,
   getWechatTextSendCount: (text: string) => Math.max(1, Math.ceil(text.length / 2000)),
   pollQrStatus: mockPollQrStatus,
 }));
@@ -101,6 +115,8 @@ vi.mock('@/business/server/bot/featureAccess', () => ({
 vi.mock('@/config/messenger', () => ({
   getEnabledMessengerPlatforms: vi.fn().mockResolvedValue([]),
   getMessengerDiscordConfig: vi.fn(),
+  getMessengerLinkTokenTtl: () => 1800,
+  getMessengerLinqConfig: vi.fn(),
   getMessengerSlackConfig: vi.fn(),
   getMessengerTelegramConfig: vi.fn(),
   isMessengerPlatformEnabled: mockIsMessengerPlatformEnabled,
@@ -171,9 +187,14 @@ vi.mock('@/server/services/messenger', () => ({
   acquireWechatQrFinalizeLock: mockAcquireWechatQrFinalizeLock,
   consumeLinkToken: mockConsumeLinkToken,
   consumeWechatQrSession: mockConsumeWechatQrSession,
+  issueWechatQrSession: mockIssueWechatQrSession,
   getMessengerRouter: () => ({ invalidateBot: mockInvalidateMessengerBot }),
   MessengerDiscordBinder: vi.fn(),
   messengerPlatformRegistry: {
+    getPlatform: (id: string) =>
+      id === 'slack' || id === 'discord'
+        ? { oauth: { getAppConfig: async () => ({ clientId: 'c', clientSecret: 's' }) } }
+        : undefined,
     listSerializedPlatforms: vi.fn().mockReturnValue([]),
   },
   MessengerSlackBinder: vi.fn(),
@@ -198,6 +219,24 @@ vi.mock('@/server/services/gateway', () => ({
 vi.mock('@/server/services/gateway/runtimeStatus', () => ({
   getBotRuntimeStatus: mockGetBotRuntimeStatus,
 }));
+
+vi.mock('@/server/services/messenger/bind/greeting', () => ({
+  greetAfterBind: mockGreetAfterBind,
+}));
+
+vi.mock('@/server/services/messenger/bind/sessionStore', () => ({
+  createBindPollId: () => 'oauth-poll-1',
+  isBindSessionExpired: () => false,
+  peekBindSession: mockPeekBindSession,
+  saveBindSession: mockSaveBindSession,
+}));
+
+vi.mock('@/server/services/messenger/linkTokenStore', () => ({
+  issueLinkCode: mockIssueLinkCode,
+  peekLinkCodeStatus: mockPeekLinkCodeStatus,
+}));
+
+vi.mock('@/envs/app', () => ({ appEnv: { APP_URL: 'https://app.test' } }));
 
 vi.mock('@/server/services/messenger/installations', () => ({
   wechatInstallationKey: (tenantId: string) => `wechat:${tenantId}`,
@@ -460,6 +499,9 @@ describe('messengerRouter.pollWechatQrSession', () => {
         workspaceId: null,
       }),
       { kind: 'gatekeeper' },
+    );
+    expect(mockGreetAfterBind).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'agent-inbox', platform: 'wechat', userId: 'user-1' }),
     );
   });
 
@@ -1022,5 +1064,185 @@ describe('messengerRouter.sendMessengerPush', () => {
   it('requires either content or attachments', async () => {
     await expect((await caller()).sendMessengerPush({ platform: 'telegram' })).rejects.toThrow();
     expect(mockSendMessengerPush).not.toHaveBeenCalled();
+  });
+});
+
+describe('messengerRouter.startBind', () => {
+  const personalAgentDB = () => {
+    const selectBuilder = createSelectBuilder([
+      { id: 'agent-toby', title: 'Toby', userId: 'user-1', workspaceId: null },
+    ]);
+    return { select: vi.fn(() => selectBuilder) };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsMessengerPlatformEnabled.mockResolvedValue(true);
+    mockAssertBotFeatureAccess.mockResolvedValue(undefined);
+    mockGetBuiltinAgent.mockResolvedValue({ id: 'agent-inbox' });
+    mockFindByPlatform.mockResolvedValue(undefined);
+    mockGetServerDB.mockResolvedValue(personalAgentDB());
+    mockSaveBindSession.mockImplementation(async (session) => ({
+      ...session,
+      createdAt: 1_000,
+      result: { status: 'pending' },
+    }));
+    mockIssueLinkCode.mockImplementation(async ({ mintCode }) => ({
+      code: mintCode(),
+      expiresAt: 99_000,
+      pollId: 'code-poll-1',
+    }));
+  });
+
+  it('returns a WeChat iLink QR as kind=qr, polled by its QR session id', async () => {
+    mockFetchQrCode.mockResolvedValue({ qrcode: 'qr-token', qrcode_img_content: 'https://qr' });
+    mockIssueWechatQrSession.mockResolvedValue({ expiresAt: 5_000, sessionId: 'wx-session-1' });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    const result = await caller.startBind({ agentId: 'agent-toby', platform: 'wechat' });
+
+    expect(result).toEqual({
+      expiresAt: 5_000,
+      kind: 'qr',
+      payload: { qrValue: 'https://qr' },
+      platform: 'wechat',
+      pollId: 'wx-session-1',
+    });
+    expect(mockSaveBindSession).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'agent-toby', kind: 'qr', pollId: 'wx-session-1' }),
+    );
+  });
+
+  it('signs a Telegram start token into a t.me deep link for the chosen agent', async () => {
+    vi.mocked(getMessengerTelegramConfig).mockResolvedValue({
+      botToken: 't',
+      botUsername: '@LobeHubBot',
+    });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    const result = await caller.startBind({
+      agentId: 'agent-toby',
+      locale: 'zh-CN',
+      platform: 'telegram',
+    });
+
+    expect(result.kind).toBe('deeplink');
+    expect(result.pollId).toBe('code-poll-1');
+    expect(result.payload.code).toMatch(/^TG_[\dA-F]{24}$/);
+    expect(result.payload.url).toBe(`https://t.me/LobeHubBot?start=${result.payload.code}`);
+    expect(result.payload.qrValue).toBe(result.payload.url);
+    expect(mockIssueLinkCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeAgentId: 'agent-toby',
+        locale: 'zh-CN',
+        platform: 'telegram',
+        userId: 'user-1',
+      }),
+    );
+  });
+
+  it('refuses a second Telegram bind while one is already linked', async () => {
+    vi.mocked(getMessengerTelegramConfig).mockResolvedValue({ botToken: 't', botUsername: 'b' });
+    mockFindByPlatform.mockResolvedValue(buildTelegramLink());
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.startBind({ platform: 'telegram' })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    expect(mockIssueLinkCode).not.toHaveBeenCalled();
+  });
+
+  it('starts Slack / Discord as kind=oauth through the install endpoint', async () => {
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    const result = await caller.startBind({ agentId: 'agent-toby', platform: 'discord' });
+
+    expect(result).toEqual({
+      expiresAt: 1_000 + 1800 * 1000,
+      kind: 'oauth',
+      payload: { url: 'https://app.test/api/agent/messenger/discord/install?bind=oauth-poll-1' },
+      platform: 'discord',
+      pollId: 'oauth-poll-1',
+    });
+  });
+
+  it('rejects an agent the caller cannot route to', async () => {
+    const selectBuilder = createSelectBuilder([
+      { id: 'agent-other', title: 'X', userId: 'user-2', workspaceId: null },
+    ]);
+    mockGetServerDB.mockResolvedValue({ select: vi.fn(() => selectBuilder) });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(
+      caller.startBind({ agentId: 'agent-other', platform: 'discord' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(mockSaveBindSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('messengerRouter.pollBind', () => {
+  const telegramLink = buildTelegramLink();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetServerDB.mockResolvedValue({});
+    mockListAccountLinks.mockResolvedValue([telegramLink]);
+  });
+
+  it('reports expired for an unknown or foreign poll id', async () => {
+    mockPeekBindSession.mockResolvedValue(null);
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'missing-poll' })).resolves.toEqual({
+      link: null,
+      platform: null,
+      status: 'expired',
+    });
+    expect(mockPeekBindSession).toHaveBeenCalledWith('missing-poll', 'user-1');
+  });
+
+  it('settles a Telegram start-token bind from the link-code poll record', async () => {
+    mockPeekBindSession.mockResolvedValue({ platform: 'telegram', pollId: 'code-poll-1' });
+    mockPeekLinkCodeStatus.mockResolvedValue({
+      linkedAt: 42,
+      platformUserId: telegramLink.platformUserId,
+      status: 'linked',
+    });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'code-poll-1' })).resolves.toEqual({
+      link: telegramLink,
+      linkedAt: 42,
+      platform: 'telegram',
+      platformUserId: telegramLink.platformUserId,
+      status: 'linked',
+    });
+  });
+
+  it('returns the OAuth outcome the callback settled on the bind session', async () => {
+    mockPeekBindSession.mockResolvedValue({
+      platform: 'slack',
+      result: { reason: 'already_linked_to_other', status: 'failed' },
+    });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'oauth-poll-1' })).resolves.toEqual({
+      link: null,
+      platform: 'slack',
+      reason: 'already_linked_to_other',
+      status: 'failed',
+    });
+  });
+
+  it('maps a WeChat scan in progress to scanned', async () => {
+    mockPeekBindSession.mockResolvedValue({ agentId: 'agent-toby', platform: 'wechat' });
+    mockPeekWechatQrSession.mockResolvedValue({ qrcode: 'qr-code', userId: 'user-1' });
+    mockPollQrStatus.mockResolvedValue({ status: 'scaned' });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'wx-session-1' })).resolves.toEqual({
+      link: null,
+      platform: 'wechat',
+      status: 'scanned',
+    });
   });
 });

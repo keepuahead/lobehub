@@ -1078,10 +1078,16 @@ export const messengerKeys = {
     tokenScopeKey,
   ]),
   peek: def('messenger:peek', (randomId: string) => ['messenger:peek', randomId]),
+  pollBind: def('messenger:pollBind', (pollId: string) => ['messenger:pollBind', pollId]),
   pushWindow: def('messenger:pushWindow', (platform: string, tenantId?: string) => [
     'messenger:pushWindow',
     platform,
     tenantId ?? null,
+  ]),
+  startBind: def('messenger:startBind', (platform: string, attempt: number) => [
+    'messenger:startBind',
+    platform,
+    attempt,
   ]),
 };
 
