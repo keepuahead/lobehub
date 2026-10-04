@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 
+import { agentAccountVoiceWebhook } from './handlers/agentAccountVoiceWebhook';
 import { agentAccountWebhook } from './handlers/agentAccountWebhook';
 import { agentNumberMaintenance } from './handlers/agentNumberMaintenance';
 import { botCallback } from './handlers/botCallback';
@@ -111,6 +112,8 @@ app.post('/webhooks/:platform/:appId?', platformWebhook);
 // for the agent's own accounts. Auth is the provider signature, verified inside
 // the handler, so this route carries no middleware (mirrors the bot webhook).
 app.post('/accounts/webhooks/:provider', agentAccountWebhook);
+// POST /api/agent/accounts/webhooks/:provider/voice — inbound calls to a dedicated number
+app.post('/accounts/webhooks/:provider/voice', agentAccountVoiceWebhook);
 
 // GET /api/agent/messenger/:platform/install — start per-tenant OAuth install
 app.get('/messenger/:platform/install', messengerInstall);

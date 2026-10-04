@@ -52,7 +52,11 @@ describe('twilio adapter', () => {
     expect(bought.providerNumberId).toMatch(/^PN/);
 
     await provider.configureWebhook(bought, { smsWebhookUrl: WEBHOOK, tag: 'agent:agt_1' });
-    expect(sandbox.state.numbers.get(bought.providerNumberId)?.friendlyName).toBe('agent:agt_1');
+    expect(sandbox.state.numbers.get(bought.providerNumberId)).toMatchObject({
+      friendlyName: 'agent:agt_1',
+      smsUrl: WEBHOOK,
+      voiceUrl: `${WEBHOOK}/voice`,
+    });
 
     const sent = await provider.send(bought, { text: 'hi', to: '+15551230000' });
     expect(sent).toMatchObject({ segments: 1 });

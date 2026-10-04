@@ -258,6 +258,51 @@ describe('dedicated number — inbound, quarantine and release', () => {
     expect(inboundCharges).toHaveLength(1);
   });
 
+  it('takes a voicemail on a live number and delivers its transcript like a text (no 10DLC needed)', async () => {
+    const { accounts, inbound, numbers, sandbox, waker } = setup();
+    const account = await accounts.provision({ agentId, provider: 'twilio' });
+    // Pending campaign: outbound is closed, voice still answers.
+    expect(account.capabilities.send).toBe(false);
+
+    const call = sandbox.buildCall({ from: '+15557654321', to: account.identifier });
+    const answer = await numbers.answerVoiceCall({ body: call.body, headers: call.headers });
+    expect(answer).toMatchObject({ mode: 'voicemail', status: 200 });
+    expect(answer?.body).toContain(`transcribeCallback="${WEBHOOK}"`);
+
+    const transcript = sandbox.buildTranscription({
+      callSid: call.callSid,
+      callbackUrl: WEBHOOK,
+      from: '+15557654321',
+      text: 'Your verification code is 9 1 4 2 7 7',
+      to: account.identifier,
+    });
+    const result = await inbound.handle('twilio', {
+      body: transcript.body,
+      headers: transcript.headers,
+    });
+    expect(result).toMatchObject({ created: true, outcome: 'delivered' });
+    expect(waker.wake.mock.calls[0][0]).toMatchObject({
+      message: { from: '+15557654321', text: 'Voicemail: Your verification code is 9 1 4 2 7 7' },
+    });
+
+    // A voicemail is not an SMS: no per-segment charge.
+    const charges = await new AgentNumberChargeModel(serverDB).listForAgent(agentId);
+    expect(charges.map((c) => c.type)).toEqual(['number_monthly']);
+  });
+
+  it('rejects a forged voice webhook', async () => {
+    const { accounts, numbers, sandbox } = setup();
+    const account = await accounts.provision({ agentId, provider: 'twilio' });
+    const call = sandbox.buildCall({ from: '+15557654321', to: account.identifier });
+
+    expect(
+      await numbers.answerVoiceCall({
+        body: call.body,
+        headers: { ...call.headers, 'x-twilio-signature': 'forged' },
+      }),
+    ).toMatchObject({ mode: 'rejected', status: 401 });
+  });
+
   it('rejects a forged signature', async () => {
     const { accounts, inbound, sandbox } = setup();
     const account = await accounts.provision({ agentId, provider: 'twilio' });
@@ -310,6 +355,13 @@ describe('dedicated number — inbound, quarantine and release', () => {
       outcome: 'quarantined',
       status: 200,
     });
+
+    // A call to the old number hears it is out of service and leaves nothing.
+    const call = sandbox.buildCall({ from: '+15550009999', to: phone });
+    const answer = await numbers.answerVoiceCall({ body: call.body, headers: call.headers });
+    expect(answer).toMatchObject({ mode: 'out-of-service', status: 200 });
+    expect(answer?.body).toContain('This number is no longer in service.');
+    expect(answer?.body).not.toContain('<Record');
 
     // Not assignable during quarantine: another agent gets a different number.
     const other = await new AgentAccountService(serverDB, userId, {

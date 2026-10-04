@@ -15,6 +15,8 @@
  * - `GET  /_sandbox`            — console page (numbers, messages, request log)
  * - `GET  /_sandbox/state`      — the same as JSON
  * - `POST /_sandbox/campaign`   — `{ "status": "VERIFIED" }` flips the 10DLC campaign
+ * - `POST /_sandbox/call`       — `{ "from", "to", "speech" }` calls a sandbox number and,
+ *   when the app answers with a transcribed voicemail, posts the transcription back.
  * - `POST /_sandbox/inbound`    — `{ "from", "to", "body" }` texts a sandbox number:
  *   the sandbox signs the webhook exactly like Twilio and posts it to the
  *   number's configured SmsUrl, then reports what the app answered.
@@ -84,16 +86,17 @@ th{background:#fafafa}td.empty{color:#999;text-align:center}code{background:#f4f
 <div class="sub">Account <code>${escape(s.account)}</code> · 10DLC campaign status <code>${escape(s.campaignStatus)}</code> · Messaging Service numbers: ${escape(s.messagingServiceNumbers.join(', ') || '—')}</div>
 <h2>Incoming phone numbers (bought through the API)</h2>
 ${table(
-  ['Number', 'SID', 'FriendlyName (tag)', 'SmsUrl', 'Released'],
+  ['Number', 'SID', 'FriendlyName (tag)', 'SmsUrl', 'VoiceUrl', 'Released'],
   s.numbers.map((n) => [
     n.phoneNumber,
     n.sid,
     n.friendlyName,
     n.smsUrl,
+    n.voiceUrl,
     n.released ? 'yes (DELETE)' : 'no',
   ]),
 )}
-<h2>Inbound deliveries posted to the app (signed X-Twilio-Signature)</h2>
+<h2>Inbound SMS / calls posted to the app (signed X-Twilio-Signature)</h2>
 ${table(
   ['At', 'From', 'To', 'Body', 'HTTP', 'X-Lobehub-Outcome', 'X-Lobehub-Wake'],
   s.deliveries.map((d) => [d.at, d.from, d.to, d.body, d.status, d.outcome, d.wake]),
@@ -149,6 +152,50 @@ const handle = async (request: Request): Promise<Response> => {
       responseBody: await response.text(),
       webhookUrl: delivery.url,
     });
+  }
+
+  if (url.pathname === '/_sandbox/call' && request.method === 'POST') {
+    // `from` calls `to` and, if the app answers with a transcribed <Record>,
+    // says `speech` into the voicemail.
+    const params = (await request.json()) as { from: string; speech: string; to: string };
+    const call = sandbox.buildCall(params);
+    const answer = await fetch(call.url, {
+      body: call.body,
+      headers: call.headers,
+      method: 'POST',
+    });
+    const twiml = await answer.text();
+    const record = {
+      at: new Date().toISOString(),
+      body: `[call] ${twiml.includes('<Record') ? `voicemail: ${params.speech}` : twiml.replaceAll(/<[^>]+>/g, ' ').trim()}`,
+      from: params.from,
+      outcome: answer.headers.get('x-lobehub-outcome'),
+      status: answer.status,
+      to: params.to,
+      wake: null as string | null,
+    };
+
+    const callbackUrl = twiml.match(/transcribeCallback="([^"]+)"/)?.[1]?.replaceAll('&amp;', '&');
+    let transcription: unknown;
+    if (callbackUrl) {
+      const delivery = sandbox.buildTranscription({
+        callSid: call.callSid,
+        callbackUrl,
+        from: params.from,
+        text: params.speech,
+        to: params.to,
+      });
+      const response = await fetch(delivery.url, {
+        body: delivery.body,
+        headers: delivery.headers,
+        method: 'POST',
+      });
+      record.wake = response.headers.get('x-lobehub-wake');
+      record.outcome = `${record.outcome} → transcript ${response.headers.get('x-lobehub-outcome')}`;
+      transcription = { status: response.status, url: delivery.url };
+    }
+    deliveries.push(record);
+    return Response.json({ ...record, transcription, twiml, voiceUrl: call.url });
   }
 
   // Everything else is the Twilio REST surface.

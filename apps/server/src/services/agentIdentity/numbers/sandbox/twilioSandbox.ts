@@ -21,6 +21,7 @@ export interface SandboxNumber {
   released: boolean;
   sid: string;
   smsUrl: string;
+  voiceUrl: string;
 }
 
 export interface SandboxMessage {
@@ -132,6 +133,7 @@ export const createTwilioSandbox = (options: TwilioSandboxOptions) => {
         released: false,
         sid: sid('PN'),
         smsUrl: form.SmsUrl ?? '',
+        voiceUrl: form.VoiceUrl ?? '',
       };
       state.numbers.set(number.sid, number);
       return json(
@@ -157,6 +159,7 @@ export const createTwilioSandbox = (options: TwilioSandboxOptions) => {
       if (method === 'POST') {
         if (form.FriendlyName) number.friendlyName = form.FriendlyName;
         if (form.SmsUrl) number.smsUrl = form.SmsUrl;
+        if (form.VoiceUrl) number.voiceUrl = form.VoiceUrl;
         return json({
           friendly_name: number.friendlyName,
           phone_number: number.phoneNumber,
@@ -285,7 +288,60 @@ export const createTwilioSandbox = (options: TwilioSandboxOptions) => {
     };
   };
 
-  return { buildInbound, fetch: fetchImpl, route, state };
+  const signed = (url: string, form: Record<string, string>) => ({
+    body: new URLSearchParams(form).toString(),
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-twilio-signature': computeTwilioSignature(options.authToken, url, form),
+    },
+    url,
+  });
+
+  /** The voice webhook Twilio posts when `from` calls `to`. */
+  const buildCall = (params: { from: string; to: string }) => {
+    const number = [...state.numbers.values()].find(
+      (n) => n.phoneNumber === params.to && !n.released,
+    );
+    if (!number) throw new Error(`Sandbox does not own ${params.to}`);
+    const callSid = sid('CA');
+    return {
+      callSid,
+      ...signed(number.voiceUrl, {
+        AccountSid: options.accountSid,
+        ApiVersion: '2010-04-01',
+        CallSid: callSid,
+        CallStatus: 'ringing',
+        Direction: 'inbound',
+        From: params.from,
+        To: params.to,
+      }),
+    };
+  };
+
+  /** The transcription callback Twilio posts after a <Record transcribe> finishes. */
+  const buildTranscription = (params: {
+    callSid: string;
+    callbackUrl: string;
+    from: string;
+    text: string;
+    to: string;
+  }) => {
+    const recordingSid = sid('RE');
+    return signed(params.callbackUrl, {
+      AccountSid: options.accountSid,
+      ApiVersion: '2010-04-01',
+      CallSid: params.callSid,
+      From: params.from,
+      RecordingSid: recordingSid,
+      RecordingUrl: `https://api.twilio.com/2010-04-01/Accounts/${options.accountSid}/Recordings/${recordingSid}`,
+      To: params.to,
+      TranscriptionSid: sid('TR'),
+      TranscriptionStatus: 'completed',
+      TranscriptionText: params.text,
+    });
+  };
+
+  return { buildCall, buildInbound, buildTranscription, fetch: fetchImpl, route, state };
 };
 
 export type TwilioSandbox = ReturnType<typeof createTwilioSandbox>;

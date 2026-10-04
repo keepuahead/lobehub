@@ -19,7 +19,14 @@ import { agentAccounts } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 
 import { AgentAccountError } from '../errors';
-import type { InboundSms, NumberProvider, NumberRef, SentSms } from './types';
+import type {
+  InboundSms,
+  NumberInboundRequest,
+  NumberProvider,
+  NumberRef,
+  SentSms,
+  VoiceCallAnswer,
+} from './types';
 import { countSmsSegments } from './types';
 
 const log = debug('lobe-server:agent-identity:numbers');
@@ -329,6 +336,20 @@ export class DedicatedNumberService {
     return { autoReplied: true, numberId: number.id, outcome: 'quarantined' };
   };
 
+  /**
+   * Answer an inbound call on one of our numbers. An assigned number takes a
+   * voicemail whose transcript arrives through the SMS webhook (and so wakes
+   * the agent like a text); a quarantined one says it is out of service.
+   * Voice is not 10DLC-gated, so neither depends on the campaign.
+   */
+  answerVoiceCall = async (request: NumberInboundRequest): Promise<VoiceCallAnswer | undefined> =>
+    this.carrier.answerVoiceCall?.(request, async (to) => {
+      const number = await this.numbers.findLiveByNumber(this.carrier.name, to);
+      if (number?.status === 'assigned') return 'voicemail';
+      if (number?.status === 'quarantined') return 'out-of-service';
+      return 'unknown';
+    });
+
   // --------------- Warm pool ---------------
 
   /** Top every configured area code up to the pool size. Run on a schedule. */
@@ -519,6 +540,8 @@ export class DedicatedNumberService {
     direction: 'inbound' | 'outbound',
     sent?: SentSms,
   ) => {
+    // A transcribed voicemail is not an SMS: nothing per-segment to bill.
+    if (segments === 0) return;
     const { carrierFeeUsd, smsSegmentUsd } = this.settings.pricing;
     await this.recordCharge(number, {
       amountUsd: segments * smsSegmentUsd,

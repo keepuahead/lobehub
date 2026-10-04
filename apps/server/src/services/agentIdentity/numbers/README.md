@@ -24,6 +24,14 @@ createDedicatedNumberAccountProvider       plugs a carrier into the identity reg
 `GET /api/agent/accounts/numbers/maintenance` (Bearer `CRON_SECRET`, `?tasks=pool,eligibility,fees,release`) runs the
 scheduled half: pool top-up, 10DLC refresh, monthly fee, quarantine release.
 
+## Voice
+
+Twilio numbers get `VoiceUrl = <sms webhook>/voice`. An assigned number answers with a transcribed voicemail
+(`<Record transcribe>`); Twilio posts the transcript back to the SMS webhook, so it enters the inbox and wakes the agent
+exactly like a text (`Voicemail: …`, no SMS charge). A quarantined number answers "This number is no longer in service"
+and records nothing. Voice is not 10DLC-gated. Telnyx voice (Call Control) is not wired yet; voice minutes and
+transcription are not billed per agent yet.
+
 ## Graded capability
 
 Receiving (SMS, OTP) works the moment the number exists. Outbound SMS opens only when the carrier reports the number

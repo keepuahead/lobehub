@@ -9,6 +9,7 @@ import type {
   NumberProvider,
   NumberRef,
   SentSms,
+  VoiceCallMode,
 } from './types';
 import { countSmsSegments } from './types';
 
@@ -33,6 +34,12 @@ export interface TwilioNumberProviderConfig {
    * host header a proxy forwarded.
    */
   smsWebhookUrl: string;
+  /**
+   * The URL Twilio posts inbound calls to. Defaults to `<smsWebhookUrl>/voice`.
+   * Voicemail transcriptions are posted back to `smsWebhookUrl`, so they enter
+   * the same inbox pipeline as a text message.
+   */
+  voiceWebhookUrl?: string;
 }
 
 const DEFAULT_API_BASE = 'https://api.twilio.com';
@@ -83,6 +90,37 @@ const mapCampaignStatus = (status: unknown): MessagingCampaignStatus => {
     }
     default: {
       return 'pending';
+    }
+  }
+};
+
+const escapeXml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+
+/**
+ * TwiML for an inbound call. A live number records a voicemail and has Twilio
+ * transcribe it back to the SMS webhook; a quarantined number says it is out
+ * of service — the call equivalent of the SMS auto-reply — and records nothing.
+ */
+export const twilioVoiceTwiml = (mode: VoiceCallMode, transcriptionCallbackUrl: string): string => {
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>';
+  switch (mode) {
+    case 'voicemail': {
+      return (
+        `${xml}<Response><Say>Please leave a message after the tone.</Say>` +
+        `<Record maxLength="120" playBeep="true" transcribe="true" transcribeCallback="${escapeXml(transcriptionCallbackUrl)}"/>` +
+        '</Response>'
+      );
+    }
+    case 'out-of-service': {
+      return `${xml}<Response><Say>This number is no longer in service.</Say><Hangup/></Response>`;
+    }
+    default: {
+      return `${xml}<Response><Reject/></Response>`;
     }
   }
 };
@@ -144,6 +182,25 @@ export const createTwilioNumberProvider = (config: TwilioNumberProviderConfig): 
     }
 
     return { data, status: response.status };
+  };
+
+  const voiceUrl = (smsWebhookUrl: string) =>
+    config.voiceWebhookUrl ?? `${smsWebhookUrl.replace(/\/$/, '')}/voice`;
+
+  /** Verify `X-Twilio-Signature` over the URL Twilio called; the params when authentic. */
+  const verified = (
+    inbound: { body: string; headers: Record<string, string | undefined> },
+    url: string,
+  ): Record<string, string> | undefined => {
+    const signature = inbound.headers['x-twilio-signature'];
+    if (!signature) return undefined;
+
+    const params = Object.fromEntries(new URLSearchParams(inbound.body));
+    if (!safeEqual(signature, computeTwilioSignature(config.authToken, url, params)))
+      return undefined;
+    // Only the account the number belongs to may deliver for it.
+    if (params.AccountSid && params.AccountSid !== config.accountSid) return undefined;
+    return params;
   };
 
   const numberUrl = (ref: NumberRef) =>
@@ -213,6 +270,8 @@ export const createTwilioNumberProvider = (config: TwilioNumberProviderConfig): 
           PhoneNumber: phoneNumber,
           SmsMethod: 'POST',
           SmsUrl: options.smsWebhookUrl,
+          VoiceMethod: 'POST',
+          VoiceUrl: voiceUrl(options.smsWebhookUrl),
         },
       );
 
@@ -224,6 +283,8 @@ export const createTwilioNumberProvider = (config: TwilioNumberProviderConfig): 
         FriendlyName: options.tag,
         SmsMethod: 'POST',
         SmsUrl: options.smsWebhookUrl,
+        VoiceMethod: 'POST',
+        VoiceUrl: voiceUrl(options.smsWebhookUrl),
       });
       await attachToMessagingService(ref);
     },
@@ -282,16 +343,50 @@ export const createTwilioNumberProvider = (config: TwilioNumberProviderConfig): 
 
     peekRecipient: (body) => new URLSearchParams(body).get('To') ?? undefined,
 
+    answerVoiceCall: async (inbound, resolve) => {
+      const params = verified(inbound, voiceUrl(config.smsWebhookUrl));
+      if (!params) {
+        return { body: 'Forbidden', contentType: 'text/plain', mode: 'rejected', status: 401 };
+      }
+
+      const mode = params.To ? await resolve(params.To) : 'unknown';
+      return {
+        body: twilioVoiceTwiml(mode, config.smsWebhookUrl),
+        contentType: 'text/xml',
+        mode,
+        status: 200,
+      };
+    },
+
     parseInbound: async (inbound) => {
-      const signature = inbound.headers['x-twilio-signature'];
-      if (!signature) return { ok: false };
+      const params = verified(inbound, config.smsWebhookUrl);
+      if (!params) return { ok: false };
 
-      const params = Object.fromEntries(new URLSearchParams(inbound.body));
-      const expected = computeTwilioSignature(config.authToken, config.smsWebhookUrl, params);
-      if (!safeEqual(signature, expected)) return { ok: false };
-
-      // Only the account the number belongs to may deliver for it.
-      if (params.AccountSid && params.AccountSid !== config.accountSid) return { ok: false };
+      // A voicemail transcription (the callback our <Record> asked for): the
+      // caller's words become an inbox message like any text, minus SMS billing.
+      if (params.TranscriptionSid) {
+        const transcript = (params.TranscriptionText ?? '').trim();
+        if (
+          params.TranscriptionStatus !== 'completed' ||
+          !transcript ||
+          !params.To ||
+          !params.From
+        ) {
+          return { message: null, ok: true };
+        }
+        return {
+          message: {
+            from: params.From,
+            media: params.RecordingUrl ? [{ mimeType: 'audio/wav', url: params.RecordingUrl }] : [],
+            providerMessageId: params.TranscriptionSid,
+            receivedAt: new Date(),
+            segments: 0,
+            text: `Voicemail: ${transcript}`,
+            to: params.To,
+          },
+          ok: true,
+        };
+      }
 
       const sid = params.MessageSid ?? params.SmsSid;
       if (!sid || !params.To || !params.From) return { message: null, ok: true };

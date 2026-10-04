@@ -11,6 +11,18 @@ import type { AgentNumberProviderName, MessagingCampaignStatus } from '@lobechat
  */
 export interface NumberProvider {
   /**
+   * Answer an inbound call, for carriers whose voice webhook is answered
+   * synchronously (Twilio TwiML). `resolve` says what the called number is:
+   * a live agent number takes a voicemail (transcribed into the inbox like an
+   * SMS), a quarantined one says it is out of service. Voice is not subject to
+   * 10DLC, so this needs no campaign. Omitted = the carrier's voice is not wired.
+   */
+  answerVoiceCall?: (
+    request: NumberInboundRequest,
+    resolve: (to: string) => Promise<VoiceCallMode>,
+  ) => Promise<VoiceCallAnswer>;
+
+  /**
    * Buy one specific number found by {@link search} and point its inbound at
    * us. The number is billable from the moment this resolves.
    */
@@ -103,12 +115,24 @@ export interface NumberInboundRequest {
   headers: Record<string, string | undefined>;
 }
 
+/** What a called number does with the call. */
+export type VoiceCallMode = 'out-of-service' | 'unknown' | 'voicemail';
+
+/** A synchronous carrier response to a voice webhook. */
+export interface VoiceCallAnswer {
+  body: string;
+  contentType: string;
+  /** What the call was answered with, for logs and operators. */
+  mode: VoiceCallMode | 'rejected';
+  status: number;
+}
+
 export interface InboundSms {
   from: string;
   media: { mimeType: string; url: string }[];
   providerMessageId: string;
   receivedAt: Date;
-  /** Segments the carrier billed for receiving it. */
+  /** Segments the carrier billed for receiving it; 0 for a transcribed voicemail. */
   segments: number;
   text: string;
   /** The agent's number the message was sent to — the routing key. */
