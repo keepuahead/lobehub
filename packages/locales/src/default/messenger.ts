@@ -41,7 +41,7 @@ export default {
   'messenger.bind.failed.unlinkBeforeRelink':
     'Your LobeHub account is already connected to another {{platform}} account. Disconnect it first, then try again.',
   'messenger.bind.linked.description':
-    'Your agent just said hi in {{platform}} — reply there anytime.',
+    'Your agent will say hi in {{platform}} first — reply there anytime.',
   'messenger.bind.linked.title': 'Connected to {{platform}}',
   'messenger.bind.retry': 'Get a new link',
   'messenger.bind.telegram.hint':

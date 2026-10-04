@@ -87,6 +87,16 @@ describe('greetAfterBind', () => {
     });
   });
 
+  it('escapes an opening message for Telegram HTML parse mode', async () => {
+    mocks.agentRows = [{ name: 'Toby', openingMessage: 'Hi <3 & welcome', title: null }];
+
+    await greetAfterBind({ agentId: 'agent-toby', platform: 'telegram', serverDB, userId: 'u' });
+
+    expect(mocks.sendMessengerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Hi &lt;3 &amp; welcome' }),
+    );
+  });
+
   it('reports a WeChat greeting waiting for the send window as queued', async () => {
     mocks.sendMessengerPush.mockResolvedValue({ reason: 'window_closed', status: 'queued' });
 

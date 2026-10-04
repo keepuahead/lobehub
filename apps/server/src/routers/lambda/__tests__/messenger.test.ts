@@ -882,6 +882,12 @@ describe('messengerRouter.confirmLink', () => {
       tenantId: '',
       workspaceId: null,
     });
+    // After the IM-side confirmation, the chosen agent greets in the chat.
+    await vi.waitFor(() =>
+      expect(mockGreetAfterBind).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'agent-1', platform: 'telegram', userId: 'user-1' }),
+      ),
+    );
   });
 
   it('blocks binding a workspace agent when workspace feature is disabled', async () => {

@@ -72,6 +72,9 @@ export const composeBindGreeting = (params: {
   return `Hi, I'm ${name} 👋 We're connected on ${platformName} now. Message me here anytime and I'll get back to you.`;
 };
 
+const escapeTelegramHtml = (text: string): string =>
+  text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
 export type GreetingOutcome = 'sent' | 'queued' | 'skipped' | 'failed';
 
 /**
@@ -110,7 +113,9 @@ export const greetAfterBind = async (params: {
     });
 
     const result = await sendMessengerPush({
-      content,
+      // The Telegram push sends in HTML parse mode; an opening message with a
+      // stray `<` or `&` would otherwise be rejected outright.
+      content: params.platform === 'telegram' ? escapeTelegramHtml(content) : content,
       platform: params.platform,
       serverDB,
       tenantId: params.tenantId,
