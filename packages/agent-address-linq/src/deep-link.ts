@@ -117,13 +117,28 @@ const ACCEPTED_NUMBER_FORMAT = /^[+\d][\d\s().\-/]*$/;
 const E164_MAX_DIGITS = 15;
 
 /**
- * Fallback for a calling code the metadata carries no plan for — the Vatican's
- * `+379` is assigned but unused — where there is no trunk-prefix rule to
- * apply. The digits are kept exactly as dialled rather than guessed at, as
- * long as the result is still E.164-shaped.
+ * Calling codes the ITU assigns but the numbering-plan metadata carries no plan
+ * for. `379` is Vatican City: the code is allocated, the plan is not — numbers
+ * there are dialled through the Italian plan — so there is no trunk prefix or
+ * length rule to read and the digits are kept as dialled.
+ *
+ * This is a *metadata-coverage gap*, and the set is closed: it changes only if
+ * the parser starts or stops carrying a plan. That is a different thing from
+ * the curated list of numbering-plan *rules* this function used to keep, which
+ * had to grow with the plans themselves. Everything else the metadata does not
+ * know is refused, because a normalized number is a promise we can dial.
  */
-const asPlanlessE164 = (value: string): string | undefined =>
-  /^\d{7,15}$/.test(value) ? `+${value}` : undefined;
+const UNMODELED_CALLING_CODES = new Set(['379']);
+
+/**
+ * Accept an E.164-shaped value only when it opens with a calling code we know
+ * to be assigned-but-unmodeled. Without that gate the fallback would bless any
+ * seven-digit string — `+9991234567`, `+0000000` — as a destination.
+ */
+const asUnmodeledE164 = (value: string): string | undefined => {
+  const known = [...UNMODELED_CALLING_CODES].some((code) => value.startsWith(code));
+  return known && /^\d{7,15}$/.test(value) ? `+${value}` : undefined;
+};
 
 /**
  * Normalize a phone number to E.164, or return `undefined` when it cannot be.
@@ -153,7 +168,7 @@ export const normalizeLinqNumber = (
   // than digit-stripped, so an extension stays visible.
   if (trimmed.startsWith('+')) {
     const parsed = parsePhoneNumberFromString(trimmed);
-    if (!parsed) return asPlanlessE164(digits);
+    if (!parsed) return asUnmodeledE164(digits);
     // `isPossible` — the length the plan allows — rather than `isValid`, which
     // asks whether a carrier would actually assign it: a reserved fixture like
     // `+1 555 000 2222` is still a well-formed destination.
@@ -164,7 +179,7 @@ export const normalizeLinqNumber = (
   if (!callingCode || callingCode.length > 3) return undefined;
 
   const countries = COUNTRIES_BY_CALLING_CODE.get(callingCode);
-  if (!countries) return asPlanlessE164(`${callingCode}${digits}`);
+  if (!countries) return asUnmodeledE164(`${callingCode}${digits}`);
 
   for (const country of countries) {
     const parsed = parsePhoneNumberFromString(trimmed, country);

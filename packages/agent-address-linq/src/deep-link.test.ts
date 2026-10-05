@@ -74,12 +74,22 @@ describe('normalizeLinqNumber', () => {
     ).toBeUndefined();
   });
 
-  it('keeps the digits as dialled for a calling code the plan does not carry', () => {
-    // `+379` is assigned to the Vatican but unused, so there is no trunk-prefix
-    // rule to read: the digits are kept rather than guessed at.
+  it('keeps the digits as dialled for an assigned calling code the plan does not model', () => {
+    // `+379` is allocated to the Vatican, but the metadata reaches Vatican
+    // numbers through the Italian plan, so there is no trunk-prefix rule of its
+    // own: the digits are kept rather than guessed at.
     expect(normalizeLinqNumber('0669883712', { defaultCountryCode: '379' })).toBe('+3790669883712');
+    expect(normalizeLinqNumber('+3790669883712')).toBe('+3790669883712');
     // Still E.164-shaped or nothing.
     expect(normalizeLinqNumber('123', { defaultCountryCode: '379' })).toBeUndefined();
+  });
+
+  it('refuses a calling code nobody assigns', () => {
+    // The gap above is a closed set of known codes, not a licence to bless any
+    // seven-digit string — or an unknown default country — as a destination.
+    expect(normalizeLinqNumber('+9991234567')).toBeUndefined();
+    expect(normalizeLinqNumber('+0000000')).toBeUndefined();
+    expect(normalizeLinqNumber('1234567', { defaultCountryCode: '999' })).toBeUndefined();
   });
 
   it('refuses input it cannot normalize rather than guessing', () => {
