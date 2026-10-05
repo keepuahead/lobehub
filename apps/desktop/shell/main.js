@@ -62,14 +62,17 @@ try {
 
   const abi = loadAbi();
   const startupUpdate = app.isPackaged
-    ? require('./update').createStartupUpdate({ userData: app.getPath('userData') })
+    ? require('./update').createStartupUpdate({
+        channel: require(path.join(builtinDir, 'manifest.json')).channel,
+        userData: app.getPath('userData'),
+      })
     : undefined;
 
   core = app.isPackaged
     ? resolveCore({
         abi: abi.shellAbi,
         builtinDir,
-        deferBoot: startupUpdate?.pending,
+        deferBoot: !!startupUpdate,
         publicKey: abi.publicKey,
         userData: app.getPath('userData'),
       })
@@ -100,10 +103,10 @@ try {
     source: core.source,
     startupUpdate: startupUpdate && {
       pending: startupUpdate.pending,
-      run: async (check) => {
+      run: async (check, security) => {
         try {
-          const ready = await startupUpdate.run(check);
-          if (ready && startupUpdate.pending) core.startBoot();
+          const ready = await startupUpdate.run(check, security);
+          if (ready) core.startBoot();
           return ready;
         } catch (error) {
           rescue(error, core.log);

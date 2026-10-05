@@ -6,6 +6,11 @@ export interface StartupUpdateProgress {
   total?: number;
 }
 
+export interface SecurityUpdateCheck {
+  check: () => Promise<boolean>;
+  isInstallerSafe: (version: string) => boolean;
+}
+
 export type StartupUpdateOutcome = 'ready' | 'relaunch' | 'full-update';
 
 export interface ShellGlobal {
@@ -23,6 +28,7 @@ export interface ShellGlobal {
     pending: boolean;
     run: (
       check: (update: (state: StartupUpdateProgress) => void) => Promise<StartupUpdateOutcome>,
+      security?: SecurityUpdateCheck,
     ) => Promise<boolean>;
   };
 }

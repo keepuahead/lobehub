@@ -1,6 +1,6 @@
 export default {
   'startupUpdate.requiredTitle': 'Update required',
-  'startupUpdate.requiredDescription': 'This update fixes important issues. Update to continue.',
+  'startupUpdate.requiredDescription': 'This version has a security issue. Update to continue.',
   'startupUpdate.checking': 'Checking for updates…',
   'startupUpdate.downloading': 'Downloading update',
   'startupUpdate.applying': 'Restarting LobeHub…',

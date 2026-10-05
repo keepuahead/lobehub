@@ -9,7 +9,7 @@ const STATE = 'shell:update-state';
 const SHOW_DELAY = 600;
 
 // This runs in the synchronous shell boot chain, before Core creates its settings file.
-function createStartupUpdate({ userData }) {
+function createStartupUpdate({ userData, channel }) {
   const marker = path.join(userData, 'startup-update.json');
   let pending;
   try {
@@ -20,10 +20,19 @@ function createStartupUpdate({ userData }) {
     fs.mkdirSync(userData, { recursive: true });
     fs.writeFileSync(marker, JSON.stringify({ completed: !pending }));
   }
+  pending = pending && (channel === 'canary' || channel === 'beta');
   let approved = false;
   return {
     pending,
-    run: async (check) => {
+    run: async (check, security) => {
+      if (await security?.check()) {
+        return runUpdateWindow({
+          check: async () => ((await security.check()) ? 'full-update' : 'ready'),
+          reason: 'required',
+          updateChannel: channel === 'beta' ? 'canary' : channel,
+          validateInstaller: security.isInstallerSafe,
+        });
+      }
       if (!pending) return true;
       await app.whenReady();
       // Offline first launch opens the app; Core's background check picks the update up later.
@@ -39,8 +48,8 @@ function createStartupUpdate({ userData }) {
   };
 }
 
-// Shared blocking surface: future required-version policy can call it with reason: 'required'.
-async function runUpdateWindow({ check, reason }) {
+// Security updates share this surface, but can never use the offline first-launch bypass.
+async function runUpdateWindow({ check, reason, updateChannel, validateInstaller }) {
   await app.whenReady();
   const win = new BrowserWindow({
     autoHideMenuBar: true,
@@ -138,13 +147,23 @@ async function runUpdateWindow({ check, reason }) {
         app.exit(0);
       } else if (outcome === 'full-update') {
         if (!updater) {
-          updater = require('../rescue/electron-updater.cjs').autoUpdater;
-          const channel = resolveChannel({
-            resourcesPath: process.resourcesPath,
-            userData: app.getPath('userData'),
-          });
+          const channel =
+            updateChannel ??
+            resolveChannel({
+              resourcesPath: process.resourcesPath,
+              userData: app.getPath('userData'),
+            });
           const feedUrl = resolveFeedUrl({ channel, resourcesPath: process.resourcesPath });
-          configureUpdater(updater, { channel, feedUrl, logger: console });
+          if (process.platform === 'darwin') {
+            updater = require('../rescue/sparkle').createSparkleUpdater({
+              app,
+              feedUrl,
+              resourcesPath: process.resourcesPath,
+            });
+          } else {
+            updater = require('../rescue/electron-updater.cjs').autoUpdater;
+            configureUpdater(updater, { channel, feedUrl, logger: console });
+          }
           updater.on('download-progress', onDownload);
           updater.on('error', onInstallError);
         }
@@ -157,10 +176,14 @@ async function runUpdateWindow({ check, reason }) {
         ]).finally(() => clearTimeout(timeout));
         if (!found?.isUpdateAvailable)
           throw new Error('A compatible installer is not available yet');
+        if (validateInstaller && !validateInstaller(found.updateInfo?.version)) {
+          throw new Error('The available installer does not satisfy the security policy');
+        }
         update({ phase: 'downloading' });
         await updater.downloadUpdate();
         update({ phase: 'applying' });
         installing = true;
+        app.releaseSingleInstanceLock();
         updater.quitAndInstall(true, true);
       } else {
         throw new Error(`Unexpected update outcome: ${outcome}`);

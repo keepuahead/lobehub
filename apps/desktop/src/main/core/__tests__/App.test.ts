@@ -214,36 +214,39 @@ describe('App', () => {
   });
 
   describe('service lifecycle', () => {
-    it('does not create business windows until the first-launch gate allows entry', async () => {
-      let release!: (ready: boolean) => void;
-      const run = vi.fn(
-        () =>
-          new Promise<boolean>((resolve) => {
-            release = resolve;
-          }),
-      );
-      shellState.shellInfo = {
-        abi: 'test',
-        builtinDir: '/mock/core',
-        coreDir: '/mock/core',
-        log: [],
-        manifest: null,
-        markHealthy: vi.fn(),
-        publicKey: '',
-        shellVersion: '1.0.0',
-        source: 'builtin',
-        startupUpdate: { pending: true, run },
-      };
-      appInstance = new App();
-      const boot = appInstance.bootstrap();
-      await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
-      expect(appInstance.startupUpdatePending).toBe(true);
-      expect(appInstance.browserManager.initializeBrowsers).not.toHaveBeenCalled();
-      release(true);
-      await boot;
-      expect(appInstance.startupUpdatePending).toBe(false);
-      expect(appInstance.browserManager.initializeBrowsers).toHaveBeenCalledOnce();
-    });
+    it.each([true, false])(
+      'does not create business windows until startup checks allow entry (first launch: %s)',
+      async (pending) => {
+        let release!: (ready: boolean) => void;
+        const run = vi.fn(
+          () =>
+            new Promise<boolean>((resolve) => {
+              release = resolve;
+            }),
+        );
+        shellState.shellInfo = {
+          abi: 'test',
+          builtinDir: '/mock/core',
+          coreDir: '/mock/core',
+          log: [],
+          manifest: null,
+          markHealthy: vi.fn(),
+          publicKey: '',
+          shellVersion: '1.0.0',
+          source: 'builtin',
+          startupUpdate: { pending, run },
+        };
+        appInstance = new App();
+        const boot = appInstance.bootstrap();
+        await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+        expect(appInstance.startupUpdatePending).toBe(true);
+        expect(appInstance.browserManager.initializeBrowsers).not.toHaveBeenCalled();
+        release(true);
+        await boot;
+        expect(appInstance.startupUpdatePending).toBe(false);
+        expect(appInstance.browserManager.initializeBrowsers).toHaveBeenCalledOnce();
+      },
+    );
 
     it('enables precise renderer heap metrics before Chromium is ready', async () => {
       appInstance = new App();

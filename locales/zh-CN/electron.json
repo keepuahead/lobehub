@@ -121,7 +121,7 @@
   "startupUpdate.downloading": "正在下载更新",
   "startupUpdate.error": "暂时无法完成更新",
   "startupUpdate.quit": "退出",
-  "startupUpdate.requiredDescription": "此更新修复了重要问题，请完成更新后继续使用。",
+  "startupUpdate.requiredDescription": "当前版本存在安全问题，请完成更新后继续使用。",
   "startupUpdate.requiredTitle": "需要更新才能继续",
   "startupUpdate.retry": "重试",
   "sync.continue": "继续",

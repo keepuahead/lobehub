@@ -7,9 +7,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
+const hostPlatform = process.platform;
 const entry = require.resolve('../update');
 const electron = require.resolve('electron');
 const rescue = require.resolve('../rescue');
+const sparklePath = require.resolve('../rescue/sparkle');
 const updaterPath = require.resolve('../rescue/electron-updater.cjs');
 let updater;
 let userData, window, handler, app, online, createStartupUpdate;
@@ -77,22 +79,28 @@ beforeEach(() => {
     loaded: true,
   };
   updater = Object.assign(new EventEmitter(), {
-    checkForUpdates: vi.fn(async () => ({ isUpdateAvailable: true })),
+    checkForUpdates: vi.fn(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: '2.0.0' },
+    })),
     downloadUpdate: vi.fn(async () => {
       updater.emit('download-progress', { percent: 45 });
     }),
     quitAndInstall: vi.fn(),
   });
   require.cache[updaterPath] = { exports: { autoUpdater: updater }, loaded: true };
+  require.cache[sparklePath] = { exports: { createSparkleUpdater: () => updater }, loaded: true };
   delete require.cache[entry];
   ({ createStartupUpdate } = require(entry));
 });
 afterEach(() => {
-  for (const file of [entry, electron, rescue, updaterPath]) delete require.cache[file];
+  Object.defineProperty(process, 'platform', { value: hostPlatform });
+  for (const file of [entry, electron, rescue, updaterPath, sparklePath])
+    delete require.cache[file];
   fs.rmSync(userData, { recursive: true, force: true });
 });
 it('keeps first launch pending until the check passes and the business renderer is healthy', async () => {
-  const gate = createStartupUpdate({ userData });
+  const gate = createStartupUpdate({ userData, channel: 'canary' });
   gate.markHealthy();
   expect(marker().completed).toBe(false);
   await expect(gate.run(async () => 'ready')).resolves.toBe(true);
@@ -102,13 +110,13 @@ it('keeps first launch pending until the check passes and the business renderer 
   gate.markHealthy();
   expect(marker().completed).toBe(true);
   const check = vi.fn();
-  await createStartupUpdate({ userData }).run(check);
+  await createStartupUpdate({ userData, channel: 'canary' }).run(check);
   expect(check).not.toHaveBeenCalled();
 });
 it('migrates existing installations without forcing them through first launch again', async () => {
   fs.writeFileSync(path.join(userData, 'lobehub-settings.json'), '{}');
   const check = vi.fn();
-  await expect(createStartupUpdate({ userData }).run(check)).resolves.toBe(true);
+  await expect(createStartupUpdate({ userData, channel: 'canary' }).run(check)).resolves.toBe(true);
   expect(check).not.toHaveBeenCalled();
 });
 it('shows a recoverable error, ignores concurrent retries, and completes after a successful retry', async () => {
@@ -122,7 +130,7 @@ it('shows a recoverable error, ignores concurrent retries, and completes after a
           resume = resolve;
         }),
     );
-  const result = createStartupUpdate({ userData }).run(check);
+  const result = createStartupUpdate({ userData, channel: 'canary' }).run(check);
   await flush();
   expect(action('state')).toMatchObject({ phase: 'error', language: 'zh-CN' });
   expect(window.shown).toBe(true);
@@ -135,20 +143,22 @@ it('shows a recoverable error, ignores concurrent retries, and completes after a
   await expect(result).resolves.toBe(true);
 });
 it('quits without completing first launch and retries the gate on the next launch', async () => {
-  const result = createStartupUpdate({ userData }).run(async () => {
+  const result = createStartupUpdate({ userData, channel: 'canary' }).run(async () => {
     throw new Error('offline');
   });
   await flush();
   action('quit');
   await expect(result).resolves.toBe(false);
   expect(app.exit).toHaveBeenCalledWith(0);
-  expect(createStartupUpdate({ userData }).pending).toBe(true);
+  expect(createStartupUpdate({ userData, channel: 'canary' }).pending).toBe(true);
   expect(app.listenerCount('activate')).toBe(0);
 });
 
 it('uses the full installer when required and leaves first launch pending until the new app boots', async () => {
   updater.downloadUpdate.mockRejectedValueOnce(new Error('download failed'));
-  const result = createStartupUpdate({ userData }).run(async () => 'full-update');
+  const result = createStartupUpdate({ userData, channel: 'canary' }).run(
+    async () => 'full-update',
+  );
   await flush();
   expect(action('state').phase).toBe('error');
   expect(updater.quitAndInstall).not.toHaveBeenCalled();
@@ -159,7 +169,7 @@ it('uses the full installer when required and leaves first launch pending until 
     expect.objectContaining({ phase: 'downloading', percent: 45 }),
   );
   expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true);
-  expect(app.releaseSingleInstanceLock).not.toHaveBeenCalled();
+  expect(app.releaseSingleInstanceLock).toHaveBeenCalledOnce();
   expect(marker().completed).toBe(false);
   action('quit');
   await result;
@@ -168,7 +178,7 @@ it('uses the full installer when required and leaves first launch pending until 
 
 it('opens the app without a window when first launch starts offline', async () => {
   online = false;
-  const gate = createStartupUpdate({ userData });
+  const gate = createStartupUpdate({ userData, channel: 'canary' });
   const check = vi.fn();
   await expect(gate.run(check)).resolves.toBe(true);
   expect(check).not.toHaveBeenCalled();
@@ -178,7 +188,9 @@ it('opens the app without a window when first launch starts offline', async () =
 });
 
 it('never shows the window when the check finishes quickly', async () => {
-  await expect(createStartupUpdate({ userData }).run(async () => 'ready')).resolves.toBe(true);
+  await expect(
+    createStartupUpdate({ userData, channel: 'canary' }).run(async () => 'ready'),
+  ).resolves.toBe(true);
   expect(window.shown).toBeUndefined();
 });
 
@@ -186,7 +198,7 @@ it('shows the window only once the check outlasts the delay', async () => {
   vi.useFakeTimers();
   try {
     let resume;
-    const result = createStartupUpdate({ userData }).run(
+    const result = createStartupUpdate({ userData, channel: 'canary' }).run(
       () =>
         new Promise((resolve) => {
           resume = resolve;
@@ -204,7 +216,7 @@ it('shows the window only once the check outlasts the delay', async () => {
 });
 
 it('opens the app instead of an error when the network drops during the update', async () => {
-  const gate = createStartupUpdate({ userData });
+  const gate = createStartupUpdate({ userData, channel: 'canary' });
   const result = gate.run(async () => {
     online = false;
     throw new Error('net::ERR_INTERNET_DISCONNECTED');
@@ -213,4 +225,64 @@ it('opens the app instead of an error when the network drops during the update',
   expect(window.isDestroyed()).toBe(true);
   gate.markHealthy();
   expect(marker().completed).toBe(true);
+});
+
+for (const channel of ['stable', 'nightly']) {
+  it(`skips the first-launch OTA gate for a ${channel} installer`, async () => {
+    const check = vi.fn();
+    const gate = createStartupUpdate({ userData, channel });
+    await expect(gate.run(check)).resolves.toBe(true);
+    expect(check).not.toHaveBeenCalled();
+    expect(window).toBeUndefined();
+  });
+}
+for (const channel of ['stable', 'canary']) {
+  it.each(['darwin', 'win32', 'linux'])(
+    `requires a safe full installer for an existing ${channel} installation on %s`,
+    async (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform });
+      fs.writeFileSync(path.join(userData, 'startup-update.json'), '{"completed":true}');
+      const check = vi.fn();
+      const security = { check: vi.fn(async () => true), isInstallerSafe: (v) => v === '2.0.0' };
+      updater.checkForUpdates.mockResolvedValueOnce({
+        isUpdateAvailable: true,
+        updateInfo: { version: '1.0.0' },
+      });
+      const result = createStartupUpdate({ userData, channel }).run(check, security);
+      await flush();
+      expect(action('state')).toMatchObject({ reason: 'required', phase: 'error' });
+      expect(updater.downloadUpdate).not.toHaveBeenCalled();
+      expect(updater.quitAndInstall).not.toHaveBeenCalled();
+      expect(check).not.toHaveBeenCalled();
+      action('retry');
+      await flush();
+      expect(updater.quitAndInstall).toHaveBeenCalledOnce();
+      action('quit');
+      await expect(result).resolves.toBe(false);
+    },
+  );
+}
+it('cannot bypass a known security restriction by going offline', async () => {
+  online = false;
+  updater.checkForUpdates.mockRejectedValue(new Error('offline'));
+  const result = createStartupUpdate({ userData, channel: 'stable' }).run(vi.fn(), {
+    check: async () => true,
+    isInstallerSafe: () => true,
+  });
+  await flush();
+  expect(action('state')).toMatchObject({ reason: 'required', phase: 'error' });
+  expect(window.isDestroyed()).toBeFalsy();
+  action('quit');
+  await expect(result).resolves.toBe(false);
+});
+it('allows entry when a newer policy revokes the restriction on retry', async () => {
+  const security = {
+    check: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false),
+    isInstallerSafe: () => true,
+  };
+  updater.checkForUpdates.mockRejectedValueOnce(new Error('unavailable'));
+  const result = createStartupUpdate({ userData, channel: 'stable' }).run(vi.fn(), security);
+  await flush();
+  action('retry');
+  await expect(result).resolves.toBe(true);
 });

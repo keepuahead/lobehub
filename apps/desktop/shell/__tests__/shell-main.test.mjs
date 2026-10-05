@@ -54,6 +54,7 @@ const fakeCore = (source, body = 'module.exports = 1;') => {
     manifest: null,
     markBroken: vi.fn(),
     markHealthy: vi.fn(),
+    startBoot: vi.fn(),
     source,
   };
 };
@@ -71,6 +72,11 @@ beforeEach(() => {
   coreMain = path.join(tmp, 'core', 'dist', 'main', 'index.js');
   resourcesPath = process.resourcesPath;
   process.resourcesPath = path.join(tmp, 'resources');
+  fs.mkdirSync(path.join(process.resourcesPath, 'core.asar'), { recursive: true });
+  fs.writeFileSync(
+    path.join(process.resourcesPath, 'core.asar/manifest.json'),
+    JSON.stringify({ channel: 'stable' }),
+  );
 });
 
 afterEach(() => {
@@ -114,6 +120,26 @@ describe('shell main', () => {
     expect(core.markHealthy).toHaveBeenCalledOnce();
     expect(runRescue).not.toHaveBeenCalled();
     delete global.__BOOTED__;
+  });
+
+  it('defers boot validation while stable security checking is pending', async () => {
+    const core = fakeCore('builtin');
+    const resolveCore = vi.fn(() => core);
+    loadMain({ app: packagedApp(), resolveCore });
+    const check = vi.fn();
+    let release;
+    const result = global.__SHELL__.startupUpdate.run(check, {
+      check: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    expect(resolveCore).toHaveBeenCalledWith(expect.objectContaining({ deferBoot: true }));
+    expect(core.startBoot).not.toHaveBeenCalled();
+    release(false);
+    expect(await result).toBe(true);
+    expect(check).not.toHaveBeenCalled();
+    expect(core.startBoot).toHaveBeenCalledOnce();
   });
 
   it('rescues in-process when the builtin core throws while loading', () => {
