@@ -122,13 +122,13 @@ describe('shell main', () => {
     delete global.__BOOTED__;
   });
 
-  it('defers boot validation while stable security checking is pending', async () => {
+  it('starts stable boot validation without waiting for the background security check', async () => {
     const core = fakeCore('builtin');
     const resolveCore = vi.fn(() => core);
     loadMain({ app: packagedApp(), resolveCore });
     const check = vi.fn();
     let release;
-    const result = global.__SHELL__.startupUpdate.run(check, {
+    const background = global.__SHELL__.startupUpdate.checkSecurity({
       check: () =>
         new Promise((resolve) => {
           release = resolve;
@@ -136,9 +136,11 @@ describe('shell main', () => {
     });
     expect(resolveCore).toHaveBeenCalledWith(expect.objectContaining({ deferBoot: true }));
     expect(core.startBoot).not.toHaveBeenCalled();
-    release(false);
-    expect(await result).toBe(true);
+    expect(await global.__SHELL__.startupUpdate.run(check)).toBe(true);
     expect(check).not.toHaveBeenCalled();
+    expect(core.startBoot).toHaveBeenCalledOnce();
+    release(false);
+    expect(await background).toBe(true);
     expect(core.startBoot).toHaveBeenCalledOnce();
   });
 
