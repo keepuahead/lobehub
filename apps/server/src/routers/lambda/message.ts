@@ -314,6 +314,13 @@ export const messageRouter = router({
     )
     .mutation(async ({ input, ctx, signal }) => {
       await assertCanUseTopicTargets(guardCtx(ctx), [input.topicId]);
+      // The service loads the model/provider from the client-supplied agent and
+      // pays for the call with it, so that agent/group needs USE access too —
+      // authorizing only the topic's own target would let a forged agentId
+      // borrow a view-only workspace agent.
+      await assertCanUseConversationTargets(guardCtx(ctx), [
+        { agentId: input.agentId, groupId: input.groupId },
+      ]);
       await assertCreatorTopicTargets(guardCtx(ctx), [input.topicId]);
 
       const service = new ContextCompactionService(
