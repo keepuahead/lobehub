@@ -74,6 +74,10 @@ vi.mock('fix-path', () => ({
   default: vi.fn(),
 }));
 
+vi.mock('@/utils/shellPath', () => ({
+  refreshShellPath: vi.fn(async () => {}),
+}));
+
 vi.mock('@/const/env', () => ({
   isDev: false,
 }));
@@ -200,6 +204,7 @@ describe('App', () => {
 
   afterEach(() => {
     shellState.shellInfo = undefined;
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -214,6 +219,46 @@ describe('App', () => {
   });
 
   describe('service lifecycle', () => {
+    it('shows business windows before starting a pending background security check', async () => {
+      let firstFrame!: () => void;
+      let finishCheck!: (ready: boolean) => void;
+      const frame = new Promise<void>((resolve) => {
+        firstFrame = resolve;
+      });
+      const checkSecurity = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finishCheck = resolve;
+          }),
+      );
+      shellState.shellInfo = {
+        abi: 'test',
+        builtinDir: '/mock/core',
+        coreDir: '/mock/core',
+        log: [],
+        manifest: null,
+        markHealthy: vi.fn(),
+        publicKey: '',
+        shellVersion: '1.0.0',
+        source: 'builtin',
+        startupUpdate: { checkSecurity, pending: false, run: vi.fn(async () => true) },
+      };
+      appInstance = new App();
+      vi.mocked(appInstance.browserManager.waitForMainWindowFirstFrame).mockReturnValue(frame);
+      // Hold unrelated native setup; this test owns only the startup/security boundary.
+      vi.spyOn(appInstance, 'runControllerHooks').mockImplementation(async (lifecycle) => {
+        if (lifecycle === 'afterFirstFrame') await new Promise(() => {});
+      });
+      await appInstance.bootstrap();
+      expect(appInstance.browserManager.initializeBrowsers).toHaveBeenCalledOnce();
+      expect(checkSecurity).not.toHaveBeenCalled();
+      expect(appInstance.startupUpdatePending).toBe(false);
+      firstFrame();
+      await vi.waitFor(() => expect(checkSecurity).toHaveBeenCalledOnce());
+      expect(appInstance.startupUpdatePending).toBe(false);
+      finishCheck(true);
+    });
+
     it.each([true, false])(
       'does not create business windows until startup checks allow entry (first launch: %s)',
       async (pending) => {
@@ -234,7 +279,7 @@ describe('App', () => {
           publicKey: '',
           shellVersion: '1.0.0',
           source: 'builtin',
-          startupUpdate: { pending, run },
+          startupUpdate: { checkSecurity: vi.fn(), pending, run },
         };
         appInstance = new App();
         const boot = appInstance.bootstrap();

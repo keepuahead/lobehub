@@ -103,9 +103,10 @@ try {
     source: core.source,
     startupUpdate: startupUpdate && {
       pending: startupUpdate.pending,
-      run: async (check, security) => {
+      checkSecurity: startupUpdate.checkSecurity,
+      run: async (check) => {
         try {
-          const ready = await startupUpdate.run(check, security);
+          const ready = await startupUpdate.run(check);
           if (ready) core.startBoot();
           return ready;
         } catch (error) {

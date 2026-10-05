@@ -22,22 +22,37 @@ function createStartupUpdate({ userData, channel }) {
   }
   pending = pending && (channel === 'canary' || channel === 'beta');
   let approved = false;
+  let securityCheck;
   return {
     pending,
-    run: async (check, security) => {
-      if (await security?.check()) {
-        return runUpdateWindow({
-          check: async () => ((await security.check()) ? 'full-update' : 'ready'),
-          reason: 'required',
-          updateChannel: channel === 'beta' ? 'canary' : channel,
-          validateInstaller: security.isInstallerSafe,
-        });
-      }
+    run: async (check) => {
       if (!pending) return true;
       await app.whenReady();
       // Offline first launch opens the app; Core's background check picks the update up later.
       approved = !net.isOnline() || (await runUpdateWindow({ check, reason: 'first-launch' }));
       return approved;
+    },
+    checkSecurity: (security) => {
+      if (securityCheck) return securityCheck;
+      securityCheck = (async () => {
+        if (!(await security.check())) return true;
+        try {
+          return await runUpdateWindow({
+            check: async () => ((await security.check()) ? 'full-update' : 'ready'),
+            reason: 'required',
+            updateChannel: channel === 'beta' ? 'canary' : channel,
+            validateInstaller: security.isInstallerSafe,
+          });
+        } catch (error) {
+          // A known restriction cannot be bypassed by a failure to create its window.
+          console.error('[shell:update] Cannot display required update', error);
+          app.exit(1);
+          return false;
+        }
+      })().finally(() => {
+        securityCheck = undefined;
+      });
+      return securityCheck;
     },
     markHealthy: () => {
       if (!pending || !approved) return;
@@ -76,6 +91,19 @@ async function runUpdateWindow({ check, reason, updateChannel, validateInstaller
       win.focus();
     }
   };
+  // A background security result can arrive after several business windows are open.
+  // Keep all of them non-interactive until the restriction is revoked or the app exits.
+  const disabledWindows = new Map();
+  const disableWindow = (_event, other) => {
+    if (other === win || other.isDestroyed() || disabledWindows.has(other)) return;
+    disabledWindows.set(other, other.isEnabled());
+    other.setEnabled(false);
+    other.on('focus', focus);
+  };
+  if (reason === 'required') {
+    BrowserWindow.getAllWindows().forEach((other) => disableWindow(undefined, other));
+    app.on('browser-window-created', disableWindow);
+  }
   app.on('activate', focus);
   app.on('second-instance', focus);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -212,6 +240,11 @@ async function runUpdateWindow({ check, reason, updateChannel, validateInstaller
     app.removeListener('activate', focus);
     app.removeListener('second-instance', focus);
     ipcMain.removeHandler(ACTION);
+    app.removeListener('browser-window-created', disableWindow);
+    for (const [other, enabled] of disabledWindows) {
+      other.removeListener('focus', focus);
+      if (!other.isDestroyed()) other.setEnabled(enabled);
+    }
     updater?.removeListener('download-progress', onDownload);
     updater?.removeListener('error', onInstallError);
     if (!win.isDestroyed()) {

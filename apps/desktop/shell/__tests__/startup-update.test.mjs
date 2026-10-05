@@ -14,7 +14,7 @@ const rescue = require.resolve('../rescue');
 const sparklePath = require.resolve('../rescue/sparkle');
 const updaterPath = require.resolve('../rescue/electron-updater.cjs');
 let updater;
-let userData, window, handler, app, online, createStartupUpdate;
+let userData, window, handler, app, online, createStartupUpdate, Window;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const marker = () =>
   JSON.parse(fs.readFileSync(path.join(userData, 'startup-update.json'), 'utf8'));
@@ -32,17 +32,30 @@ beforeEach(() => {
     releaseSingleInstanceLock: vi.fn(),
     relaunch: vi.fn(),
   });
-  class Window extends EventEmitter {
+  const windows = [];
+  Window = class extends EventEmitter {
+    static getAllWindows() {
+      return windows.filter((win) => !win.isDestroyed());
+    }
     constructor() {
       super();
       // eslint-disable-next-line @typescript-eslint/no-this-alias -- Expose the fake native window to the test.
       window = this;
+      windows.push(this);
+      this.enabled = true;
+      app.emit('browser-window-created', {}, this);
       this.webContents = Object.assign(new EventEmitter(), {
         send: vi.fn(),
         setWindowOpenHandler: vi.fn(),
       });
     }
     center() {}
+    isEnabled() {
+      return this.enabled;
+    }
+    setEnabled(enabled) {
+      this.enabled = enabled;
+    }
     destroy() {
       this.destroyed = true;
       if (!app.emit('window-all-closed')) app.quit();
@@ -55,7 +68,7 @@ beforeEach(() => {
       this.shown = true;
     }
     focus() {}
-  }
+  };
   require.cache[electron] = {
     exports: {
       app,
@@ -236,6 +249,83 @@ for (const channel of ['stable', 'nightly']) {
     expect(window).toBeUndefined();
   });
 }
+it('lets Stable enter while a delayed security fetch is still pending, then forces the update', async () => {
+  let finishCheck;
+  const security = {
+    check: vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishCheck = resolve;
+          }),
+      )
+      .mockResolvedValue(true),
+    isInstallerSafe: () => true,
+  };
+  const gate = createStartupUpdate({ userData, channel: 'stable' });
+  const check = vi.fn();
+  await expect(gate.run(check)).resolves.toBe(true);
+  const business = new Window();
+  const background = gate.checkSecurity(security);
+  expect(gate.checkSecurity(security)).toBe(background);
+  await flush();
+  expect(window).toBe(business);
+  expect(business.isEnabled()).toBe(true);
+  expect(check).not.toHaveBeenCalled();
+  finishCheck(true);
+  await flush();
+  expect(window).not.toBe(business);
+  expect(business.isEnabled()).toBe(false);
+  expect(action('state').reason).toBe('required');
+  action('quit');
+  await expect(background).resolves.toBe(false);
+});
+
+it('keeps business windows interactive when the background policy does not match', async () => {
+  const business = new Window();
+  await createStartupUpdate({ userData, channel: 'stable' }).checkSecurity({
+    check: async () => false,
+    isInstallerSafe: () => true,
+  });
+  expect(window).toBe(business);
+  expect(business.isEnabled()).toBe(true);
+});
+
+it('exits if the mandatory update window cannot load after a confirmed match', async () => {
+  vi.spyOn(Window.prototype, 'loadFile').mockRejectedValueOnce(new Error('missing update UI'));
+  const result = await createStartupUpdate({ userData, channel: 'stable' }).checkSecurity({
+    check: async () => true,
+    isInstallerSafe: () => true,
+  });
+  expect(result).toBe(false);
+  expect(app.exit).toHaveBeenCalledWith(1);
+});
+
+it('blocks existing and newly created windows until a newer policy revokes the restriction', async () => {
+  const business = new Window();
+  const alreadyDisabled = new Window();
+  alreadyDisabled.setEnabled(false);
+  const security = {
+    check: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false),
+    isInstallerSafe: () => true,
+  };
+  updater.checkForUpdates.mockRejectedValueOnce(new Error('unavailable'));
+  const result = createStartupUpdate({ userData, channel: 'stable' }).checkSecurity(security);
+  await flush();
+  const requiredWindow = window;
+  const newBusiness = new Window();
+  expect(business.isEnabled()).toBe(false);
+  expect(newBusiness.isEnabled()).toBe(false);
+  expect(requiredWindow.isEnabled()).toBe(true);
+  window = requiredWindow;
+  action('retry');
+  await expect(result).resolves.toBe(true);
+  expect(business.isEnabled()).toBe(true);
+  expect(newBusiness.isEnabled()).toBe(true);
+  expect(alreadyDisabled.isEnabled()).toBe(false);
+  expect(app.listenerCount('browser-window-created')).toBe(0);
+});
 for (const channel of ['stable', 'canary']) {
   it.each(['darwin', 'win32', 'linux'])(
     `requires a safe full installer for an existing ${channel} installation on %s`,
@@ -248,7 +338,7 @@ for (const channel of ['stable', 'canary']) {
         isUpdateAvailable: true,
         updateInfo: { version: '1.0.0' },
       });
-      const result = createStartupUpdate({ userData, channel }).run(check, security);
+      const result = createStartupUpdate({ userData, channel }).checkSecurity(security);
       await flush();
       expect(action('state')).toMatchObject({ reason: 'required', phase: 'error' });
       expect(updater.downloadUpdate).not.toHaveBeenCalled();
@@ -265,7 +355,7 @@ for (const channel of ['stable', 'canary']) {
 it('cannot bypass a known security restriction by going offline', async () => {
   online = false;
   updater.checkForUpdates.mockRejectedValue(new Error('offline'));
-  const result = createStartupUpdate({ userData, channel: 'stable' }).run(vi.fn(), {
+  const result = createStartupUpdate({ userData, channel: 'stable' }).checkSecurity({
     check: async () => true,
     isInstallerSafe: () => true,
   });
@@ -281,7 +371,7 @@ it('allows entry when a newer policy revokes the restriction on retry', async ()
     isInstallerSafe: () => true,
   };
   updater.checkForUpdates.mockRejectedValueOnce(new Error('unavailable'));
-  const result = createStartupUpdate({ userData, channel: 'stable' }).run(vi.fn(), security);
+  const result = createStartupUpdate({ userData, channel: 'stable' }).checkSecurity(security);
   await flush();
   action('retry');
   await expect(result).resolves.toBe(true);

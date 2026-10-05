@@ -25,10 +25,10 @@ export interface ShellGlobal {
   readonly shellVersion: string;
   readonly source: 'builtin' | 'external';
   readonly startupUpdate?: {
+    checkSecurity: (security: SecurityUpdateCheck) => Promise<boolean>;
     pending: boolean;
     run: (
       check: (update: (state: StartupUpdateProgress) => void) => Promise<StartupUpdateOutcome>,
-      security?: SecurityUpdateCheck,
     ) => Promise<boolean>;
   };
 }

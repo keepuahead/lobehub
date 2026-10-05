@@ -277,18 +277,6 @@ export class App {
     if (shellInfo?.startupUpdate) {
       const ready = await shellInfo.startupUpdate.run(
         this.coreUpdateManager.checkBeforeFirstLaunch,
-        new SecurityUpdatePolicy({
-          channel: BUILD_CHANNEL,
-          coreVersion: () => this.coreUpdateManager.getStatus().running,
-          feedBaseUrl: (UPDATE_SERVER_URL ?? '')
-            .replace(/\/(stable|nightly|canary|beta)\/?$/, '')
-            .replace(/\/$/, ''),
-          fetchImpl: (url, init) => net.fetch(url, init),
-          platform: process.platform as 'darwin' | 'linux' | 'win32',
-          publicKey: shellInfo.publicKey,
-          shellVersion: shellInfo.shellVersion,
-          userData: app.getPath('userData'),
-        }),
       );
       if (!ready) return;
     }
@@ -336,6 +324,28 @@ export class App {
 
   private initializeAfterFirstFrame = async (initializeNativeShell: () => Promise<void>) => {
     await this.browserManager.waitForMainWindowFirstFrame();
+
+    // Security policy IO must never delay the first usable window.
+    if (shellInfo?.startupUpdate) {
+      void shellInfo.startupUpdate
+        .checkSecurity(
+          new SecurityUpdatePolicy({
+            channel: BUILD_CHANNEL,
+            coreVersion: () => this.coreUpdateManager.getStatus().running,
+            feedBaseUrl: (UPDATE_SERVER_URL ?? '')
+              .replace(/\/(stable|nightly|canary|beta)\/?$/, '')
+              .replace(/\/$/, ''),
+            fetchImpl: (url, init) => net.fetch(url, init),
+            platform: process.platform as 'darwin' | 'linux' | 'win32',
+            publicKey: shellInfo.publicKey,
+            shellVersion: shellInfo.shellVersion,
+            userData: app.getPath('userData'),
+          }),
+        )
+        .catch((error) => {
+          logger.error('Background security update check failed:', error);
+        });
+    }
 
     // GUI-launched apps do not inherit the user's login-shell PATH. Resolve it
     // asynchronously after the first frame so shell startup never blocks the
