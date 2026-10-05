@@ -83,6 +83,13 @@ export interface LinqNumberOptions {
 }
 
 /**
+ * Country calling codes whose national significant numbers keep their leading
+ * `0` in E.164 (Italy, San Marino, Vatican City): there the zero is part of
+ * the number, not a trunk prefix.
+ */
+const ZERO_SIGNIFICANT_COUNTRY_CODES = new Set(['39', '378', '379']);
+
+/**
  * Normalize a phone number to E.164, or return `undefined` when it cannot be.
  *
  * Accepts the formatting people actually paste — `+1 (555) 000-2222`,
@@ -107,9 +114,13 @@ export const normalizeLinqNumber = (
   } else {
     const country = options.defaultCountryCode?.replaceAll(/\D/g, '');
     if (!country) return undefined;
-    // A leading `0` is a national trunk prefix, not part of the subscriber
-    // number; drop it before prepending the country code.
-    e164 = `${country}${digits.replace(/^0+/, '')}`;
+    // A leading `0` is usually a national trunk prefix, not part of the
+    // subscriber number, so it is dropped before prepending the country code —
+    // except where the zero is dialled internationally too.
+    const national = ZERO_SIGNIFICANT_COUNTRY_CODES.has(country)
+      ? digits
+      : digits.replace(/^0+/, '');
+    e164 = `${country}${national}`;
   }
 
   // E.164 caps a full number at 15 digits; 8 is the shortest real one.

@@ -25,6 +25,18 @@ describe('normalizeLinqNumber', () => {
     );
   });
 
+  it('keeps a leading zero that is part of the national significant number', () => {
+    // Italy, San Marino and Vatican City dial the `0` internationally: Rome
+    // `06 …` is `+39 06 …`, not `+39 6 …`.
+    expect(normalizeLinqNumber('06 6988 3712', { defaultCountryCode: '39' })).toBe('+390669883712');
+    expect(normalizeLinqNumber('0549 882 555', { defaultCountryCode: '378' })).toBe(
+      '+3780549882555',
+    );
+    expect(normalizeLinqNumber('06 6988 3712', { defaultCountryCode: '379' })).toBe(
+      '+3790669883712',
+    );
+  });
+
   it('refuses input it cannot normalize rather than guessing', () => {
     // A national number with no default country code is ambiguous.
     expect(normalizeLinqNumber('555 000 2222')).toBeUndefined();
