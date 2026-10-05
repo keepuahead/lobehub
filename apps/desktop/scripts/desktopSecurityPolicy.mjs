@@ -338,7 +338,11 @@ export async function runSecurityPolicy({
 
 async function main() {
   const { values } = parseArgs({
-    options: { request: { type: 'string' }, output: { type: 'string' } },
+    options: {
+      'request': { type: 'string' },
+      'output': { type: 'string' },
+      'validate-request': { type: 'boolean' },
+    },
   });
   const input = values.request
     ? await readFile(values.request, 'utf8')
@@ -350,6 +354,10 @@ async function main() {
     return value;
   };
   const request = securityPolicyRequestSchema.parse(JSON.parse(input));
+  if (values['validate-request']) {
+    console.log(JSON.stringify(request));
+    return;
+  }
   const feedBaseUrl = required('UPDATE_SERVER_URL')
     .replace(/\/$/, '')
     .replace(/\/(stable|canary|beta|nightly)$/, '');

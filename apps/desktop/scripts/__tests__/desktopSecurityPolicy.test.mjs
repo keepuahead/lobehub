@@ -72,6 +72,39 @@ const fixture = (policy = null) => {
   };
 };
 
+describe('credential-free workflow request validation', () => {
+  const validate = (request) =>
+    promisify(execFile)(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../desktopSecurityPolicy.mjs', import.meta.url)),
+        '--validate-request',
+      ],
+      { env: { SECURITY_POLICY_REQUEST: JSON.stringify(request) } },
+    );
+
+  it('normalizes inspect and default preview requests without any credentials', async () => {
+    const inspection = JSON.parse((await validate({ action: 'inspect' })).stdout);
+    expect(inspection).toEqual({ action: 'inspect' });
+    const preview = JSON.parse((await validate(mark({ apply: undefined }))).stdout);
+    expect(preview.apply).toBe(false);
+    expect(preview.rule).toEqual(rule);
+  });
+
+  it('allows the signing branch only for an explicitly true, valid mutation', async () => {
+    const publication = JSON.parse((await validate(mark())).stdout);
+    expect(publication.apply).toBe(true);
+    expect(publication.action).toBe('mark');
+    await expect(validate(mark({ apply: 'true' }))).rejects.toMatchObject({ stdout: '' });
+    await expect(validate({ action: 'inspect', apply: true })).rejects.toMatchObject({
+      stdout: '',
+    });
+    await expect(validate(mark({ expectedRevision: undefined }))).rejects.toMatchObject({
+      stdout: '',
+    });
+  });
+});
+
 describe('security policy publication', () => {
   it('previews a valid restriction without requiring a signing key or writing objects', async () => {
     const env = fixture();

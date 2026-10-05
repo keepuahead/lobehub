@@ -92,9 +92,32 @@ jobs:
           printf '%s\n' '{"private":true,"type":"module"}' > package.json
           npm install --ignore-scripts --no-audit --no-fund --save-exact \
             @aws-sdk/client-s3@3.932.0 builder-util-runtime@9.7.0 semver@7.8.5 yaml@2.9.1 zod@4.6.5
-      - name: Run security policy operation
+      - name: Validate security policy request without credentials
+        id: policy-request
         env:
           SECURITY_POLICY_REQUEST: ${{ inputs.security_policy }}
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/security-policy-runtime/scripts/desktopSecurityPolicy.mjs" \
+            --validate-request > "$RUNNER_TEMP/security-policy-request.json"
+          jq -r '"apply=\(.apply // false)"' "$RUNNER_TEMP/security-policy-request.json" >> "$GITHUB_OUTPUT"
+      - name: Inspect or preview security policy
+        if: steps.policy-request.outputs.apply != 'true'
+        env:
+          UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          UPDATE_S3_ENDPOINT: ${{ secrets.UPDATE_S3_ENDPOINT }}
+          UPDATE_S3_REGION: ${{ secrets.UPDATE_S3_REGION }}
+          UPDATE_S3_BUCKET: ${{ secrets.UPDATE_S3_BUCKET }}
+          UPDATE_AWS_ACCESS_KEY_ID: ${{ secrets.UPDATE_AWS_ACCESS_KEY_ID }}
+          UPDATE_AWS_SECRET_ACCESS_KEY: ${{ secrets.UPDATE_AWS_SECRET_ACCESS_KEY }}
+          RENDERER_OTA_PUBLIC_KEY: ${{ secrets.RENDERER_OTA_PUBLIC_KEY }}
+        run: |
+          node "$RUNNER_TEMP/security-policy-runtime/scripts/desktopSecurityPolicy.mjs" \
+            --request "$RUNNER_TEMP/security-policy-request.json" \
+            --output "$RUNNER_TEMP/security-policy-report.json"
+      - name: Publish security policy
+        if: steps.policy-request.outputs.apply == 'true'
+        env:
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           UPDATE_S3_ENDPOINT: ${{ secrets.UPDATE_S3_ENDPOINT }}
           UPDATE_S3_REGION: ${{ secrets.UPDATE_S3_REGION }}
@@ -105,6 +128,7 @@ jobs:
           RENDERER_OTA_PRIVATE_KEY: ${{ secrets.RENDERER_OTA_PRIVATE_KEY }}
         run: |
           node "$RUNNER_TEMP/security-policy-runtime/scripts/desktopSecurityPolicy.mjs" \
+            --request "$RUNNER_TEMP/security-policy-request.json" \
             --output "$RUNNER_TEMP/security-policy-report.json"
       - name: Upload operation report
         if: always()
