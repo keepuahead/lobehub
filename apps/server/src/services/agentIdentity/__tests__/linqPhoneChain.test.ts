@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 
 import {
   buildLinqDeepLink,
+  createInMemoryLinqWebhookDedupeStore,
   createLinqLinkCode,
   extractLinqLinkCode,
   signLinqWebhookPayload,
@@ -157,7 +158,8 @@ beforeEach(async () => {
     createLinqProvider({
       apiBaseUrl: mock.baseUrl,
       apiKey: 'linq_phone_e2e',
-      fromNumber: LINQ_NUMBER,
+      dedupeStore: createInMemoryLinqWebhookDedupeStore(),
+      fromNumbers: [LINQ_NUMBER],
       now: () => NOW,
       webhookSecret: WEBHOOK_SECRET,
     }),
@@ -251,7 +253,7 @@ describe('Linq phone chain — end to end over loopback', () => {
     expect(wireText).toBe('Linked! Docs at lobehub.com/docs (https://lobehub.com/docs)');
     expect(wireText).not.toContain('**');
 
-    // ------------------------------------------- 7. 重放同一条 webhook-id 被拒
+    // ------------------------------------------- 7. 重放同一条 webhook-id 只确认不再投递
     const replay = await service.handleInbound(
       'linq',
       signedInbound({
@@ -260,7 +262,9 @@ describe('Linq phone chain — end to end over loopback', () => {
       }),
     );
     transcript.push(`6. handleInbound(replay of delivery_phone_1) -> ${replay.outcome}`);
-    expect(replay.outcome).toBe('rejected');
+    // Authentic but already handled: acknowledged so Linq stops retrying,
+    // and nothing is delivered a second time.
+    expect(replay.outcome).toBe('ignored');
 
     // ---------------------------------------------------- 8. 伪造签名被拒
     const forgedRaw = inboundBody({ deliveryId: 'delivery_phone_2', text: 'spoofed' });
