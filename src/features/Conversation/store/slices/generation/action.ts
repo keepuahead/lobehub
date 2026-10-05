@@ -4,8 +4,12 @@ import { shouldDropUnsupportedClaudeAssistantPrefill } from '@lobechat/model-run
 import type {
   ChatImageItem,
   ChatTopic,
+  ChatTopicMetadata,
+  CodexForkTarget,
+  ContextSelection,
   ConversationContext,
   HeterogeneousProviderConfig,
+  PageSelection,
 } from '@lobechat/types';
 import { applyTopicModelToHeterogeneousProvider, resolveAgentAgencyConfig } from '@lobechat/types';
 import { toast } from '@lobehub/ui/base-ui';
@@ -28,12 +32,17 @@ import {
 } from '@/helpers/executionTarget';
 import { globalAgentContextManager } from '@/helpers/GlobalAgentContextManager';
 import { messageService } from '@/services/message';
+import { threadService } from '@/services/thread';
 import { topicService } from '@/services/topic';
 import { getAgentStoreState } from '@/store/agent';
 import { agentByIdSelectors, agentSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
 import { selectRuntimeType } from '@/store/chat/slices/agentRun/actions/dispatch/agentDispatcher';
+import {
+  resolveCodexForkTarget,
+  resolvePersistedCodexChildSession,
+} from '@/store/chat/slices/agentRun/actions/dispatch/codexForkTarget';
 import {
   parseMentionedAgentsFromEditorData,
   parseSelectedSkillsFromEditorData,
@@ -56,6 +65,7 @@ import { getUserStoreState } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
 
 import { type Store as ConversationStore } from '../../action';
+import { buildCodexBranchParams } from './codexBranch';
 import { MAX_HETERO_AUTO_RETRIES } from './heteroRetryConfig';
 
 const buildRetryInitialContext = (editorData: Record<string, any> | null | undefined) => {
@@ -214,14 +224,22 @@ export const resolveHeteroRunContext = (
     legacyAgentWorkingDirectory: agentState.localAgentWorkingDirectoryMap[agentId],
     workspaceScoped,
   });
-  const workingDirectory = topic?.metadata?.workingDirectory || agentWorkingDirectory;
   const heterogeneousProvider = agencyConfig?.heterogeneousProvider;
   const providerBinding = heterogeneousProvider?.authMode === 'api';
+  const thread =
+    context.topicId && context.threadId
+      ? chatStore.threadMaps[context.topicId]?.find((item) => item.id === context.threadId)
+      : undefined;
+  const workingDirectory =
+    thread?.metadata?.workingDirectory ??
+    topic?.metadata?.workingDirectory ??
+    agentWorkingDirectory;
+  const resumeMetadata = (thread?.metadata ?? topic?.metadata) as ChatTopicMetadata | undefined;
 
   // Drops the saved sessionId when its bound cwd disagrees with the current
   // one — without this CC emits "No conversation found with session ID".
   const { cwdChanged, reason, resumeBindingKey, resumeSessionId } = resolveHeteroResume(
-    topic?.metadata,
+    resumeMetadata,
     workingDirectory,
     {
       currentBindingKey:
@@ -248,6 +266,11 @@ export const resolveHeteroRunContext = (
 export const runHeterogeneousFromExistingMessage = async (
   chatStore: ReturnType<typeof useChatStore.getState>,
   params: {
+    codexForkTarget?: CodexForkTarget;
+    /** Captured branch history for retry recovery when navigation changes during preflight. */
+    sourceMessages?: ConversationStore['dbMessages'];
+    contextSelections?: ContextSelection[];
+    pageSelections?: PageSelection[];
     context: ConversationContext;
     heterogeneousProvider: HeterogeneousProviderConfig;
     /** Image attachments from the original user message — forwarded to the CLI for vision support */
@@ -290,8 +313,52 @@ export const runHeterogeneousFromExistingMessage = async (
   if (!agentId) throw new Error('agentId is required for heterogeneous agent');
 
   await ensureEffectiveAgencyAccess(agentId);
-  const { cwdChanged, reason, resumeBindingKey, resumeSessionId, workingDirectory } =
-    resolveHeteroRunContext(chatStore, context, agentId, topicOverride);
+  const runtime = resolveHeteroRunContext(chatStore, context, agentId, topicOverride);
+  const { cwdChanged, reason, resumeBindingKey, workingDirectory } = runtime;
+  let { resumeSessionId } = runtime;
+  let { codexForkTarget } = params;
+  const threadMetadata =
+    context.topicId && context.threadId
+      ? chatStore.threadMaps[context.topicId]?.find((thread) => thread.id === context.threadId)
+          ?.metadata
+      : undefined;
+  const pendingFork = threadMetadata?.codexForkTarget;
+  const sourceMessages =
+    params.sourceMessages ??
+    (pendingFork ? (chatStore.dbMessagesMap[messageMapKey(context)] ?? []) : []);
+  const recoveredChild =
+    heterogeneousProvider.type === 'codex' &&
+    heterogeneousProvider.authMode !== 'api' &&
+    context.threadId &&
+    pendingFork &&
+    threadMetadata?.workingDirectory === (workingDirectory ?? '') &&
+    !reason &&
+    resumeSessionId &&
+    resolvePersistedCodexChildSession(
+      sourceMessages,
+      parentMessageId,
+      context.threadId,
+      pendingFork.threadId,
+    );
+  if (recoveredChild) {
+    resumeSessionId = recoveredChild;
+    if (
+      codexForkTarget?.threadId === pendingFork?.threadId &&
+      codexForkTarget?.turnId === pendingFork?.turnId &&
+      codexForkTarget?.position === pendingFork?.position
+    ) {
+      // A pre-turn Retry resumes the established child. A started Retry keeps
+      // the selected child's exact boundary instead of reviving the old source.
+      const source = sourceMessages.find((message) => message.id === parentMessageId);
+      codexForkTarget =
+        source?.role === 'user' && source.metadata?.codexTurnId
+          ? resolveCodexForkTarget(sourceMessages, parentMessageId, 'before')
+          : undefined;
+    }
+  }
+  if (codexForkTarget && !resumeSessionId) {
+    throw new Error('Cannot fork this Codex conversation because its native thread is unavailable');
+  }
   if (replayTranscript && !resumeSessionId) {
     throw new Error('Transcript replay needs a resumable CLI session on the topic');
   }
@@ -342,6 +409,10 @@ export const runHeterogeneousFromExistingMessage = async (
     await import('@/store/chat/slices/agentRun/actions/transports/hetero/heterogeneousAgentExecutor');
   const outcome = await executeHeterogeneousAgent(() => useChatStore.getState(), {
     assistantMessageId: assistantMsg.id,
+    userMessageId: parentMessageId,
+    codexForkTarget,
+    contextSelections: params.contextSelections,
+    pageSelections: params.pageSelections,
     context,
     heterogeneousProvider: effectiveHeterogeneousProvider,
     imageList: imageList?.length ? imageList : undefined,
@@ -533,7 +604,28 @@ const regenerateUserMessageFromSource = async (
     // history, and resumes the same session id (when the cwd still matches)
     // so prior context is preserved.
     if (runtimeType === 'hetero' && heterogeneousProvider) {
+      const nativeSource = dbMessages.find((message) => message.id === messageId) ?? item;
+      const pendingFork =
+        context.topicId && context.threadId
+          ? useChatStore
+              .getState()
+              .threadMaps[context.topicId]?.find((thread) => thread.id === context.threadId)
+              ?.metadata?.codexForkTarget
+          : undefined;
+      // A failed attempt before turn/started has no native boundary yet. Reuse
+      // its pending branch intent, or retry normally for an unstarted/legacy turn.
+      const codexForkTarget =
+        heterogeneousProvider.type === 'codex' && context.threadId
+          ? (pendingFork ??
+            (nativeSource.metadata?.codexTurnId
+              ? resolveCodexForkTarget([nativeSource], messageId, 'before')
+              : undefined))
+          : undefined;
       await runHeterogeneousFromExistingMessage(chatStore, {
+        codexForkTarget,
+        sourceMessages: dbMessages,
+        contextSelections: nativeSource.metadata?.contextSelections,
+        pageSelections: nativeSource.metadata?.pageSelections,
         context,
         heterogeneousProvider,
         // Forward the original user message's images so regenerate re-runs
@@ -589,7 +681,6 @@ export interface GenerationAction {
    * pending user message, so the user can send it now or delete the topic.
    */
   cancelScheduledRun: () => Promise<void>;
-
   /**
    * Clear all operations
    */
@@ -636,6 +727,18 @@ export interface GenerationAction {
    * Delete and resend a thread message
    */
   delAndResendThreadMessage: (messageId: string) => Promise<void>;
+
+  /**
+   * Creates an isolated Codex branch at the selected native turn.
+   *
+   * Use when:
+   * - Branching from a saved Codex user or assistant message.
+   * Expects:
+   * - A saved source message with native provenance and an idle conversation.
+   * Returns:
+   * - A promise for creation and, for a user message, its replay in the child.
+   */
+  forkCodexMessage: (messageId: string) => Promise<void>;
 
   /**
    * Start (or reuse) the long-lived `autoRetryPending` operation for a turn so
@@ -1291,6 +1394,123 @@ export const generationSlice: StateCreator<
 
     // Delegate to regenerateUserMessage with the parent user message
     await get().regenerateUserMessage(userId);
+  },
+
+  forkCodexMessage: async (messageId) => {
+    const { context, dbMessages } = get();
+    const chatStore = useChatStore.getState();
+    if (operationSelectors.isInputLoadingByContext(context)(chatStore)) {
+      throw new Error(t('messageAction.regenerateAlreadyRunning', { ns: 'chat' }));
+    }
+    const source = dbMessages.find((message) => message.id === messageId);
+    if (!source) throw new Error('The selected Codex message is unavailable');
+    if (!context.topicId) throw new Error('Codex branches require a saved topic');
+    const topicId = context.topicId;
+    const { operationId } = chatStore.startOperation({
+      context: { ...context, messageId },
+      type: 'regenerate',
+    });
+    try {
+      await ensureEffectiveAgencyAccess(context.agentId);
+      const topic = topicSelectors.getTopicById(topicId)(useChatStore.getState());
+      const { agencyConfig, isWorkspaceAgent, workspaceScoped } = getEffectiveAgencyConfig(
+        context.agentId,
+        topic,
+      );
+      const heterogeneousProvider = agencyConfig?.heterogeneousProvider;
+      const runtimeType = selectRuntimeType({
+        boundDeviceId: agencyConfig?.boundDeviceId,
+        executionTarget: agencyConfig?.executionTarget,
+        heterogeneousProvider,
+        isGatewayMode: chatStore.isGatewayModeEnabled(context.agentId),
+        isWorkspaceAgent,
+        workspaceScoped,
+      });
+      if (runtimeType !== 'hetero' || heterogeneousProvider?.type !== 'codex') {
+        throw new Error('Codex message branches require the local Codex runtime');
+      }
+      const runtime = resolveHeteroRunContext(
+        useChatStore.getState(),
+        context,
+        context.agentId,
+        topic,
+      );
+      if (!runtime.resumeSessionId)
+        throw new Error('The native Codex thread is unavailable on this device');
+      const parentThread = context.threadId
+        ? useChatStore
+            .getState()
+            .threadMaps[topicId]?.find((thread) => thread.id === context.threadId)
+        : undefined;
+      const { threadParams, messageParams } = buildCodexBranchParams({
+        context,
+        source,
+        runtimeMetadata: {
+          ...(parentThread?.metadata ?? topic?.metadata),
+          workingDirectory: runtime.workingDirectory,
+        },
+      });
+      if (
+        operationSelectors.getOperationById(operationId)(useChatStore.getState())?.status !==
+        'running'
+      )
+        return;
+      toast.info(t('codexForkFilesystemNotice', { ns: 'common' }));
+      const branch = messageParams
+        ? // Fork-at-user replays the selected prompt without its old answer.
+          await threadService.createThreadWithMessage({ ...threadParams, message: messageParams })
+        : { threadId: await threadService.createThread(threadParams), messageId: undefined };
+      // NOTICE:
+      // Preserve native boundaries when Desktop and server versions differ.
+      // Older create schemas strip fork metadata, making forks lose context.
+      // Source: `packages/types/src/topic/thread.ts` at `b6198d9b34`; updateThread accepts metadata.
+      // Remove when every supported server version preserves these fields on create.
+      await threadService.updateThread(branch.threadId, { metadata: threadParams.metadata });
+      const threads = await threadService.getThreads(topicId);
+      useChatStore.setState((state) => ({
+        threadMaps: { ...state.threadMaps, [topicId]: threads },
+      }));
+      const branchContext: ConversationContext = {
+        ...context,
+        isNew: false,
+        scope: 'thread',
+        threadId: branch.threadId,
+      };
+      await chatStore.refreshMessages(branchContext);
+      if (
+        messageMapKey(get().context) === messageMapKey(context) &&
+        useChatStore.getState().activeTopicId === topicId &&
+        useChatStore.getState().activeAgentId === context.agentId
+      ) {
+        chatStore.openThreadInPortal(branch.threadId, source.id);
+      }
+      if (
+        operationSelectors.getOperationById(operationId)(useChatStore.getState())?.status !==
+        'running'
+      )
+        return;
+      if (messageParams && branch.messageId) {
+        await runHeterogeneousFromExistingMessage(useChatStore.getState(), {
+          codexForkTarget: threadParams.metadata?.codexForkTarget,
+          context: branchContext,
+          heterogeneousProvider,
+          imageList: source.imageList,
+          contextSelections: source.metadata?.contextSelections,
+          pageSelections: source.metadata?.pageSelections,
+          parentMessageId: branch.messageId,
+          parentOperationId: operationId,
+          prompt: messageParams.content,
+          topic,
+        });
+      }
+      chatStore.completeOperation(operationId);
+    } catch (error) {
+      chatStore.failOperation(operationId, {
+        message: error instanceof Error ? error.message : String(error),
+        type: 'CodexForkError',
+      });
+      throw error;
+    }
   },
 
   regenerateUserMessage: async (messageId: string) =>
