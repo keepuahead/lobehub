@@ -2,12 +2,11 @@
 
 Every packaged launch checks `<UPDATE_SERVER_URL base>/security-policy.json` before opening business windows. This is independent of the OTA channel eligibility, first-launch marker, rollout percentage, and automatic-update preference. Stable installers skip the initial OTA gate; Canary and Beta installers keep it.
 
-The endpoint is independent of versioned Core feeds so one policy can cover existing installers. The client accepts a strict schema, a maximum 1 MiB response, and an Ed25519 signature verified with the packaged OTA public key. The request times out after five seconds. No publication workflow is included yet.
+The endpoint is independent of versioned Core feeds so one policy can cover existing installers. The client accepts a strict schema, a maximum 1 MiB response, and an Ed25519 signature verified with the packaged OTA public key. The request times out after five seconds.
 
 ```json
 {
   "kind": "desktop-security-policy",
-  "schemaVersion": 1,
   "revision": 1,
   "rules": [
     {
@@ -25,11 +24,12 @@ The endpoint is independent of versioned Core feeds so one policy can cover exis
       "minimumInstallerVersion": "2.2.20-canary.4"
     }
   ],
+  "schemaVersion": 1,
   "signature": "<base64 Ed25519 signature>"
 }
 ```
 
-Sign the canonical JSON of all fields except `signature`, using the same recursive sorted-key canonicalization as the Core manifest (`coreOta/manifest.ts`). `kind` separates the policy from an OTA manifest. Increment `revision` for every policy change, including revocation; an empty `rules` array with a newer revision clears restrictions. Publish the complete rule set each time. Lower or equal revisions cannot replace a verified local policy.
+Sign the canonical JSON of all fields except `signature`, using the shared recursive sorted-key canonicalization in `src/common/signedJson.ts`. The schema lives in `src/common/securityPolicy.ts`; both the client and publisher consume these modules. `kind` separates the policy from an OTA manifest. Increment `revision` for every policy change, including revocation; an empty `rules` array with a newer revision clears restrictions. Publish the complete rule set each time. Lower or equal revisions cannot replace a verified local policy.
 
 `channel` refers to the installer build channel, not a user-selected update preference. `target: shell` matches the installed full-package version. `target: core` matches the active Core version. `affectedVersions` uses npm SemVer ranges with prereleases included; an exact version is also valid. Rules are limited to the listed platforms. Overlapping rules all apply.
 
@@ -37,9 +37,29 @@ An affected installation opens the shell-owned required-update window, offering 
 
 Verified policies are persisted atomically in `security-update-policy.json` under userData. A failed request, invalid signature, missing endpoint, or older response retains the previous verified policy. A known vulnerable version remains blocked offline. Without any verified policy, unavailable policy service does not block ordinary startup. This is operational update enforcement, not protection against a user who deliberately modifies their local installation/cache.
 
+## Publishing and operator skill
+
+Use the repository [desktop-security-update skill](../../../.agents/skills/desktop-security-update/SKILL.md) to inspect, mark, preview, apply, and revoke restrictions. For example: “Mark Stable Windows shell versions >=2.2.0 <2.2.20 as vulnerable, requiring installer 2.2.20, because of the confirmed security fix.” Scope and release numbers must come from the actual incident.
+
+The existing `release-desktop-core-ota.yml` workflow accepts an optional `security_policy` JSON input. When set, only the policy job runs; ordinary Core build/publish jobs are skipped. Existing manual Core releases and `workflow_call` callers retain their behavior. Policy operations serialize globally across channels. `security_policy_request_id` appears in the run title for unambiguous run discovery.
+
+`apps/desktop/scripts/desktopSecurityPolicy.mjs` implements three request types:
+
+- `inspect`: return authoritative storage revision and rule IDs, and compare public delivery.
+- `mark`: upsert one rule, preserving unrelated rules. Requires `expectedRevision`, `reason`, and `rule`. A rule's ID hashes its channel, sorted platform set, target, and affected range; updating its repair minimum keeps the ID.
+- `revoke`: remove one inspected `ruleId`, preserving unrelated rules. Requires `expectedRevision` and `reason`.
+
+Mutations default to `apply:false`. Preview checks the public repair feeds and installer availability without writing. `apply:true` additionally signs with `RENDERER_OTA_PRIVATE_KEY`, checks it against `RENDERER_OTA_PUBLIC_KEY`, archives the signed policy under `security-policy-history/<revision>-<hash>.json`, and conditionally writes `security-policy.json` using the prior ETag (or `If-None-Match: *` on first publication). The request must match the authoritative revision. Repeating an identical mark is a no-op.
+
+The policy uses the existing `UPDATE_SERVER_URL`, `UPDATE_S3_ENDPOINT`, `UPDATE_S3_REGION`, `UPDATE_S3_BUCKET`, `UPDATE_AWS_ACCESS_KEY_ID`, and `UPDATE_AWS_SECRET_ACCESS_KEY` secrets. Signing stays in Actions. Each run uploads a JSON report containing before/after rules, reason, actor, installer checks, publication status, and run URL. Signed policy history remains in the bucket; operation reports are retained for 90 days.
+
+Success requires fetching and verifying the exact signed object through the ordinary public policy URL. A stale cache or failed readback fails the run after the write and leaves `published-unverified` in its report. Inspect before retrying: do not blindly republish, delete the object, or restore an older revision. Configure the public endpoint to respect the object's `Cache-Control: no-store, max-age=0`; bypass any CDN rule that forcibly caches this path, including cached 404s from before first publication.
+
+Installer preflight checks the candidate version against all rules for the same channel/platform, signed Sparkle enclosure metadata on both macOS architectures, hashed Windows/Linux installer entries, and public HEAD availability. It does not replace platform signing, installation, or product acceptance. The client rechecks its installed Shell/Core on its next startup.
+
 ## Current delivery boundary
 
 - Requires a new full installer containing this startup gate; older clients cannot learn this behavior through a policy file alone.
 - Checks run at startup. Already-running clients do not immediately react to a newly published policy.
-- Remote publishing, authorization and operator tooling are intentionally deferred.
+- Merge the publisher/workflow to the trusted release branch before invoking the production skill. Implementing or testing the tooling does not publish a real restriction.
 - First-launch Core OTA continues to use the existing signed feed and offline-first behavior. Security restrictions always take precedence.

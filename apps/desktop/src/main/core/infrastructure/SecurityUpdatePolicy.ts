@@ -2,33 +2,14 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { readBlobWithLimit } from '@lobechat/utils/imageToBase64';
-import { gte, satisfies, valid, validRange } from 'semver';
-import * as z from 'zod/v4';
+import { gte, satisfies, valid } from 'semver';
 
 import { createLogger } from '@/utils/logger';
+import { type SecurityPolicy, securityUpdatePolicySchema } from '~common/securityPolicy';
 
 import { verifyManifestSignature } from './coreOta/manifest';
 
 const logger = createLogger('core:SecurityUpdatePolicy');
-const channels = z.enum(['stable', 'canary', 'beta', 'nightly']);
-const ruleSchema = z.strictObject({
-  affectedVersions: z
-    .string()
-    .min(1)
-    .refine((value) => validRange(value) !== null),
-  channel: channels,
-  minimumInstallerVersion: z.string().refine((value) => valid(value) !== null),
-  platforms: z.array(z.enum(['darwin', 'win32', 'linux'])).min(1),
-  target: z.enum(['shell', 'core']),
-});
-const policySchema = z.strictObject({
-  kind: z.literal('desktop-security-policy'),
-  revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  rules: z.array(ruleSchema).max(1000),
-  schemaVersion: z.literal(1),
-  signature: z.string().min(1),
-});
-type Policy = z.infer<typeof policySchema>;
 interface Options {
   channel: string;
   coreVersion: () => string | null;
@@ -42,7 +23,7 @@ interface Options {
 
 /** Independent of OTA availability, rollout and the user's automatic-update preference. */
 export class SecurityUpdatePolicy {
-  private policy: Policy | undefined;
+  private policy: SecurityPolicy | undefined;
   private readonly cacheFile: string;
 
   constructor(private readonly options: Options) {
@@ -50,7 +31,7 @@ export class SecurityUpdatePolicy {
   }
 
   private parse(value: unknown) {
-    const policy = policySchema.parse(value);
+    const policy = securityUpdatePolicySchema.parse(value);
     if (!verifyManifestSignature(policy, this.options.publicKey)) {
       throw new Error('Security policy signature invalid');
     }
