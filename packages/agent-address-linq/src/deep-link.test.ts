@@ -43,6 +43,43 @@ describe('normalizeLinqNumber', () => {
     expect(normalizeLinqNumber('06 6988 3712', { defaultCountryCode: '379' })).toBe(
       '+3790669883712',
     );
+    // Côte d'Ivoire's mobile ranges carry the zero in the national significant
+    // number too, so `07 …` is `+225 07 …`, not `+225 7 …`.
+    expect(normalizeLinqNumber('07 5887 2091', { defaultCountryCode: '225' })).toBe(
+      '+2250758872091',
+    );
+  });
+
+  it('accepts a short number the plan actually assigns', () => {
+    // E.164 caps a number at 15 digits but sets no global minimum: Niue hands
+    // out four-digit national numbers under `+683`, so this is a destination,
+    // not a typo.
+    expect(normalizeLinqNumber('+683 5000')).toBe('+6835000');
+    expect(normalizeLinqNumber('5000', { defaultCountryCode: '683' })).toBe('+6835000');
+  });
+
+  it('refuses a number the plan has no room for, at either end', () => {
+    // Seven digits is fine for Niue but far too short for the NANP.
+    expect(normalizeLinqNumber('+1234567')).toBeUndefined();
+    expect(normalizeLinqNumber('555 000', { defaultCountryCode: '1' })).toBeUndefined();
+  });
+
+  it('rejects an extension instead of folding it into the destination', () => {
+    // Stripping the punctuation would turn `ext. 9` into a ninth destination
+    // digit and text the wrong number.
+    expect(normalizeLinqNumber('+1 (555) 000-2222 ext. 9')).toBeUndefined();
+    expect(normalizeLinqNumber('+1 (555) 000-2222 x9')).toBeUndefined();
+    expect(
+      normalizeLinqNumber('555 000 2222 extension 9', { defaultCountryCode: '1' }),
+    ).toBeUndefined();
+  });
+
+  it('keeps the digits as dialled for a calling code the plan does not carry', () => {
+    // `+379` is assigned to the Vatican but unused, so there is no trunk-prefix
+    // rule to read: the digits are kept rather than guessed at.
+    expect(normalizeLinqNumber('0669883712', { defaultCountryCode: '379' })).toBe('+3790669883712');
+    // Still E.164-shaped or nothing.
+    expect(normalizeLinqNumber('123', { defaultCountryCode: '379' })).toBeUndefined();
   });
 
   it('refuses input it cannot normalize rather than guessing', () => {
@@ -50,8 +87,7 @@ describe('normalizeLinqNumber', () => {
     expect(normalizeLinqNumber('555 000 2222')).toBeUndefined();
     expect(normalizeLinqNumber('')).toBeUndefined();
     expect(normalizeLinqNumber('not a number')).toBeUndefined();
-    // Too short and too long for E.164.
-    expect(normalizeLinqNumber('+1234567')).toBeUndefined();
+    // Past E.164's 15-digit ceiling.
     expect(normalizeLinqNumber('+1234567890123456')).toBeUndefined();
   });
 });

@@ -15,6 +15,9 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "libphonenumber-js": "^1.13.14"
+  },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "standardwebhooks": "^1.0.0",

@@ -21,6 +21,9 @@
 
 import { randomInt } from 'node:crypto';
 
+import type { CountryCode } from 'libphonenumber-js';
+import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from 'libphonenumber-js';
+
 /** Marker that makes a link code recognizable inside an arbitrary message body. */
 export const LINQ_LINK_CODE_PREFIX = 'LH-';
 
@@ -86,18 +89,52 @@ export interface LinqNumberOptions {
 }
 
 /**
- * Country calling codes whose national significant numbers keep their leading
- * `0` in E.164 (Italy, San Marino, Vatican City): there the zero is part of
- * the number, not a trunk prefix.
+ * Every country that owns a calling code, taken from the same numbering-plan
+ * metadata the parser reads. A calling code is not a country — `+1` is shared
+ * by the whole NANP, `+44` by four territories, and `+379` by nobody — so a
+ * national-format number is parsed against the plan of some country that owns
+ * the code; each of them applies the same trunk prefix and subscriber length.
  */
-const ZERO_SIGNIFICANT_COUNTRY_CODES = new Set(['39', '378', '379']);
+const COUNTRIES_BY_CALLING_CODE: ReadonlyMap<string, CountryCode[]> = (() => {
+  const countriesByCode = new Map<string, CountryCode[]>();
+  for (const country of getCountries()) {
+    const code = getCountryCallingCode(country);
+    const shared = countriesByCode.get(code);
+    if (shared) shared.push(country);
+    else countriesByCode.set(code, [country]);
+  }
+  return countriesByCode;
+})();
+
+/**
+ * The characters people actually paste around a number. Anything else — an
+ * `ext. 9`, a stray word — means the string is not a bare destination, and
+ * folding the extra digits into the number would address a different one.
+ */
+const ACCEPTED_NUMBER_FORMAT = /^[+\d][\d\s().\-/]*$/;
+
+/** E.164 caps a full number at 15 digits. */
+const E164_MAX_DIGITS = 15;
+
+/**
+ * Fallback for a calling code the metadata carries no plan for — the Vatican's
+ * `+379` is assigned but unused — where there is no trunk-prefix rule to
+ * apply. The digits are kept exactly as dialled rather than guessed at, as
+ * long as the result is still E.164-shaped.
+ */
+const asPlanlessE164 = (value: string): string | undefined =>
+  /^\d{7,15}$/.test(value) ? `+${value}` : undefined;
 
 /**
  * Normalize a phone number to E.164, or return `undefined` when it cannot be.
  *
  * Accepts the formatting people actually paste — `+1 (555) 000-2222`,
- * `+1-555-000-2222`, `555 000 2222` with a default country code — and rejects
- * anything whose digit count cannot be E.164.
+ * `+1-555-000-2222`, `555 000 2222` with a default country code — and lets the
+ * numbering plan decide the trunk prefix and the length. Italy's `06 …` and
+ * Côte d'Ivoire's `07 …` keep a zero that is part of the national significant
+ * number, a UK `07700 …` has its trunk `0` dropped, and a four-digit Niue
+ * number under `+683` stays short because that is what the plan assigns.
+ * Refuses rather than guessing.
  */
 export const normalizeLinqNumber = (
   raw: string,
@@ -107,29 +144,35 @@ export const normalizeLinqNumber = (
 
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
+  if (!ACCEPTED_NUMBER_FORMAT.test(trimmed)) return undefined;
 
   const digits = trimmed.replaceAll(/\D/g, '');
-  if (!digits) return undefined;
+  if (digits.length > E164_MAX_DIGITS) return undefined;
 
-  let e164: string;
+  // An international number names its own plan. It is parsed as written rather
+  // than digit-stripped, so an extension stays visible.
   if (trimmed.startsWith('+')) {
-    e164 = digits;
-  } else {
-    const country = options.defaultCountryCode?.replaceAll(/\D/g, '');
-    if (!country) return undefined;
-    // A leading `0` is usually a national trunk prefix, not part of the
-    // subscriber number, so it is dropped before prepending the country code —
-    // except where the zero is dialled internationally too.
-    const national = ZERO_SIGNIFICANT_COUNTRY_CODES.has(country)
-      ? digits
-      : digits.replace(/^0+/, '');
-    e164 = `${country}${national}`;
+    const parsed = parsePhoneNumberFromString(trimmed);
+    if (!parsed) return asPlanlessE164(digits);
+    // `isPossible` — the length the plan allows — rather than `isValid`, which
+    // asks whether a carrier would actually assign it: a reserved fixture like
+    // `+1 555 000 2222` is still a well-formed destination.
+    return !parsed.ext && parsed.isPossible() ? parsed.number : undefined;
   }
 
-  // E.164 caps a full number at 15 digits; 8 is the shortest real one.
-  if (!/^\d{8,15}$/.test(e164)) return undefined;
+  const callingCode = options.defaultCountryCode?.replaceAll(/\D/g, '');
+  if (!callingCode || callingCode.length > 3) return undefined;
 
-  return `+${e164}`;
+  const countries = COUNTRIES_BY_CALLING_CODE.get(callingCode);
+  if (!countries) return asPlanlessE164(`${callingCode}${digits}`);
+
+  for (const country of countries) {
+    const parsed = parsePhoneNumberFromString(trimmed, country);
+    if (!parsed) continue;
+    if (!parsed.ext && parsed.isPossible()) return parsed.number;
+  }
+
+  return undefined;
 };
 
 export interface LinqDeepLinkInput extends LinqNumberOptions {
