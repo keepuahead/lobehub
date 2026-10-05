@@ -1,5 +1,5 @@
 {
-  "id": "cf97d903-757c-42ed-bb9a-bfc22f8be133",
+  "id": "0080325e-ba90-4f74-8e66-389d379ce9d1",
   "prevId": "aa686cd8-d10e-4850-ae83-8941b2d47fae",
   "version": "7",
   "dialect": "postgresql",
@@ -5049,6 +5049,27 @@
             },
             {
               "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_inbox_messages_agent_created_at_idx": {
+          "name": "agent_inbox_messages_agent_created_at_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
