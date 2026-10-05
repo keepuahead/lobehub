@@ -79,10 +79,10 @@ const build = async (version, contents, previousManifest) => {
     );
   return { dir, manifest };
 };
-const stage = async (builtin, remote) =>
+const stage = async (builtin, remote, current = null) =>
   new CoreStore(path.join(root, 'ota'), fetchImpl).stage({
     builtin,
-    current: null,
+    current,
     packsBaseUrl: BASE,
     remote: remote.manifest,
   });
@@ -108,6 +108,16 @@ describe('v4 pack OTA', () => {
     expect(events.at(-1)).toEqual({ phase: 'applying' });
     expect(await readFile(path.join(result.dir, 'cli/new.js'), 'utf8')).toBe('new');
   });
+  it('reuses builtin renderer content when the current version is an overlay', async () => {
+    const v1 = await build('1', files);
+    const v5 = await build('5', { ...files, 'cli/new.js': Buffer.from('new') });
+    const staged = await stage(v1, v5);
+    const v6 = await build('6', { ...files, 'cli/new.js': Buffer.from('newer') });
+    const result = await stage(v1, v6, { dir: staged.dir, manifest: v5.manifest });
+    expect(result.downloaded.bytes).toBeLessThan(1000);
+    expect(result.fallbackFull).toBe(false);
+  });
+
   it('builds deterministic signed packs and skips unchanged local bytes across versions', async () => {
     const v1 = await build('1', files);
     const v5 = await build('5', { ...files, 'cli/new.js': Buffer.from('new') });
@@ -121,9 +131,9 @@ describe('v4 pack OTA', () => {
     expect(
       fetchImpl.mock.calls.every(([, init]) => !!new Headers(init?.headers).get('range')),
     ).toBe(true);
-    expect(await readFile(path.join(result.dir, 'dist/renderer/assets/large.js'))).toEqual(
-      files['dist/renderer/assets/large.js'],
-    );
+    await expect(
+      readFile(path.join(result.dir, 'dist/renderer/assets/large.js')),
+    ).rejects.toThrow();
   });
   it('keeps 401 small missing files incremental and coalesces a fresh tree into one request', async () => {
     const v1 = await build('1', files);

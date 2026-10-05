@@ -1,6 +1,6 @@
 import type { GoalReportDispatch, GoalReportState } from './goalReport';
 import type { InitialGoalOverviewContext } from './stepContext';
-import type { AcceptanceStatus } from './verify';
+import type { AcceptanceStatus, VerifyCheckTally } from './verify';
 import type { WorkType } from './work';
 
 // ============================================
@@ -138,7 +138,15 @@ export interface GoalExplorationConfig {
   maxExperiments: number;
 }
 
-/** Opt-in recovery supervision. It cannot grant new permissions or expand budgets. */
+/**
+ * Recovery supervision. It cannot grant new permissions or expand budgets.
+ *
+ * Every newly created Goal carries this with `enabled: true` — the server writes
+ * it at creation and rejecting the opposite is what makes "no Goal without a
+ * supervisor" hold. `enabled` is kept (rather than dropped) because Goals created
+ * before supervision became mandatory still read it to decide whether the
+ * supervisor runs.
+ */
 export interface GoalSupervisionPolicy {
   enabled: boolean;
   /** Bounded incident ledger and paid diagnostic runs per Goal (default 10, maximum 100). */
@@ -237,7 +245,21 @@ export interface GoalManagerState {
    */
   adoptedOperationId?: string;
   consumed?: boolean;
+  /**
+   * Set when the dispatch for this turn was refused its topic reservation — the
+   * one failure raised before anything of the run is written — so no run exists
+   * and none can start. Decided from the error itself, never from rows the
+   * owner can edit.
+   */
+  dispatchNeverStarted?: boolean;
   operationId?: string;
+  /**
+   * Management conversations this Goal planned in before a handoff moved it to
+   * another agent's topic. `topicId` always points at the current agent's
+   * conversation; the earlier ones are kept here so the turns already spent in
+   * them keep counting toward the Goal's management usage and budget.
+   */
+  previousTopicIds?: string[];
   /**
    * The problem this turn was invited to take over, when the coordinator handed
    * one over instead of opening a human gate. Its presence is what separates a
@@ -534,6 +556,13 @@ export interface GoalGraphWorkVersionDisplay {
 
 /** Where a task node's own verification stands, for a reader scanning the goal. */
 export interface GoalNodeAcceptance {
+  /**
+   * The acceptance's current round, counted. Read in the same batched pass as
+   * the rows themselves so a surface can show each level's standing without
+   * opening it; absent when the acceptance has no round yet, which is not the
+   * same as a round that judged nothing.
+   */
+  checks?: VerifyCheckTally;
   id: string;
   status: AcceptanceStatus;
 }

@@ -271,6 +271,7 @@ describe('AgentRuntimeService', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete process.env.AGENT_RUNTIME_BASE_URL;
     hookDispatcher.unregister('test-operation-1');
   });
@@ -497,6 +498,34 @@ describe('AgentRuntimeService', () => {
       autoStart: true,
       initialMessages: [],
     };
+
+    it.each([undefined, 'parent-operation'])(
+      'persists only caller hooks for a run with parent %s',
+      async (parentOperationId) => {
+        vi.stubEnv('AGENT_HOOK_WEBHOOK_URL', 'http://webhook-service/ingress');
+        vi.stubEnv('AGENT_HOOK_WEBHOOK_TOKEN', 'synthetic-env-secret');
+        vi.stubEnv('AGENT_HOOK_WEBHOOK_EVENTS', 'beforeToolCall, afterToolCall, beforeToolCall');
+        vi.stubEnv('AGENT_HOOK_WEBHOOK_RESPONSE_HANDLING', 'toolCall');
+        vi.stubEnv('AGENT_HOOK_WEBHOOK_ON_ERROR', 'block');
+        const hooks = [
+          {
+            id: 'internal-callback',
+            type: 'afterToolCall' as const,
+            webhook: { url: 'http://webhook-service/internal' },
+          },
+        ];
+        await service.createOperation({
+          ...mockParams,
+          autoStart: false,
+          parentOperationId,
+          hooks,
+        });
+        const state = await mockCoordinator.loadAgentState(mockParams.operationId);
+        expect(state.host.hooks).toEqual(hooks);
+        expect(JSON.stringify(state.host.hooks)).not.toContain('synthetic-env-secret');
+        expect(hookDispatcher.hasHooks(mockParams.operationId)).toBe(true);
+      },
+    );
 
     it.each([undefined, false, true])(
       'persists the snapshot opt-in for resumed steps (%s)',
@@ -2800,12 +2829,9 @@ describe('AgentRuntimeService', () => {
       expect(result).toEqual(stubMessages);
     });
 
-    it.each([
-      { skipToolProjection: false, visitorUserId: undefined },
-      { skipToolProjection: true, visitorUserId: 'visitor_1' },
-    ])(
-      'includes visitor rows with skipToolProjection=$skipToolProjection',
-      async ({ skipToolProjection, visitorUserId }) => {
+    it.each([undefined, 'visitor_1'])(
+      'includes visitor rows (visitor=%s)',
+      async (visitorUserId) => {
         // Regression: `MessageModel.query()` hides share-visitor messages by
         // default. A visitor run executes under the creator's identity, so
         // without the opt-in the terminal snapshot for the visitor's topic is
@@ -2819,10 +2845,10 @@ describe('AgentRuntimeService', () => {
           principal: visitorUserId ? { actor: { shareVisitor: { visitorUserId } } } : undefined,
         } as any);
 
-        expect(queryMessages).toHaveBeenCalledWith(expect.anything(), {
-          allowShareVisitor: true,
-          skipToolProjection,
-        });
+        // The pushed snapshot always carries whole tool payloads now: it only
+        // reaches a client that did not ask for protocol 2, which has no way to
+        // fetch an omitted payload back.
+        expect(queryMessages).toHaveBeenCalledWith(expect.anything(), { allowShareVisitor: true });
       },
     );
 

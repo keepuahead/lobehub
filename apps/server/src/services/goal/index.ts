@@ -1,11 +1,13 @@
 import type { GoalAdvanceEffect, GoalMetricCriteriaState } from '@lobechat/agent-tracing';
 import { buildGoalRequirement } from '@lobechat/builtin-tool-goal';
 import {
+  DEVICE_OFFLINE_RUN_STATUS,
   GOAL_CLARIFICATION_OPTION,
   GOAL_CLARIFICATION_TITLE,
   GOAL_COORDINATOR_ACTOR_ID,
 } from '@lobechat/const/goal';
 import type {
+  ChatTopicMetadata,
   GoalConfig,
   GoalCreateConfig,
   GoalDecisionOption,
@@ -59,16 +61,19 @@ import {
   LEASE_EXPIRED_ERROR,
   MEASURED_ACCEPTANCE_PAUSE_REASON,
   needsMetricCriteria,
+  NO_FRONTIER_PAUSE_REASON,
   selectFrontier,
   TERMINAL_NODE_STATUSES,
 } from './decideNextMove';
 import { experimentResults, exploreGraph } from './exploreGraph';
 import { answeredProblem, GoalManagerService, problemKey } from './manager';
 import {
+  countConsecutiveDeviceOfflineRuns,
   DEFAULT_MANAGER_MAX_TURNS,
-  DEVICE_RECONNECT_WAIT_MS,
+  DEVICE_OFFLINE_GATE_REASON,
   isDeviceUnavailableFailure,
   managerTurnsSpent,
+  nextDeviceOfflineRetryAt,
   resolveMaxConcurrentTasks,
   resolveOperationLeaseTimeout,
   resolveTaskMaxSteps,
@@ -364,6 +369,28 @@ export class GoalService {
         manager: { instruction: managerOptions?.instruction, maxTurns: managerOptions?.maxTurns },
       };
     }
+    // Supervision is a creation invariant, not a creation option: every Goal
+    // recovers its own dropped dispatches, so a caller may tune the incident cap
+    // but never opt out. This is the single choke point — the CLI, the `/goal`
+    // tool, tRPC and REST all land here — so no client can create an
+    // unsupervised Goal. A legacy `enabled: false` is rejected rather than
+    // silently rewritten: the caller asked for the opposite of what it would
+    // get, and hiding that would make the surprise surface later, mid-run.
+    const requestedSupervision = config?.supervision;
+    if (requestedSupervision?.enabled === false)
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Supervision is required for every goal and cannot be disabled',
+      });
+    config = {
+      ...config,
+      supervision: {
+        enabled: true,
+        ...(requestedSupervision?.maxIncidents === undefined
+          ? {}
+          : { maxIncidents: requestedSupervision.maxIncidents }),
+      },
+    };
     // A supplied requirement is the user-reviewed goal document. Criteria live
     // separately; only synthesize a document when the caller omitted one.
     const requirement =
@@ -742,6 +769,11 @@ export class GoalService {
    * against — never the judgment. A reader could see that a task finished and
    * still have no idea whether it held up, which is the gap that made the page
    * feel unverifiable.
+   *
+   * Each level's tally rides along so the page can show its standing without
+   * opening it. That tally is counted from the same check union the level
+   * expands to (so a summary row can never contradict its own list), and it is
+   * one batched read, never one per acceptance — this runs on every graph poll.
    */
   private collectAcceptances = async (
     graph: GoalGraphSnapshot,
@@ -757,11 +789,18 @@ export class GoalService {
       taskNodes.map((node) => node.taskId),
     );
 
+    // An acceptance with no round yet is absent from the tally map, not zero —
+    // keep "no round" and "judged nothing" apart on the page.
+    const tallies = await this.acceptanceService.getCheckTalliesByAcceptances(
+      rows.map((row) => row.id),
+    );
+
     const result: Record<string, GoalNodeAcceptance> = {};
     for (const row of rows) {
       const nodeId = nodeByTaskId.get(row.subjectId);
       if (!nodeId) continue;
-      result[nodeId] = { id: row.id, status: row.status };
+      const checks = tallies.get(row.id);
+      result[nodeId] = { id: row.id, status: row.status, ...(checks ? { checks } : {}) };
     }
     return Object.keys(result).length > 0 ? result : undefined;
   };
@@ -1099,6 +1138,7 @@ export class GoalService {
         graph.goal.config?.supervisorState,
       ),
       new GoalManagerService(this.db, this.userId, this.workspaceId).usage(
+        graph.goal.id,
         graph.goal.config?.managerState,
       ),
     ]);
@@ -1127,6 +1167,10 @@ export class GoalService {
    * coordinator creates from here on goes to the new agent and — unless the
    * caller opts out — the unfinished ones move with it. A goal whose Tasks go
    * to a dedicated executor keeps them there; see `setTaskAgent`.
+   *
+   * The management conversation moves with supervision: it lives in the goal
+   * agent's own history, so it is re-created for the new agent here instead of
+   * being left pointing at the previous agent's topic until the next claim.
    */
   setAgent = async (
     goalId: string,
@@ -1140,11 +1184,22 @@ export class GoalService {
     const goal = await this.goalModel.update(goalId, { agentId });
     if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
 
+    // The receipt carries the management topic, so the caller must get the row
+    // with the migrated one — not the copy read before the handoff.
+    const migrated = await new GoalManagerService(
+      this.db,
+      this.userId,
+      this.workspaceId,
+    ).moveConversationTo(goalId, agentId);
+
     const reassignedTaskIds =
       options?.goalOnly || goal.config?.taskAgentId
         ? []
         : await this.reassignUnfinishedTasks(goalId, agentId);
-    return { goal, reassignedTaskIds };
+    return {
+      goal: migrated ? ((await this.goalModel.findById(goalId)) ?? goal) : goal,
+      reassignedTaskIds,
+    };
   };
 
   /**
@@ -1237,7 +1292,7 @@ export class GoalService {
     const unfinishedNodes = graph.nodes.filter(
       (node) =>
         node.kind === 'task' &&
-        !isGoalReportNode(node) &&
+        !isGoalReportNode(graph, node) &&
         node.taskId &&
         !TERMINAL_NODE_STATUSES.has(node.status),
     );
@@ -1305,6 +1360,176 @@ export class GoalService {
       goal = (await this.resume(goalId)) ?? goal;
     }
     return { goal, restartedTaskIds };
+  };
+
+  /**
+   * Task access under the goal owner's principal — the identity the goal's
+   * coordinator creates and runs its Tasks as. Only for acting on Tasks already
+   * bound to this goal's nodes, after the caller's right to manage the goal has
+   * been checked.
+   */
+  private goalOwnerTaskScope = (goal: { userId: string }) =>
+    goal.userId === this.userId
+      ? {
+          taskModel: this.taskModel,
+          taskService: this.taskService,
+          taskTopicModel: this.taskTopicModel,
+        }
+      : {
+          taskModel: new TaskModel(this.db, goal.userId, this.workspaceId),
+          taskService: new TaskService(this.db, goal.userId, this.workspaceId),
+          taskTopicModel: new TaskTopicModel(this.db, goal.userId, this.workspaceId),
+        };
+
+  /**
+   * Retire Task nodes a person no longer wants run — a duplicated plan branch,
+   * work that landed elsewhere. Without this a stray node that never got a Task
+   * stays unfinished forever and the coordinator can never reach acceptance.
+   *
+   * Nodes are retired as one set: any unfinished Task still depending on a node
+   * in the set must be in the set too, otherwise it would wait on a
+   * prerequisite that will never resolve.
+   */
+  retireNodes = async (
+    goalId: string,
+    nodeIds: string[],
+    reason?: string,
+  ): Promise<{ retiredNodeIds: string[] }> => {
+    const graph = await this.requireGraph(goalId);
+    const targetIds = new Set(nodeIds);
+
+    const targets = [...targetIds].map((nodeId) => {
+      const node = graph.nodes.find((item) => item.id === nodeId);
+      if (!node) throw new TRPCError({ code: 'NOT_FOUND', message: `Node ${nodeId} not found` });
+      if (node.kind !== 'task') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Node ${nodeId} is a ${node.kind}; only task nodes can be retired`,
+        });
+      }
+      // An already-retired node is accepted so an interrupted retirement (its
+      // fence landed, stopping the run did not) can be finished by retrying.
+      if (node.status !== 'retired' && TERMINAL_NODE_STATUSES.has(node.status)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Node ${nodeId} is already ${node.status}`,
+        });
+      }
+      // Retiring the terminal acceptance fails the whole Goal; that verdict
+      // belongs to its decision gate, not to a graph edit.
+      if (node.title === GOAL_ACCEPTANCE_TASK_TITLE) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'The Goal acceptance task cannot be retired',
+        });
+      }
+      return node;
+    });
+
+    const strandedIds = graph.edges
+      .filter(
+        (edge) =>
+          edge.kind === 'depends_on' &&
+          targetIds.has(edge.targetNodeId) &&
+          !targetIds.has(edge.sourceNodeId),
+      )
+      .map((edge) => graph.nodes.find((node) => node.id === edge.sourceNodeId))
+      .filter(
+        (node): node is NonNullable<typeof node> =>
+          !!node && node.kind === 'task' && !TERMINAL_NODE_STATUSES.has(node.status),
+      )
+      .map((node) => node.id);
+    if (strandedIds.length > 0) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `Unfinished tasks depend on these nodes; retire them together: ${[...new Set(strandedIds)].join(', ')}`,
+      });
+    }
+
+    // Fence the nodes BEFORE looking for their Tasks. The snapshot above can
+    // miss a Task a concurrent tick is creating for a proposed node; once the
+    // node reads `retired`, `bindTask` (which only binds an `active` node) can
+    // no longer attach that Task, and the creator discards it.
+    for (const node of targets) {
+      if (node.status === 'retired') continue;
+      await this.graphModel.updateNodeStatus(goalId, node.id, 'retired', reason);
+    }
+
+    // Stop what the nodes are still running, so a retired node cannot keep
+    // spending or deliver into the Goal afterwards. Bound Tasks are read after
+    // the fence so a Task bound just before it is included.
+    const fenced = await this.requireGraph(goalId);
+    const taskIds = fenced.nodes.flatMap((node) =>
+      targetIds.has(node.id) && node.taskId ? [node.taskId] : [],
+    );
+    if (taskIds.length > 0) {
+      // The caller may be a workspace owner retiring a colleague's goal (the
+      // router authorizes that). The nodes' Tasks were created by the goal's
+      // coordinator, which runs as the goal's owner — and may be `private`,
+      // inherited from that owner's private agent — so reads under the caller's
+      // visibility would miss them and leave them running. Stop them under the
+      // goal owner's principal instead, limited to the Tasks bound to the nodes
+      // being retired.
+      const { taskModel, taskService, taskTopicModel } = this.goalOwnerTaskScope(fenced.goal);
+      const cancelTasks = async () => {
+        for (const id of taskIds) {
+          // CAS against the status just read; a runner flipping the Task to
+          // `running` in between makes it miss, so re-read and try again.
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const [task] = await taskModel.findByIds([id]);
+            if (!task || ['canceled', 'completed', 'failed'].includes(task.status)) break;
+            if (await taskModel.updateStatusIfCurrent(id, task.status, 'canceled')) break;
+          }
+        }
+      };
+      // Cancel the Tasks FIRST: that is the fence a run still being dispatched
+      // checks under the Task's row lock before recording its operation, so a
+      // run started from here on stops itself (TaskRunnerService.runTask).
+      // Runs recorded before the fence are then found and stopped below.
+      await cancelTasks();
+      for (const topic of await taskTopicModel.findRunningByTaskIds(taskIds)) {
+        if (topic.topicId) await taskService.cancelTopic(topic.topicId);
+      }
+      // `cancelTopic` parks its Task as `paused`; settle them back to canceled.
+      await cancelTasks();
+    }
+
+    // A pending recovery gate on a retired node asks a question nobody needs
+    // answered any more; left pending it keeps the Goal parked in review.
+    for (const decision of fenced.decisions) {
+      if (decision.status !== 'pending') continue;
+      const gatedByTarget = fenced.edges.some(
+        (edge) =>
+          edge.kind === 'leads_to' &&
+          edge.targetNodeId === decision.nodeId &&
+          targetIds.has(edge.sourceNodeId),
+      );
+      if (gatedByTarget) {
+        await this.graphModel.cancelDecision(goalId, decision.id, 'Superseded by node retirement');
+      }
+    }
+
+    // Reopen a goal the coordinator parked because of what was just retired:
+    // `review` held by the retired node's gate, or `paused` by `no_frontier`
+    // (the stray branch left nothing runnable). A pause somebody chose — or
+    // one the coordinator took for another reason, like a budget — is left.
+    const after = await this.requireGraph(goalId);
+    const lastTransition = after.events.find((event) => event.entityType === 'goal');
+    const parkedOnNoFrontier =
+      after.goal.status === 'paused' &&
+      !after.goal.config?.pausedBy &&
+      lastTransition?.actorType !== 'user' &&
+      lastTransition?.reason === NO_FRONTIER_PAUSE_REASON;
+    if (after.goal.status === 'review' || parkedOnNoFrontier) {
+      const hasPendingDecision = after.decisions.some((decision) => decision.status === 'pending');
+      if (!hasPendingDecision) {
+        await this.transitionStatus(after.goal, 'running', 'nodes retired by user', 'user');
+      } else if (parkedOnNoFrontier) {
+        await this.transitionStatus(after.goal, 'review', 'nodes retired by user', 'user');
+      }
+    }
+
+    return { retiredNodeIds: targets.map((node) => node.id) };
   };
 
   setBudget = async (
@@ -1401,7 +1626,7 @@ export class GoalService {
         (node) =>
           node.kind === 'task' &&
           node.title !== GOAL_ACCEPTANCE_TASK_TITLE &&
-          !isGoalReportNode(node),
+          !isGoalReportNode(before, node),
       ).length >= (goal.config?.exploration?.maxExperiments ?? 0)
     )
       return goal;
@@ -1796,7 +2021,7 @@ export class GoalService {
         // sweep's window. A `running` goal that always reports `no_progress` is
         // picked by every scan forever, and enough of them starve every other
         // stalled goal out of the newest-first limit.
-        await this.transitionStatus(graph.goal, 'paused', 'no eligible task to advance');
+        await this.transitionStatus(graph.goal, 'paused', NO_FRONTIER_PAUSE_REASON);
         effects.push({ type: 'goal_status', detail: 'paused' });
         return observe({ goalId, message: move.message, outcome: move.outcome });
       }
@@ -1832,9 +2057,7 @@ export class GoalService {
           }
 
           case 'recover_lease': {
-            return observe(
-              await this.resumeAbandonedTaskRecovery(graph, acting!.id, task, effects),
-            );
+            return observe(await this.recoverLostRun(graph, acting!.id, task, effects));
           }
 
           case 'recover_verification': {
@@ -2434,7 +2657,40 @@ export class GoalService {
     });
     if (!reclaimed) return undefined;
 
+    return this.recoverLostRun(graph, nodeId, task, effects);
+  };
+
+  /**
+   * Recover a Task whose run was lost rather than judged — its lease expired or
+   * the gateway watchdog abandoned it.
+   *
+   * A run lost because its device went offline mid-run is the same failure as a
+   * dispatch that never reached the device, only noticed later: the laptop went
+   * to sleep with the run on it. It is re-marked as an offline run so it neither
+   * spends the attempt budget nor retries into a device that is still gone.
+   */
+  private recoverLostRun = async (
+    graph: GoalGraphSnapshot,
+    nodeId: string,
+    task: TaskItem,
+    effects: GoalAdvanceEffect[] = [],
+  ): Promise<GoalTickResult> => {
+    await this.markRunLostToOfflineDevice(task.id);
+    const held = await this.holdForOfflineDevice(graph, nodeId, task, effects);
+    if (held) return held;
     return this.resumeAbandonedTaskRecovery(graph, nodeId, task, effects);
+  };
+
+  /**
+   * Re-mark the Task's latest lost run as an offline run when the device it ran
+   * on is offline now. Only a device the gateway can vouch for counts: without
+   * presence the run stays a charged attempt, exactly as before.
+   */
+  private markRunLostToOfflineDevice = async (taskId: string) => {
+    const [latest] = await this.taskTopicModel.findWithHandoff(taskId, 1);
+    if (!latest?.topicId || (latest.status !== 'timeout' && latest.status !== 'failed')) return;
+    if ((await this.readRunDevicePresence(latest)) !== 'offline') return;
+    await this.taskTopicModel.updateStatus(taskId, latest.topicId, DEVICE_OFFLINE_RUN_STATUS);
   };
 
   private resumeAbandonedTaskRecovery = async (
@@ -2511,18 +2767,9 @@ export class GoalService {
    *
    * A sleeping laptop or a restarting desktop app is the usual cause, and it
    * fixes itself: the gate it used to open waited hours for someone to press
-   * Retry once the device had long reconnected. While that device is offline
-   * the goal simply waits — the sweep keeps asking — and spends nothing. Once
-   * it is back, the Task retries through the ordinary recovery path, so a
-   * binding that stays broken still ends at the attempt budget's gate. Past the
-   * reconnect window a person is asked after all, since the device is not
-   * coming back on its own.
-   *
-   * Presence is read for the exact device the failed dispatch was routed to,
-   * in the pool it was routed through: a workspace goal may run on a personal
-   * device, and another device coming online proves nothing about this one.
-   * Without a recorded route, or without a device gateway at all, there is
-   * nothing to wait for and the existing failure path decides.
+   * Retry once the device had long reconnected. While the device is offline the
+   * goal waits — the sweep keeps asking — and spends nothing; the retry then
+   * goes through the ordinary recovery path.
    */
   private waitForDevice = async (
     graph: GoalGraphSnapshot,
@@ -2531,29 +2778,103 @@ export class GoalService {
     effects: GoalAdvanceEffect[],
   ): Promise<GoalTickResult | undefined> => {
     if (task.status !== 'paused' || !isDeviceUnavailableFailure(task.error)) return;
-    if (!deviceGateway.isConfigured) return;
-    if (new Date(task.updatedAt).getTime() < Date.now() - DEVICE_RECONNECT_WAIT_MS) return;
+    const held = await this.holdForOfflineDevice(graph, nodeId, task, effects);
+    if (held) return held;
+    return this.resumeAbandonedTaskRecovery(graph, nodeId, task, effects);
+  };
 
-    const [latestRun] = await this.taskTopicModel.findWithHandoff(task.id, 1);
-    const operation = latestRun?.operationId
-      ? await new AgentOperationModel(this.db, this.userId, this.workspaceId).findById(
-          latestRun.operationId,
-        )
-      : undefined;
-    const route = readDeviceDispatchRoute(operation?.error);
-    if (!route) return;
+  /**
+   * The offline retry schedule. Offline runs are not charged to the attempt
+   * budget, so this is what bounds them: each consecutive one pushes the next
+   * retry further out (see `nextDeviceOfflineRetryAt`), and once the offline
+   * retries are spent a person is asked. Presence only brings a retry forward —
+   * a device seen back online is retried at once — so a deployment without a
+   * device gateway, or a run with no recorded device, still retries on schedule.
+   *
+   * Returns nothing when the Task should retry now.
+   */
+  private holdForOfflineDevice = async (
+    graph: GoalGraphSnapshot,
+    nodeId: string,
+    task: TaskItem,
+    effects: GoalAdvanceEffect[],
+  ): Promise<GoalTickResult | undefined> => {
+    const runs = await this.taskTopicModel.findByTaskId(task.id);
+    const offlineRuns = countConsecutiveDeviceOfflineRuns(runs);
+    // A dispatch failure is an offline run even when it left no run behind.
+    if (!offlineRuns && !isDeviceUnavailableFailure(task.error)) return;
 
-    const devices = await deviceGateway.queryDeviceList(route.userId, route.workspaceId);
-    if (devices.some((device) => device.deviceId === route.deviceId))
-      return this.resumeAbandonedTaskRecovery(graph, nodeId, task, effects);
+    const lastFailureAt = new Date(offlineRuns ? runs[0].updatedAt : task.updatedAt);
+    const retryAt = nextDeviceOfflineRetryAt(offlineRuns, lastFailureAt);
+    if (!retryAt)
+      return this.gateOrTakeOver(graph, nodeId, task.id, DEVICE_OFFLINE_GATE_REASON, effects);
+    if (retryAt.getTime() <= Date.now()) return;
+
+    const [latest] = await this.taskTopicModel.findWithHandoff(task.id, 1);
+    if (latest && (await this.readRunDevicePresence(latest)) === 'online') return;
 
     return {
       goalId: graph.goal.id,
-      message: `Task ${task.identifier} is waiting for its device to reconnect`,
+      message: `Task ${task.identifier} is waiting for its device to reconnect; next retry at ${retryAt.toISOString()}`,
       nodeId,
       outcome: 'waiting_external',
       taskId: task.id,
     };
+  };
+
+  /**
+   * Whether the device a run was routed to is connected right now.
+   *
+   * Presence is read for the exact device the run used, in the pool it was
+   * routed through: a workspace goal may run on a personal device, and another
+   * device coming online proves nothing about this one. A failed dispatch
+   * records its route on the operation error; a run that got going leaves its
+   * device on the topic. A topic bound to a device without a recorded pool is
+   * looked up in every pool this goal can route through.
+   */
+  private readRunDevicePresence = async (run: {
+    metadata?: ChatTopicMetadata | null;
+    operationId?: string | null;
+  }): Promise<'offline' | 'online' | 'unknown'> => {
+    if (!deviceGateway.isConfigured) return 'unknown';
+
+    const operation = run.operationId
+      ? await new AgentOperationModel(this.db, this.userId, this.workspaceId).findById(
+          run.operationId,
+        )
+      : undefined;
+    const dispatchRoute = readDeviceDispatchRoute(operation?.error);
+    const running = run.metadata?.runningOperation;
+    const runningDevice =
+      running?.deviceId && running.operationId === run.operationId ? running : undefined;
+
+    let deviceId: string | undefined;
+    let pools: { userId: string; workspaceId?: string }[];
+    if (dispatchRoute) {
+      deviceId = dispatchRoute.deviceId;
+      pools = [{ userId: dispatchRoute.userId, workspaceId: dispatchRoute.workspaceId }];
+    } else if (runningDevice) {
+      deviceId = runningDevice.deviceId;
+      pools = [
+        {
+          userId: runningDevice.deviceUserId ?? this.userId,
+          workspaceId: runningDevice.deviceWorkspaceId,
+        },
+      ];
+    } else {
+      deviceId = run.metadata?.boundDeviceId;
+      pools = [
+        { userId: this.userId },
+        ...(this.workspaceId ? [{ userId: this.userId, workspaceId: this.workspaceId }] : []),
+      ];
+    }
+    if (!deviceId) return 'unknown';
+
+    for (const pool of pools) {
+      const devices = await deviceGateway.queryDeviceList(pool.userId, pool.workspaceId);
+      if (devices.some((device) => device.deviceId === deviceId)) return 'online';
+    }
+    return 'offline';
   };
 
   private buildTaskInstruction = (
@@ -2845,6 +3166,17 @@ export class GoalService {
    * linked at their newest version, so a document refined across rounds is one
    * deliverable with a history rather than several deliverables.
    *
+   * Two rules keep one deliverable from being declared once per task:
+   *
+   * - **Created only.** A Work none of the task's runs created is someone
+   *   else's artifact this task happened to revise. A shared backlog document
+   *   that every run appends to is the case that surfaced this: without the
+   *   rule the document is declared as the output of every task in the goal.
+   * - **Claimed once per goal.** The first node to deliver a Work owns it. A
+   *   later node that revises it adds no link and no lifecycle event, so the
+   *   history reads "C1-c delivered the backlog" instead of repeating the same
+   *   deliverable under each task.
+   *
    * `task` Works are deliberately excluded: the responsible task's own Work is
    * the execution container and the caller already links it. `file` Works are
    * opt-in at the registry (conversation lists do not want every exported
@@ -2868,14 +3200,29 @@ export class GoalService {
       rootOperationIds: operationIds,
     });
 
-    const newestByWork = new Map<string, WorkVersionEventItem>();
+    const claimedWorkIds = await this.coordinatorGraph.listProducedWorkIds(goalId);
+
+    // Per Work: whether the task's runs created it, and the newest version they
+    // registered. `created` is sticky across the run's versions — a document
+    // written in round one and revised in round three is still this task's
+    // deliverable, while one that was only ever revised is not.
+    const harvestByWork = new Map<string, { created: boolean; item: WorkVersionEventItem }>();
     for (const item of Object.values(byOperation).flat()) {
       if (item.type === 'task') continue;
-      const seen = newestByWork.get(item.id);
-      if (!seen || seen.version.createdAt < item.version.createdAt) newestByWork.set(item.id, item);
+      const seen = harvestByWork.get(item.id);
+      const created = item.version.changeType === 'created';
+      if (!seen) {
+        harvestByWork.set(item.id, { created, item });
+        continue;
+      }
+      harvestByWork.set(item.id, {
+        created: seen.created || created,
+        item: seen.item.version.createdAt < item.version.createdAt ? item : seen.item,
+      });
     }
 
-    for (const item of newestByWork.values()) {
+    for (const [workId, { created, item }] of harvestByWork) {
+      if (!created || claimedWorkIds.has(workId)) continue;
       const link = await this.coordinatorGraph.attachWorkVersion(
         goalId,
         nodeId,
@@ -2900,6 +3247,18 @@ export class GoalService {
     taskId: string,
     effects: GoalAdvanceEffect[] = [],
   ): Promise<GoalTickResult> => {
+    // `graph` can predate a retirement that landed while this tick ran. A
+    // retired node's late output must not enter the Goal as a finding or
+    // deliverable (and `updateNodeStatus` refuses to revive the node).
+    if ((await this.coordinatorGraph.getNodeStatus(graph.goal.id, nodeId)) === 'retired') {
+      return {
+        goalId: graph.goal.id,
+        message: 'Node was retired; the task outcome is discarded',
+        nodeId,
+        outcome: 'no_progress',
+        taskId,
+      };
+    }
     const existingFinding = graph.edges.some(
       (edge) => edge.sourceNodeId === nodeId && edge.kind === 'produces',
     );
@@ -2928,7 +3287,18 @@ export class GoalService {
       type: 'node_status',
       detail: 'resolved',
     });
-    if (completedWork?.currentVersionId) {
+    // The container link is written once per node — at dispatch, or by
+    // `ensureTaskWorkVersion` for a node that never got one. Re-linking the
+    // completed version only appended a second identical row for the same task:
+    // the goal's task-container links were one per settle round instead of one
+    // per node, which is where half of the graph's hidden Work links came from.
+    const containerLinked = graph.workVersions.some(
+      (link) =>
+        link.nodeId === nodeId &&
+        link.relation === 'produced' &&
+        link.work?.workId === completedWork?.id,
+    );
+    if (completedWork?.currentVersionId && !containerLinked) {
       await this.coordinatorGraph.attachWorkVersion(
         graph.goal.id,
         nodeId,

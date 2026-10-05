@@ -7,7 +7,8 @@ import type { VerifyAgentPlanConfig, VerifyCheckItem } from '@lobechat/types';
 import type { Command } from 'commander';
 import pc from 'picocolors';
 
-import { getTrpcClient } from '../api/client';
+import type { TrpcClient } from '../api/client';
+import { createPublicLambdaClient, getTrpcClient } from '../api/client';
 import { resolveWorkspaceId } from '../api/workspace';
 import { resolveServerUrl } from '../settings';
 import { ensureAcceptanceDirIgnored, ensureAcceptanceDirIgnoredFor } from '../utils/acceptanceDir';
@@ -74,8 +75,7 @@ const listMaterializedFiles = (directory: string): string[] => {
   });
 };
 
-async function installAction(options: InstallOptions): Promise<void> {
-  const client = await getTrpcClient();
+async function installAction(options: InstallOptions, client: TrpcClient): Promise<void> {
   const version = options.skillVersion?.replace(/^v/, '');
   const bundle = await client.verify.getSkillBundle.query({
     identifier: options.skill,
@@ -699,6 +699,7 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
   // An external repository has none of those, so create a first-class
   // standalone subject instead of making the caller manufacture a Task ID.
   let subject = subjectFromResult(result);
+  let foldTaskRunTopic = false;
   if (!requestedAcceptanceId && options.subject) {
     const ref = parseSubjectRef(options.subject);
     if (!ref) {
@@ -714,6 +715,8 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
   } else if (!requestedAcceptanceId && !subject) {
     const ref = subjectFromEnv();
     if (ref) subject = { ref };
+    // Only the ambient topic may be folded onto its Task; an explicit subject stays exact.
+    foldTaskRunTopic = Boolean(ref);
   }
   if (!requestedAcceptanceId && !subject) {
     subject = {
@@ -772,10 +775,16 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
       requirement,
       subjectId: subject!.ref.subjectId,
       subjectType: subject!.ref.subjectType,
+      ...(foldTaskRunTopic ? { foldTaskRunTopic } : {}),
       ...(subject!.ref.subjectType === 'standalone' && (title || goal)
         ? { title: title || goal }
         : {}),
     });
+    // The server may fold the subject (a Task's run topic lands on the Task).
+    subject = {
+      ...subject!,
+      ref: { subjectId: acceptance.subjectId, subjectType: acceptance.subjectType },
+    };
     // A subject's acceptance may already hold rounds; this one has to line up
     // with them exactly as an explicit `--acceptance` round does.
     bundle = await client.acceptance.getBundle.query({ id: acceptance.id });
@@ -1197,13 +1206,15 @@ export function attachAcceptanceRunCommands(acceptance: Command): void {
     acceptance
       .command('install')
       .description('Install the latest acceptance skill source into .agents/skills/acceptance'),
-  ).action(installAction);
+  ).action((options: InstallOptions) => installAction(options, createPublicLambdaClient()));
 
   withInstallOptions(
     acceptance
       .command('update')
       .description('Download the latest skill source, replacing its files and re-wiring harnesses'),
-  ).action((options: InstallOptions) => installAction({ ...options, force: true }));
+  ).action((options: InstallOptions) =>
+    installAction({ ...options, force: true }, createPublicLambdaClient()),
+  );
 
   const run = acceptance
     .command('run')
@@ -1313,14 +1324,14 @@ export function attachDeprecatedVerifyRunAliases(verify: Command): void {
       verify.command('init').description('Deprecated — use `lh acceptance install`'),
     ),
     'lh acceptance install',
-  ).action(installAction);
+  ).action(async (options: InstallOptions) => installAction(options, await getTrpcClient()));
 
   deprecate(
     withInstallOptions(
       verify.command('install').description('Deprecated — use `lh acceptance install`'),
     ),
     'lh acceptance install',
-  ).action(installAction);
+  ).action(async (options: InstallOptions) => installAction(options, await getTrpcClient()));
 
   deprecate(
     withIngestReportOptions(

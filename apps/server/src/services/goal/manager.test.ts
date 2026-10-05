@@ -7,6 +7,7 @@ import { getTestDB } from '@/database/core/getTestDB';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { GoalModel } from '@/database/models/goal';
 import { GoalGraphModel } from '@/database/models/goalGraph';
+import { MessageModel } from '@/database/models/message';
 import { TaskModel } from '@/database/models/task';
 import {
   acceptances,
@@ -17,6 +18,7 @@ import {
   goalNodeDecisions,
   goalNodes,
   goals,
+  messages,
   tasks,
   taskTopics,
   topics,
@@ -24,6 +26,7 @@ import {
 } from '@/database/schemas';
 import { goalRouter } from '@/server/routers/lambda/goal';
 import { AiAgentService } from '@/server/services/aiAgent';
+import { TopicStartReservationError } from '@/server/services/aiAgent/topicStartReservation';
 
 import { GoalService } from './index';
 import { GoalManagerService } from './manager';
@@ -89,6 +92,7 @@ afterEach(async () => {
     goals,
     acceptances,
     agentOperations,
+    messages,
     taskTopics,
     topics,
     tasks,
@@ -104,6 +108,15 @@ async function start(maxTurns = 4) {
     createdByAgentId: agentId,
     config: { manager: { maxTurns } },
   });
+  // A manager-mode Goal predates the mandatory-supervision invariant, and the
+  // server now writes supervision onto every Goal it creates. Clear it so this
+  // file keeps covering the manager's own recovery path: with supervision on, an
+  // eligible transport failure is handled by the supervisor instead (see the
+  // `failure_decision` ordering in GoalService).
+  await db
+    .update(goals)
+    .set({ config: { manager: { maxTurns } } })
+    .where(eq(goals.id, graph.goal.id));
   expect((await service().tick(graph.goal.id)).outcome).toBe('waiting_external');
   const state = (await model().findById(graph.goal.id))!.config!.managerState!;
   const op = await ops().findByTopicSourceMessage(state.topicId, `msg_goal_manager_${state.token}`);
@@ -349,7 +362,7 @@ describe('CLI main Agent planning', () => {
       });
       const state = (await model().findById(graph.goal.id))!.config!.managerState!;
 
-      expect((await manager().usage(state)).totalCost).toBe(2);
+      expect((await manager().usage(graph.goal.id, state)).totalCost).toBe(2);
     });
 
     it('keeps the adopted run in management spend after a later turn replaces the receipt', async () => {
@@ -376,10 +389,11 @@ describe('CLI main Agent planning', () => {
         turns: 2,
       };
 
-      expect((await manager().usage(laterTurn)).totalCost).toBe(2);
+      expect((await manager().usage(graph.goal.id, laterTurn)).totalCost).toBe(2);
       // After a handoff the later turn lives on another topic; the run still counts.
       expect(
-        (await manager().usage({ ...laterTurn, topicId: 'tpc_other_supervisor' })).totalCost,
+        (await manager().usage(graph.goal.id, { ...laterTurn, topicId: 'tpc_other_supervisor' }))
+          .totalCost,
       ).toBe(2);
     });
 
@@ -562,6 +576,131 @@ describe('CLI main Agent planning', () => {
     await expect(manager().submit(id, next.token, op.id, taskPlan)).rejects.toThrow('Unrelated');
   });
 
+  it('moves the management conversation to the new agent at the handoff', async () => {
+    const { id, state, op } = await start();
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+
+    await db.insert(agents).values({ id: 'handoff-target', userId });
+    const { goal } = await service().setAgent(id, 'handoff-target');
+
+    // The row handed back to the caller already points at the new agent's topic,
+    // so the supervision panel and its "open conversation" link follow the
+    // handoff instead of staying on the previous agent until the next claim.
+    const moved = (await model().findById(id))!.config!.managerState!;
+    expect(moved.topicId).not.toBe(state.topicId);
+    expect(goal.config?.managerState?.topicId).toBe(moved.topicId);
+    const [topic] = await db.select().from(topics).where(eq(topics.id, moved.topicId));
+    expect(topic?.agentId).toBe('handoff-target');
+    expect(topic?.trigger).toBe('goal_supervision');
+    // The conversation it left behind is retained rather than orphaned.
+    expect(moved.previousTopicIds).toEqual([state.topicId]);
+  });
+
+  it('keeps counting the previous conversations in management spend', async () => {
+    const { id, state, op } = await start();
+    await db.update(agentOperations).set({ totalCost: 3 }).where(eq(agentOperations.id, op.id));
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+
+    await db.insert(agents).values({ id: 'spend-target', userId });
+    await service().setAgent(id, 'spend-target');
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+
+    const next = (await model().findById(id))!.config!.managerState!;
+    // The turn now runs in the new agent's topic; the spend already booked in
+    // the conversation it left still belongs to the goal's management budget.
+    expect(next.topicId).not.toBe(state.topicId);
+    expect((await manager().usage(id, next)).totalCost).toBe(3);
+  });
+
+  it('leaves a live turn on the previous agent topic instead of migrating mid-turn', async () => {
+    const { id, state } = await start();
+    await db.insert(agents).values({ id: 'mid-turn-target', userId });
+
+    // The first turn is dispatched but not settled: `settleInFlight` finds its
+    // run through `state.topicId`, so re-pointing now would strand it.
+    await service().setAgent(id, 'mid-turn-target');
+
+    const untouched = (await model().findById(id))!.config!.managerState!;
+    expect(untouched.topicId).toBe(state.topicId);
+    expect(untouched.previousTopicIds).toBeUndefined();
+    expect(
+      await db.select().from(topics).where(eq(topics.agentId, 'mid-turn-target')),
+    ).toHaveLength(0);
+  });
+
+  it('migrates on the next claim after a mid-turn handoff and retains the old conversation', async () => {
+    const { id, state, op } = await start();
+    await db.insert(agents).values({ id: 'late-target', userId });
+    await service().setAgent(id, 'late-target');
+
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+
+    const next = (await model().findById(id))!.config!.managerState!;
+    const [topic] = await db.select().from(topics).where(eq(topics.id, next.topicId));
+    expect(topic?.agentId).toBe('late-target');
+    // The conversation the handoff moved out of keeps counting.
+    expect(next.previousTopicIds).toEqual([state.topicId]);
+  });
+
+  it('does not charge another Goal’s turns in a shared conversation to this one', async () => {
+    const a = await start();
+    const shared = a.state.topicId;
+    // A second Goal is created from the same conversation and plans there too —
+    // the shared conversation a retained topic can turn out to be.
+    const sharedRunId = 'op-shared-conversation-run';
+    await ops().recordStart({
+      agentId,
+      appContext: { sourceMessageId: 'msg_user_second_goal' },
+      operationId: sharedRunId,
+      topicId: shared,
+    });
+    const { graph: b } = await service().createFromConversation(sharedRunId, {
+      title: 'Second goal',
+    });
+    await ops().recordCompletion(sharedRunId, { status: 'done' });
+    expect((await service().tick(b.goal.id)).outcome).toBe('advanced');
+    expect((await service().tick(b.goal.id)).outcome).toBe('waiting_external');
+    const bState = (await model().findById(b.goal.id))!.config!.managerState!;
+    const bTurn = await ops().findByTopicSourceMessage(shared, `msg_goal_manager_${bState.token}`);
+    expect(bTurn).toBeTruthy();
+    await db.update(agentOperations).set({ totalCost: 9 }).where(eq(agentOperations.id, bTurn!.id));
+
+    // A hands over, retaining the shared conversation as one it moved out of.
+    await ops().recordCompletion(a.op.id, { status: 'done' });
+    expect((await service().tick(a.id)).outcome).toBe('advanced');
+    await db.insert(agents).values({ id: 'shared-target', userId });
+    await service().setAgent(a.id, 'shared-target');
+    const retained = (await model().findById(a.id))!.config!.managerState!;
+    expect(retained.previousTopicIds).toEqual([shared]);
+
+    await db.update(agentOperations).set({ totalCost: 1 }).where(eq(agentOperations.id, a.op.id));
+    // Only A's own turn counts; the other Goal's run in the same conversation does not.
+    expect((await manager().usage(a.id, retained)).totalCost).toBe(1);
+  });
+
+  it('declines a handoff migration whose target is no longer the goal agent', async () => {
+    const { id, op } = await start();
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+    await db.insert(agents).values([
+      { id: 'first-target', userId },
+      { id: 'second-target', userId },
+    ]);
+
+    // Two overlapping handoffs: this call's migration runs after the later one
+    // has already re-assigned the Goal, so its target is stale.
+    await service().setAgent(id, 'second-target');
+    expect(await manager().moveConversationTo(id, 'first-target')).toBeUndefined();
+
+    const state = (await model().findById(id))!.config!.managerState!;
+    const [topic] = await db.select().from(topics).where(eq(topics.id, state.topicId));
+    expect(topic?.agentId).toBe('second-target');
+  });
+
   it('rejects wrong owner, operation, pause and changed graph without adding tasks', async () => {
     const { id, state, op } = await start();
     await expect(
@@ -680,6 +819,170 @@ describe('CLI main Agent planning', () => {
 
   it('retains the live turn and pauses instead of replacing an unconfirmed timed-out process', async () => {
     const { id, state } = await start();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.token).toBe(state.token);
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a timed-out turn that never started instead of pausing on it', async () => {
+    // A refused topic reservation — the planning topic was busy — is raised
+    // before the planning message or any operation is written.
+    const original = vi.mocked(AiAgentService.prototype.execAgent).getMockImplementation()!;
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async () => {
+      throw new TopicStartReservationError('Topic tpc remained busy while starting operation x');
+    });
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+    expect((await model().findById(id))!.config!.managerState!.dispatchNeverStarted).toBe(true);
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('advanced');
+    const settled = (await model().findById(id))!;
+    expect(settled.status).toBe('running');
+    expect(settled.config!.managerState!.token).toBe(state.token);
+    expect(settled.config!.managerState!.consumed).toBe(true);
+
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementation(original);
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+    const next = (await model().findById(id))!.config!.managerState!;
+    expect(next.token).not.toBe(state.token);
+    expect(next.turns).toBe(state.turns + 1);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps pausing when the planning message is deleted after a dispatch that had started', async () => {
+    // The message was written and the call failed later, so a run may be live.
+    // The owner then deletes the message from their conversation; a later
+    // lookup must not turn that into "never started".
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async (params) => {
+      await new MessageModel(db, userId).create(
+        {
+          agentId: params.agentId,
+          content: 'plan',
+          role: 'user',
+          topicId: params.appContext!.topicId!,
+        },
+        params.clientIds!.userMessageId,
+      );
+      throw new Error('Topic metadata update failed');
+    });
+    const { id, state } = await start();
+    expect(state.dispatchNeverStarted).toBeUndefined();
+    await db.delete(messages).where(eq(messages.id, `msg_goal_manager_${state.token}`));
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pausing a turn whose dispatch failed for any reason other than a refused reservation', async () => {
+    // No message and no operation, but an ordinary failure can come after a run
+    // went live; only the error decides, never the absence of rows.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async () => {
+      throw new Error('Something failed while starting');
+    });
+    const { id, state } = await start();
+    expect(state.dispatchNeverStarted).toBeUndefined();
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    expect((await model().findById(id))!.status).toBe('paused');
+  });
+
+  /**
+   * Regression: the pause asked the owner to "confirm its exit before resuming"
+   * with no way to do so, so a Goal paused on a turn recorded before the
+   * never-started verdict existed could not be resumed at all.
+   */
+  it('lets the owner confirm a stuck turn has ended and resume with a fresh one', async () => {
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(
+      async (params) =>
+        ({
+          agentId: params.agentId!,
+          operationId: 'op-lost',
+          topicId: params.appContext!.topicId!,
+        }) as any,
+    );
+    const { id, state } = await start();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    await service().tick(id);
+    expect((await model().findById(id))!.status).toBe('paused');
+
+    // A plain resume pauses again on the same turn.
+    await service().resume(id);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+
+    expect(await manager().confirmTurnExit(id)).toBe(true);
+    await service().resume(id);
+    // The settled turn no longer holds the Goal: the next advance plans afresh.
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+    expect((await model().findById(id))!.status).toBe('running');
+    const next = (await model().findById(id))!.config!.managerState!;
+    expect(next.token).not.toBe(state.token);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to confirm the exit of a turn whose run is still live', async () => {
+    const { id } = await start();
+    await expect(manager().confirmTurnExit(id)).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await model().findById(id))!.config!.managerState!.consumed).not.toBe(true);
+  });
+
+  it('keeps pausing a timed-out turn whose dispatch never reported failure', async () => {
+    // No message and no operation, but the dispatch call never ended in an
+    // error: it may still be initialising and start a paid run later, so the
+    // turn cannot be replaced.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(
+      async (params) =>
+        ({
+          agentId: params.agentId!,
+          operationId: 'op-still-starting',
+          topicId: params.appContext!.topicId!,
+        }) as any,
+    );
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.token).toBe(state.token);
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pausing a timed-out turn whose message exists but whose operation row is missing', async () => {
+    // The runtime keeps running when its operation insert fails, so a written
+    // planning message with no operation is still an unconfirmed process.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async (params) => {
+      await new MessageModel(db, userId).create(
+        {
+          agentId: params.agentId,
+          content: 'plan',
+          role: 'user',
+          topicId: params.appContext!.topicId!,
+        },
+        params.clientIds!.userMessageId,
+      );
+      throw new Error('Operation insert failed');
+    });
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
     expect((await service().tick(id)).outcome).toBe('no_progress');

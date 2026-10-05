@@ -1,5 +1,6 @@
 import { fetchAcceptanceSkillBundle } from '@lobechat/builtin-skills/acceptance';
 import {
+  normalizeEvidenceMetadata,
   normalizeVerifySurface,
   verifyRunScenarios,
   verifySurfaces,
@@ -514,7 +515,6 @@ export const verifyRouter = router({
         enableAiGeneration: z.boolean().optional(),
         goal: z.string(),
         maxAiCriteria: z.number().optional(),
-        modelConfig: modelConfigSchema.optional(),
         operationId: z.string(),
         verifyCriteriaIds: z.array(z.string()).optional(),
         verifyRubricId: z.string().nullish(),
@@ -539,7 +539,6 @@ export const verifyRouter = router({
         context: z.string().optional(),
         goal: z.string().min(1),
         maxCriteria: z.number().int().min(1).max(8).optional(),
-        modelConfig: modelConfigSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -667,10 +666,10 @@ export const verifyRouter = router({
 
   /**
    * Serve a pullable skill bundle (`SKILL.md` + inline resource files) by
-   * identifier. Keep the authenticated contract and legacy alias while sourcing
+   * identifier without authentication. Keep the legacy alias while sourcing
    * all installers from the upstream default branch (or an explicitly selected tag).
    */
-  getSkillBundle: wsCompatProcedure
+  getSkillBundle: publicProcedure
     .input(
       z.object({
         identifier: z.string(),
@@ -969,7 +968,7 @@ export const verifyRouter = router({
         content: input.content ?? null,
         description: input.description ?? null,
         fileId: input.fileId ?? null,
-        metadata: input.metadata ?? null,
+        metadata: normalizeEvidenceMetadata(input.metadata, input.type) ?? null,
         type: input.type,
       });
     }),

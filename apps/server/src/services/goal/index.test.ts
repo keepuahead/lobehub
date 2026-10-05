@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { GOAL_COORDINATOR_ACTOR_ID } from '@lobechat/const/goal';
+import { DEVICE_OFFLINE_RUN_STATUS, GOAL_COORDINATOR_ACTOR_ID } from '@lobechat/const/goal';
+import type { ChatTopicMetadata } from '@lobechat/types';
 import * as goalGraphUtils from '@lobechat/utils/goalGraph';
 import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +18,7 @@ import {
   acceptances,
   agentOperations,
   agents,
+  documents,
   goalEdges,
   goalEvents,
   goalNodeDecisions,
@@ -28,6 +30,7 @@ import {
   taskTopics,
   topics,
   users,
+  workspaces,
 } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 import { AgentRuntimeCoordinator } from '@/server/modules/AgentRuntime/AgentRuntimeCoordinator';
@@ -44,7 +47,7 @@ import {
 } from './decideNextMove';
 import { GoalExplorationPlanner } from './explorationPlanner';
 import { GoalService } from './index';
-import { VERIFY_SETTLE_GRACE_MS } from './recoveryPolicy';
+import { DEVICE_OFFLINE_GATE_REASON, VERIFY_SETTLE_GRACE_MS } from './recoveryPolicy';
 import { TaskRecoveryCoordinator } from './taskRecoveryCoordinator';
 import type { GoalTickObservation } from './traceObservation';
 
@@ -76,6 +79,28 @@ afterEach(async () => {
 });
 
 describe('GoalService', () => {
+  it('supervises every Goal it creates, even when the caller omits the policy', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ title: 'Supervised by default' });
+    expect(graph.goal.config?.supervision).toMatchObject({ enabled: true });
+  });
+
+  it('keeps the caller incident cap while forcing supervision on', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      config: { supervision: { enabled: true, maxIncidents: 4 } },
+      title: 'Capped supervision',
+    });
+    expect(graph.goal.config?.supervision).toEqual({ enabled: true, maxIncidents: 4 });
+  });
+
+  it('rejects a caller that tries to create an unsupervised Goal', async () => {
+    const service = new GoalService(serverDB, userId);
+    await expect(
+      service.create({ config: { supervision: { enabled: false } }, title: 'No supervision' }),
+    ).rejects.toThrow('Supervision is required for every goal and cannot be disabled');
+  });
+
   it('explores after result settlement and dispatches the new graph node through the ordinary Task path', async () => {
     const service = new GoalService(serverDB, userId);
     const graph = await service.create({
@@ -675,6 +700,151 @@ describe('GoalService', () => {
       (link) => link.nodeId === created.nodeId && link.work?.title === 'Delivered once',
     );
     expect(delivered).toHaveLength(1);
+    // The execution container is claimed once per node too, not once per
+    // settle: re-linking the completed version added a second identical row for
+    // the same task, which is where half of a goal's Work links came from.
+    expect(
+      snapshot.workVersions.filter(
+        (link) => link.nodeId === created.nodeId && link.work?.type === 'task',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not declare a shared document a task only revised', async () => {
+    // A backlog document every task appends to used to be declared as the
+    // output of every task that touched it, because a Work registered during a
+    // run counted as that run's deliverable. Only a Work one of the task's own
+    // runs created is one; a revision is not a delivery.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const workModel = new WorkModel(serverDB, userId);
+    const graph = await service.create({
+      tasks: ['Deliver me'],
+      title: 'Revisions are not deliveries',
+    });
+    const created = await service.tick(graph.goal.id);
+    const [backlog] = await serverDB
+      .insert(documents)
+      .values({
+        content: 'Shared backlog body',
+        fileType: 'markdown',
+        filename: 'Shared backlog',
+        source: 'notebook',
+        sourceType: 'api',
+        title: 'Shared backlog',
+        totalCharCount: 19,
+        totalLineCount: 1,
+        userId,
+      })
+      .returning();
+    // Written by an earlier task's run; this task only appends to it.
+    await workModel.registerDocument({
+      changeType: 'created',
+      documentId: backlog.id,
+      rootOperationId: 'op-wrote-it-first',
+      toolIdentifier: 'lobehub-notebook',
+      toolName: 'createDocument',
+    });
+    await serverDB.insert(taskTopics).values({
+      handoff: { summary: 'Delivered', title: 'Delivered title' },
+      operationId: 'op-delivered',
+      seq: 1,
+      status: 'completed',
+      taskId: created.taskId!,
+      userId,
+    });
+    await workModel.registerDocument({
+      changeType: 'updated',
+      documentId: backlog.id,
+      rootOperationId: 'op-delivered',
+      toolIdentifier: 'lobe-agent-documents',
+      toolName: 'modifyNodes',
+    });
+    await taskModel.updateStatus(created.taskId!, 'completed');
+
+    await service.tick(graph.goal.id);
+
+    const snapshot = await service.graph(graph.goal.id);
+    expect(
+      snapshot.workVersions.filter(
+        (link) => link.nodeId === created.nodeId && link.work?.resourceId === backlog.id,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('declares a deliverable once, on the node that delivered it', async () => {
+    // The flare case behind the reported duplicate deliverables: one document
+    // delivered by a node, then written again by another node's run, appeared
+    // as a deliverable of both.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const workModel = new WorkModel(serverDB, userId);
+    const graph = await service.create({
+      tasks: ['First delivery', 'Second delivery'],
+      title: 'One claim per deliverable',
+    });
+    const [backlog] = await serverDB
+      .insert(documents)
+      .values({
+        content: 'Shared backlog body',
+        fileType: 'markdown',
+        filename: 'Shared backlog',
+        source: 'notebook',
+        sourceType: 'api',
+        title: 'Shared backlog',
+        totalCharCount: 19,
+        totalLineCount: 1,
+        userId,
+      })
+      .returning();
+
+    const first = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values({
+      handoff: { summary: 'Delivered', title: 'Delivered title' },
+      operationId: 'op-first',
+      seq: 1,
+      status: 'completed',
+      taskId: first.taskId!,
+      userId,
+    });
+    await workModel.registerDocument({
+      changeType: 'created',
+      documentId: backlog.id,
+      rootOperationId: 'op-first',
+      toolIdentifier: 'lobe-agent-documents',
+      toolName: 'createDocument',
+    });
+    await taskModel.updateStatus(first.taskId!, 'completed');
+    await service.tick(graph.goal.id);
+
+    const second = await service.tick(graph.goal.id);
+    expect(second.taskId).toBeTruthy();
+    await serverDB.insert(taskTopics).values({
+      handoff: { summary: 'Delivered again', title: 'Delivered again' },
+      operationId: 'op-second',
+      seq: 1,
+      status: 'completed',
+      taskId: second.taskId!,
+      userId,
+    });
+    // The second node's run writes the same document (a new version of the same
+    // Work), which is what a shared backlog looks like from the graph's side.
+    await workModel.registerDocument({
+      changeType: 'created',
+      documentId: backlog.id,
+      rootOperationId: 'op-second',
+      toolIdentifier: 'lobehub-notebook',
+      toolName: 'createDocument',
+    });
+    await taskModel.updateStatus(second.taskId!, 'completed');
+    await service.tick(graph.goal.id);
+
+    const snapshot = await service.graph(graph.goal.id);
+    const claims = snapshot.workVersions.filter(
+      (link) => link.work?.resourceId === backlog.id && link.relation === 'produced',
+    );
+    expect(claims).toHaveLength(1);
+    expect(claims[0].nodeId).toBe(first.nodeId);
   });
 
   it('leaves a fresh dispatch claim alone', async () => {
@@ -1093,6 +1263,204 @@ describe('GoalService', () => {
     vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
     const next = await service.tick(graph.goal.id);
     expect(next.outcome).not.toBe('waiting_human');
+  });
+
+  it('retires a stray node only together with the unfinished tasks depending on it', async () => {
+    // A duplicated plan branch never gets a Task, so nothing else ever closes it
+    // and the goal can never reach acceptance.
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ tasks: ['First', 'Second', 'Keep'], title: 'Duplicates' });
+    const [first, second, keep] = ['First', 'Second', 'Keep'].map((title) =>
+      graph.nodes.find((node) => node.kind === 'task' && node.title === title)!,
+    );
+    await service.addEdge(graph.goal.id, second.id, first.id, 'depends_on');
+
+    await expect(service.retireNodes(graph.goal.id, [first.id])).rejects.toThrow(second.id);
+
+    const result = await service.retireNodes(graph.goal.id, [first.id, second.id], 'duplicate');
+
+    expect(result.retiredNodeIds.sort()).toEqual([first.id, second.id].sort());
+    const after = await service.graph(graph.goal.id);
+    const status = (id: string) => after.nodes.find((node) => node.id === id)?.status;
+    expect(status(first.id)).toBe('retired');
+    expect(status(second.id)).toBe('retired');
+    expect(status(keep.id)).not.toBe('retired');
+  });
+
+  it('retiring a dispatched node cancels its task and the gate parking the goal', async () => {
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Canceled elsewhere'], title: 'Stray gate' });
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'paused', { error: 'Task canceled' });
+    expect((await service.tick(graph.goal.id)).outcome).toBe('waiting_human');
+
+    await service.retireNodes(graph.goal.id, [created.nodeId!]);
+
+    expect((await taskModel.findById(created.taskId!))?.status).toBe('canceled');
+    const after = await service.graph(graph.goal.id);
+    expect(after.decisions[0].status).toBe('canceled');
+    expect(after.goal.status).toBe('running');
+  });
+
+  it('retiring a node fences it against a coordinator still creating its task', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graphModel = new GoalGraphModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Stray', 'Keep'], title: 'Retire race' });
+    const stray = graph.nodes.find((node) => node.kind === 'task' && node.title === 'Stray')!;
+    // A tick has claimed the node and is creating its Task when retirement lands.
+    expect(await graphModel.claimTaskNode(graph.goal.id, stray.id, new Date(0))).toBeDefined();
+
+    await service.retireNodes(graph.goal.id, [stray.id]);
+
+    const lateTask = await new TaskModel(serverDB, userId).create({ instruction: 'Late' });
+    expect(await graphModel.bindTask(graph.goal.id, stray.id, lateTask.id)).toBeUndefined();
+    const after = await service.graph(graph.goal.id);
+    expect(after.nodes.find((node) => node.id === stray.id)?.status).toBe('retired');
+  });
+
+  it("stops a colleague's private task when a workspace owner retires its node", async () => {
+    // The coordinator runs as the goal's owner, so its Tasks can be private to
+    // that colleague. An owner retiring the node must still stop them — reads
+    // under the owner's own visibility would silently miss them.
+    const workspaceId = 'goal-retire-private-ws';
+    const ownerId = 'goal-retire-private-owner';
+    await serverDB.insert(users).values({ id: ownerId }).onConflictDoNothing();
+    await serverDB
+      .insert(workspaces)
+      .values({ id: workspaceId, name: workspaceId, primaryOwnerId: ownerId, slug: workspaceId })
+      .onConflictDoNothing();
+    const colleague = new GoalService(serverDB, userId, workspaceId);
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const graph = await colleague.create({ tasks: ['Private', 'Keep'], title: 'Private retire' });
+    const created = await colleague.tick(graph.goal.id);
+    await serverDB
+      .update(tasks)
+      .set({ status: 'running', visibility: 'private' })
+      .where(eq(tasks.id, created.taskId!));
+    expect(
+      await new TaskModel(serverDB, ownerId, workspaceId).findById(created.taskId!),
+    ).toBeFalsy();
+
+    await new GoalService(serverDB, ownerId, workspaceId).retireNodes(graph.goal.id, [
+      created.nodeId!,
+    ]);
+
+    const [task] = await serverDB.select().from(tasks).where(eq(tasks.id, created.taskId!));
+    expect(task.status).toBe('canceled');
+  });
+
+  it('cancels a running task before looking for its runs, fencing a run still being dispatched', async () => {
+    // A runner that already flipped the Task to `running` but has not recorded
+    // its topic yet is invisible to the run lookup. It checks the Task's status
+    // under the row lock before recording, so the cancellation must already be
+    // committed by the time retirement looks for runs to stop.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Dispatching', 'Keep'], title: 'Fence runs' });
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'running');
+    const statusAtLookup: (string | undefined)[] = [];
+    const original = TaskTopicModel.prototype.findRunningByTaskIds;
+    vi.spyOn(TaskTopicModel.prototype, 'findRunningByTaskIds').mockImplementation(async function (
+      this: TaskTopicModel,
+      ids: string[],
+    ) {
+      statusAtLookup.push((await taskModel.findById(created.taskId!))?.status);
+      return original.call(this, ids);
+    });
+
+    await service.retireNodes(graph.goal.id, [created.nodeId!]);
+
+    expect(statusAtLookup).toEqual(['canceled']);
+    expect((await taskModel.findById(created.taskId!))?.status).toBe('canceled');
+  });
+
+  it('lets an interrupted retirement be finished by retrying it', async () => {
+    // The fence lands before the run is stopped; when stopping it cannot be
+    // confirmed the call fails with the node already retired. A retry must
+    // still stop the task instead of rejecting the node as terminal.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Running', 'Keep'], title: 'Retry retire' });
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const created = await service.tick(graph.goal.id);
+    vi.spyOn(TaskTopicModel.prototype, 'findRunningByTaskIds').mockResolvedValue([
+      { taskId: created.taskId!, topicId: 'tpc_running' },
+    ] as never);
+    const cancelTopic = vi
+      .spyOn(TaskService.prototype, 'cancelTopic')
+      .mockRejectedValueOnce(new Error('interrupt not confirmed'))
+      .mockResolvedValue(undefined as never);
+
+    await expect(service.retireNodes(graph.goal.id, [created.nodeId!])).rejects.toThrow(
+      'interrupt not confirmed',
+    );
+    expect(
+      (await service.graph(graph.goal.id)).nodes.find((node) => node.id === created.nodeId)?.status,
+    ).toBe('retired');
+
+    const retried = await service.retireNodes(graph.goal.id, [created.nodeId!]);
+
+    expect(retried.retiredNodeIds).toEqual([created.nodeId]);
+    expect(cancelTopic).toHaveBeenCalledTimes(2);
+    expect((await taskModel.findById(created.taskId!))?.status).toBe('canceled');
+  });
+
+  it('discards a stale tick outcome for a node retired while it ran', async () => {
+    const service = new GoalService(serverDB, userId);
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const graph = await service.create({ tasks: ['Stray', 'Keep'], title: 'Stale tick' });
+    const created = await service.tick(graph.goal.id);
+    // The coordinator loaded this snapshot before the retirement landed.
+    const stale = await service.graph(graph.goal.id);
+    await service.retireNodes(graph.goal.id, [created.nodeId!]);
+
+    const result = await (service as any).consumeCompletedTask(
+      stale,
+      created.nodeId!,
+      created.taskId!,
+    );
+
+    expect(result.outcome).toBe('no_progress');
+    const after = await service.graph(graph.goal.id);
+    expect(after.nodes.find((node) => node.id === created.nodeId)?.status).toBe('retired');
+    expect(after.nodes.some((node) => node.kind === 'finding')).toBe(false);
+  });
+
+  it('reopens a goal parked by no_frontier once the blocking nodes are retired', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ tasks: ['A', 'B', 'Keep'], title: 'Deadlocked branch' });
+    const [a, b] = ['A', 'B'].map((title) =>
+      graph.nodes.find((node) => node.kind === 'task' && node.title === title)!,
+    );
+    const graphModel = new GoalGraphModel(serverDB, userId);
+    await graphModel.createEdge(graph.goal.id, a.id, b.id, 'depends_on');
+    await graphModel.createEdge(graph.goal.id, b.id, a.id, 'depends_on');
+    const keep = graph.nodes.find((node) => node.kind === 'task' && node.title === 'Keep')!;
+    await graphModel.updateNodeStatus(graph.goal.id, keep.id, 'resolved');
+    await service.tick(graph.goal.id); // deadlock → no_frontier → paused
+    expect((await service.graph(graph.goal.id)).goal.status).toBe('paused');
+
+    await service.retireNodes(graph.goal.id, [a.id, b.id]);
+
+    expect((await service.graph(graph.goal.id)).goal.status).toBe('running');
+  });
+
+  it('leaves a user-paused goal paused when nodes are retired', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ tasks: ['A', 'B'], title: 'Paused by a person' });
+    const [a, b] = graph.nodes.filter((node) => node.kind === 'task');
+    const graphModel = new GoalGraphModel(serverDB, userId);
+    await graphModel.createEdge(graph.goal.id, a.id, b.id, 'depends_on');
+    await graphModel.createEdge(graph.goal.id, b.id, a.id, 'depends_on');
+    await service.tick(graph.goal.id); // no_frontier park
+    await service.pause(graph.goal.id); // the person takes the pause over
+
+    await service.retireNodes(graph.goal.id, [a.id, b.id]);
+
+    expect((await service.graph(graph.goal.id)).goal.status).toBe('paused');
   });
 
   it('leaves a deliberately paused goal paused when its budget changes', async () => {
@@ -3134,28 +3502,274 @@ describe('GoalService', () => {
       expect((await service.graph(graph.goal.id)).decisions).toHaveLength(0);
     });
 
-    it('asks a person once the device has been gone past the reconnect window', async () => {
+    it('retries on the offline schedule even while the device still looks offline', async () => {
       vi.spyOn(deviceGateway, 'queryDeviceList').mockResolvedValue([]);
-      const { created, graph, service } = await setup('Device gone for good');
+      const runSpy = vi
+        .spyOn(TaskRunnerService.prototype, 'runTask')
+        .mockResolvedValue({ operationId: 'op-on-schedule', success: true } as never);
+      const { created, graph, service } = await setup('Device gone past the first backoff');
       await serverDB
         .update(tasks)
-        .set({ updatedAt: new Date(Date.now() - 13 * 60 * 60 * 1000) })
+        .set({ updatedAt: new Date(Date.now() - 31 * 60 * 1000) })
         .where(eq(tasks.id, created.taskId!));
 
-      const gated = await service.tick(graph.goal.id);
+      const retried = await service.tick(graph.goal.id);
 
-      expect(gated).toMatchObject({ outcome: 'waiting_human', taskId: created.taskId });
+      expect(runSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: created.taskId, trigger: 'goal' }),
+      );
+      expect(retried).toMatchObject({ outcome: 'waiting_external', taskId: created.taskId });
+      expect((await service.graph(graph.goal.id)).decisions).toHaveLength(0);
     });
 
-    it('does not wait on a deployment without a device gateway', async () => {
+    it('waits out the backoff without presence on a deployment without a device gateway', async () => {
       const listSpy = vi.spyOn(deviceGateway, 'queryDeviceList');
+      const runSpy = vi.spyOn(TaskRunnerService.prototype, 'runTask');
       const { created, graph, service } = await setup('Self-hosted without devices');
       vi.spyOn(deviceGateway, 'isConfigured', 'get').mockReturnValue(false);
 
-      const gated = await service.tick(graph.goal.id);
+      const waiting = await service.tick(graph.goal.id);
 
       expect(listSpy).not.toHaveBeenCalled();
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(waiting).toMatchObject({ outcome: 'waiting_external', taskId: created.taskId });
+    });
+  });
+
+  describe('a Task whose runs its device lost', () => {
+    const MINUTE = 60 * 1000;
+    const HOUR = 60 * MINUTE;
+
+    const setup = async (title: string, maxAttemptsPerTask: number) => {
+      vi.spyOn(deviceGateway, 'isConfigured', 'get').mockReturnValue(true);
+      vi.spyOn(deviceGateway, 'queryDeviceList').mockResolvedValue([]);
+      const runSpy = vi
+        .spyOn(TaskRunnerService.prototype, 'runTask')
+        .mockResolvedValue({ operationId: 'op-retry', success: true } as never);
+      const service = new GoalService(serverDB, userId);
+      const taskModel = new TaskModel(serverDB, userId);
+      const graph = await service.create({
+        config: { recovery: { maxAttemptsPerTask, operationLeaseTimeoutMs: 60_000 } },
+        title,
+        tasks: ['Run on the laptop'],
+      });
+      const created = await service.tick(graph.goal.id);
+      runSpy.mockClear();
+      return { created, graph, runSpy, service, taskModel };
+    };
+
+    const addRun = async (
+      taskId: string,
+      seq: number,
+      status: string,
+      options: { metadata?: ChatTopicMetadata; operationId?: string; updatedAt?: Date } = {},
+    ) => {
+      const topicId = `tpc_offline_${seq}`;
+      await serverDB.insert(topics).values({ id: topicId, metadata: options.metadata, userId });
+      await serverDB.insert(taskTopics).values({
+        operationId: options.operationId,
+        seq,
+        status,
+        taskId,
+        topicId,
+        userId,
+        ...(options.updatedAt && { updatedAt: options.updatedAt }),
+      });
+      return topicId;
+    };
+
+    /** `count` consecutive offline runs, the newest `sinceLast` ago. */
+    const addOfflineRuns = async (taskId: string, count: number, sinceLast: number) => {
+      for (let seq = 1; seq <= count; seq++) {
+        await addRun(taskId, seq, DEVICE_OFFLINE_RUN_STATUS, {
+          updatedAt: new Date(Date.now() - sinceLast - (count - seq) * HOUR),
+        });
+      }
+    };
+
+    const decisionReasons = async (service: GoalService, goalId: string) =>
+      (await service.graph(goalId)).nodes
+        .filter((node) => node.kind === 'decision')
+        .map((node) => node.description);
+
+    it('does not charge a run lost while its device was offline to the attempt budget', async () => {
+      const { created, graph, runSpy, service, taskModel } = await setup(
+        'Laptop went offline mid-run',
+        1,
+      );
+      await taskModel.update(created.taskId!, { totalTopics: 1 });
+      await taskModel.updateStatus(created.taskId!, 'running');
+      const operationModel = new AgentOperationModel(serverDB, userId);
+      await operationModel.recordStart({ operationId: 'op-lost', taskId: created.taskId });
+      await serverDB
+        .update(agentOperations)
+        .set({ updatedAt: new Date('2026-01-01T00:00:00.000Z') })
+        .where(eq(agentOperations.id, 'op-lost'));
+      const topicId = await addRun(created.taskId!, 1, 'running', {
+        metadata: {
+          runningOperation: {
+            assistantMessageId: 'msg-lost',
+            deviceId: 'device-laptop',
+            operationId: 'op-lost',
+          },
+        },
+        operationId: 'op-lost',
+      });
+
+      const waiting = await service.tick(graph.goal.id);
+
+      expect(waiting).toMatchObject({
+        message: expect.stringContaining('waiting for its device to reconnect'),
+        outcome: 'waiting_external',
+        taskId: created.taskId,
+      });
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(await decisionReasons(service, graph.goal.id)).toHaveLength(0);
+      const [lost] = await new TaskTopicModel(serverDB, userId).findByTaskId(created.taskId!);
+      expect(lost.status).toBe(DEVICE_OFFLINE_RUN_STATUS);
+
+      // Once the first backoff has passed, the retry goes out on the budget the
+      // lost run did not spend.
+      await serverDB
+        .update(taskTopics)
+        .set({ updatedAt: new Date(Date.now() - 31 * MINUTE) })
+        .where(eq(taskTopics.topicId, topicId));
+      await service.tick(graph.goal.id);
+
+      expect(runSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: created.taskId, trigger: 'goal' }),
+      );
+      expect(await decisionReasons(service, graph.goal.id)).toHaveLength(0);
+    });
+
+    it('still charges a lost run whose device is online when it is reclaimed', async () => {
+      const { created, graph, runSpy, service, taskModel } = await setup(
+        'Run died on a connected laptop',
+        1,
+      );
+      vi.spyOn(deviceGateway, 'queryDeviceList').mockResolvedValue([
+        { deviceId: 'device-laptop' } as never,
+      ]);
+      await taskModel.update(created.taskId!, { totalTopics: 1 });
+      await taskModel.updateStatus(created.taskId!, 'running');
+      const operationModel = new AgentOperationModel(serverDB, userId);
+      await operationModel.recordStart({ operationId: 'op-died', taskId: created.taskId });
+      await serverDB
+        .update(agentOperations)
+        .set({ updatedAt: new Date('2026-01-01T00:00:00.000Z') })
+        .where(eq(agentOperations.id, 'op-died'));
+      await addRun(created.taskId!, 1, 'running', {
+        metadata: { boundDeviceId: 'device-laptop' },
+        operationId: 'op-died',
+      });
+
+      const gated = await service.tick(graph.goal.id);
+
       expect(gated).toMatchObject({ outcome: 'waiting_human', taskId: created.taskId });
+      expect(runSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { before: 29 * MINUTE, after: 31 * MINUTE, offlineRuns: 1, schedule: '30min' },
+      { before: 59 * MINUTE, after: 61 * MINUTE, offlineRuns: 2, schedule: '1h' },
+      { before: 119 * MINUTE, after: 121 * MINUTE, offlineRuns: 3, schedule: '2h' },
+      { before: 7 * HOUR + 59 * MINUTE, after: 8 * HOUR + MINUTE, offlineRuns: 5, schedule: '8h' },
+      {
+        before: 7 * HOUR + 59 * MINUTE,
+        after: 8 * HOUR + MINUTE,
+        offlineRuns: 6,
+        schedule: '8h (capped)',
+      },
+    ])(
+      'waits $schedule after offline run $offlineRuns before retrying',
+      async ({ after, before, offlineRuns }) => {
+        const { created, graph, runSpy, service, taskModel } = await setup(
+          `Offline backoff ${offlineRuns}`,
+          1,
+        );
+        await taskModel.update(created.taskId!, { totalTopics: offlineRuns });
+        await addOfflineRuns(created.taskId!, offlineRuns, before);
+        await taskModel.updateStatus(created.taskId!, 'paused', { error: 'DEVICE_OFFLINE' });
+
+        const waiting = await service.tick(graph.goal.id);
+        expect(waiting).toMatchObject({ outcome: 'waiting_external', taskId: created.taskId });
+        expect(runSpy).not.toHaveBeenCalled();
+
+        await serverDB
+          .update(taskTopics)
+          .set({ updatedAt: new Date(Date.now() - after) })
+          .where(eq(taskTopics.topicId, `tpc_offline_${offlineRuns}`));
+        await service.tick(graph.goal.id);
+
+        expect(runSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ taskId: created.taskId, trigger: 'goal' }),
+        );
+        expect(await decisionReasons(service, graph.goal.id)).toHaveLength(0);
+      },
+    );
+
+    it('retries at once when presence shows the device back before the backoff ends', async () => {
+      const { created, graph, runSpy, service, taskModel } = await setup('Laptop woke up', 1);
+      vi.spyOn(deviceGateway, 'queryDeviceList').mockResolvedValue([
+        { deviceId: 'device-laptop' } as never,
+      ]);
+      await taskModel.update(created.taskId!, { totalTopics: 1 });
+      await addRun(created.taskId!, 1, DEVICE_OFFLINE_RUN_STATUS, {
+        metadata: { boundDeviceId: 'device-laptop' },
+      });
+      await taskModel.updateStatus(created.taskId!, 'paused', { error: 'DEVICE_OFFLINE' });
+
+      await service.tick(graph.goal.id);
+
+      expect(runSpy).toHaveBeenCalledOnce();
+    });
+
+    it('asks a person once every offline retry found the device gone', async () => {
+      const { created, graph, runSpy, service, taskModel } = await setup(
+        'Laptop never came back',
+        1,
+      );
+      await taskModel.update(created.taskId!, { totalTopics: 7 });
+      await addOfflineRuns(created.taskId!, 7, 10 * HOUR);
+      await taskModel.updateStatus(created.taskId!, 'paused', { error: 'DEVICE_OFFLINE' });
+
+      const gated = await service.tick(graph.goal.id);
+
+      expect(gated).toMatchObject({ outcome: 'waiting_human', taskId: created.taskId });
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(await decisionReasons(service, graph.goal.id)).toEqual([DEVICE_OFFLINE_GATE_REASON]);
+    });
+
+    it('keeps charging verification-rejected attempts to the budget', async () => {
+      const { created, graph, runSpy, service, taskModel } = await setup(
+        'Rejections still count',
+        2,
+      );
+      await addRun(created.taskId!, 1, DEVICE_OFFLINE_RUN_STATUS);
+      await addRun(created.taskId!, 2, 'completed');
+      await taskModel.update(created.taskId!, { totalTopics: 2 });
+      await taskModel.updateStatus(created.taskId!, 'paused', {
+        error: VERIFICATION_FAILED_ERROR,
+      });
+
+      // One offline run and one rejection: only the rejection is charged.
+      await service.tick(graph.goal.id);
+      expect(runSpy).toHaveBeenCalledOnce();
+
+      await addRun(created.taskId!, 3, 'completed');
+      await taskModel.update(created.taskId!, { totalTopics: 3 });
+      await taskModel.updateStatus(created.taskId!, 'paused', {
+        error: VERIFICATION_FAILED_ERROR,
+      });
+      runSpy.mockClear();
+
+      const gated = await service.tick(graph.goal.id);
+
+      expect(gated).toMatchObject({ outcome: 'waiting_human', taskId: created.taskId });
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(await decisionReasons(service, graph.goal.id)).toEqual([
+        'Task attempt budget was exhausted',
+      ]);
     });
   });
 

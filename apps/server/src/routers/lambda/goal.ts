@@ -490,6 +490,38 @@ export const goalRouter = router({
       }
     }),
 
+  retireNodes: goalWriteProcedure
+    .input(
+      idInput.extend({
+        nodeIds: z.array(z.string().uuid()).min(1),
+        reason: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        // Same ownership rule as restart/delete: retiring cancels the nodes'
+        // Tasks and recovery gates, so visibility is not manageability.
+        const goal = await ctx.goalModel.findById(input.id);
+        if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+        assertWorkspaceRowManageable(ctx, goal.userId, 'goal');
+
+        const data = await ctx.goalService.retireNodes(input.id, input.nodeIds, input.reason);
+        // Retiring can unpark the goal or clear the last unfinished task. Advance
+        // as the goal's owner: a workspace owner retiring a colleague's nodes
+        // cannot see that colleague's private Tasks, so an advance under the
+        // caller would read their bound nodes as `missing_task`.
+        await scheduleGoalAdvance({
+          goalId: input.id,
+          trigger: 'manual',
+          userId: goal.userId,
+          workspaceId: ctx.workspaceId ?? undefined,
+        });
+        return { data, message: `Retired ${data.retiredNodeIds.length} node(s)`, success: true };
+      } catch (error) {
+        mapGoalError(error, 'retireNodes');
+      }
+    }),
+
   /** Declare or clear the numeric clauses gating this goal's acceptance. */
   setMetricCriteria: goalWriteProcedure
     .input(
@@ -654,26 +686,42 @@ export const goalRouter = router({
     }
   }),
 
-  resume: goalWriteProcedure.input(idInput).mutation(async ({ ctx, input }) => {
-    try {
-      const data = await ctx.goalService.resume(input.id);
-      await scheduleGoalAdvance({
-        goalId: input.id,
-        trigger: 'resume',
-        userId: ctx.userId,
-        workspaceId: ctx.workspaceId ?? undefined,
-      });
-      // Resuming does not give the main Agent more turns, so a goal it paused
-      // for running out would stop again on the next tick. Say how to continue
-      // it instead of leaving the caller to replace it with a new goal.
-      const message = managerTurnsSpent(data.config)
-        ? `Goal resumed, but its main Agent has used all ${data.config?.manager?.maxTurns ?? DEFAULT_MANAGER_MAX_TURNS} turns and it will pause again. Raise the cap with: lh goal set-budget ${input.id} --max-manager-turns <n>`
-        : 'Goal resumed';
-      return { data, message, success: true };
-    } catch (error) {
-      mapGoalError(error, 'resume');
-    }
-  }),
+  resume: goalWriteProcedure
+    .input(
+      idInput.extend({
+        /**
+         * The owner confirms the planning turn the Goal paused on has ended, so
+         * it is settled before resuming instead of pausing the Goal again.
+         */
+        confirmExit: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        if (input.confirmExit)
+          await new GoalManagerService(
+            ctx.serverDB,
+            ctx.userId,
+            ctx.workspaceId ?? undefined,
+          ).confirmTurnExit(input.id);
+        const data = await ctx.goalService.resume(input.id);
+        await scheduleGoalAdvance({
+          goalId: input.id,
+          trigger: 'resume',
+          userId: ctx.userId,
+          workspaceId: ctx.workspaceId ?? undefined,
+        });
+        // Resuming does not give the main Agent more turns, so a goal it paused
+        // for running out would stop again on the next tick. Say how to continue
+        // it instead of leaving the caller to replace it with a new goal.
+        const message = managerTurnsSpent(data.config)
+          ? `Goal resumed, but its main Agent has used all ${data.config?.manager?.maxTurns ?? DEFAULT_MANAGER_MAX_TURNS} turns and it will pause again. Raise the cap with: lh goal set-budget ${input.id} --max-manager-turns <n>`
+          : 'Goal resumed';
+        return { data, message, success: true };
+      } catch (error) {
+        mapGoalError(error, 'resume');
+      }
+    }),
 
   /**
    * Start every unfinished Task node over (cancel stale runs, back to

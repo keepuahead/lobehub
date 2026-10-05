@@ -10,6 +10,7 @@ import type {
 } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { eq, sql } from 'drizzle-orm';
+import pMap from 'p-map';
 import { z } from 'zod';
 
 import { TopicTrigger } from '@/const/topic';
@@ -22,8 +23,9 @@ import { TopicModel } from '@/database/models/topic';
 import { goals } from '@/database/schemas/goal';
 import type { LobeChatDatabase } from '@/database/type';
 import { AiAgentService } from '@/server/services/aiAgent';
+import { TopicStartReservationError } from '@/server/services/aiAgent/topicStartReservation';
 
-import { DEFAULT_MANAGER_MAX_TURNS } from './recoveryPolicy';
+import { countDeviceOfflineRuns, DEFAULT_MANAGER_MAX_TURNS } from './recoveryPolicy';
 import { scheduleGoalAdvance } from './scheduler';
 import { recoveryEligibility } from './supervisor/policy';
 
@@ -72,6 +74,17 @@ const terminalNodes = new Set(['resolved', 'retired', 'rejected']);
 const TIMEOUT_MS = 20 * 60_000;
 /** Source message id prefix of a dispatched planning turn; the suffix is its token. */
 const MANAGER_SOURCE_MESSAGE_PREFIX = 'msg_goal_manager_';
+
+/**
+ * The token a planning turn is keyed by, carrying the Goal it belongs to.
+ *
+ * The source message `msg_goal_manager_<token>` is the only durable link from a
+ * manager operation back to its Goal, so the Goal id has to sit inside it for
+ * management spend to be attributable. Without it, a conversation this Goal was
+ * moved out of — which can be a normal conversation that later supervised
+ * another Goal — would charge that other Goal's turns to this one's budget.
+ */
+const managerTurnToken = (goalId: string) => `${goalId}_${randomUUID()}`;
 
 /** Excludes only the manager's own receipt. Concurrent policy/graph changes invalidate its plan. */
 export const managerSnapshot = (graph: GoalGraphSnapshot) => {
@@ -125,7 +138,7 @@ export class GoalManagerService {
     private readonly workspaceId?: string,
   ) {}
 
-  usage = async (state?: GoalManagerState) => {
+  usage = async (goalId: string, state?: GoalManagerState) => {
     // The planning topic can be the user's own conversation (`/goal`), so only
     // manager turns count as management spend: the dispatched ones by their
     // server-minted source message, the adopted one by its operation id. The
@@ -135,13 +148,35 @@ export class GoalManagerService {
     // Later receipts replace `adopted` / `operationId`, so the adopted run is
     // read from the id every receipt carries forward.
     const adoptedId = state.adoptedOperationId ?? (state.adopted ? state.operationId : undefined);
-    const operations = (await model.listByTopic(state.topicId, 100)).filter(
-      (op) =>
-        op.appContext?.sourceMessageId?.startsWith(MANAGER_SOURCE_MESSAGE_PREFIX) ||
-        op.id === adoptedId,
+    // A handoff moves later turns to the new agent's topic; the turns already
+    // spent in the conversations it left behind still belong to the Goal, so
+    // they are summed too instead of dropping out of its budget.
+    const goalTokenPrefix = `${MANAGER_SOURCE_MESSAGE_PREFIX}${goalId}_`;
+    // One read per conversation the Goal planned in. The list grows with every
+    // handoff, so the fan-out is capped rather than left to the history length.
+    const reads = await pMap(
+      [state.topicId, ...(state.previousTopicIds ?? [])],
+      async (topicId, index) => ({
+        current: index === 0,
+        operations: await model.listByTopic(topicId, 100),
+      }),
+      { concurrency: 5 },
     );
-    // A handoff moves later turns to the new agent's topic; the adopted run
-    // stays on the original conversation and still counts.
+    const operations = reads.flatMap(({ current, operations: topicOperations }) =>
+      topicOperations.filter((op) => {
+        if (op.id === adoptedId) return true;
+        const source = op.appContext?.sourceMessageId;
+        // The Goal's own conversation keeps the historical prefix match: a turn
+        // dispatched before the token carried the Goal id has no marker to match.
+        if (current) return source?.startsWith(MANAGER_SOURCE_MESSAGE_PREFIX);
+        // A conversation the Goal moved out of is matched on the Goal's own
+        // marker only. It can be shared with another Goal created in the same
+        // conversation, whose turns are not this Goal's spend.
+        return source?.startsWith(goalTokenPrefix);
+      }),
+    );
+    // The adopted run lives on the conversation that created the Goal; keep it
+    // counted even when it is not among the topics read above.
     if (adoptedId && !operations.some((op) => op.id === adoptedId)) {
       const adoptedRun = await model.findById(adoptedId);
       if (adoptedRun) operations.push(adoptedRun);
@@ -209,6 +244,53 @@ export class GoalManagerService {
       return state;
     });
 
+  /**
+   * Move the management conversation onto the agent that now supervises the Goal.
+   *
+   * The management conversation lives in the goal agent's own history, so
+   * handing the Goal to another agent leaves `managerState.topicId` pointing at a
+   * conversation the new agent does not own: the supervision panel keeps showing
+   * the previous agent's planning thread, and its "open conversation" link opens
+   * that agent's chat. Creating the new agent's conversation here, at the
+   * handoff, keeps the panel and its link honest immediately instead of only
+   * after the next planning claim.
+   *
+   * Declines while a turn is unclaimed in flight: `settleInFlight` finds that
+   * turn's run through `state.topicId`, so re-pointing early would strand it as
+   * unconfirmed and pause the Goal. `startTurn` migrates on the next claim in
+   * that case. It also declines when the Goal no longer belongs to the target: an
+   * overlapping handoff that landed later owns the answer, and migrating to this
+   * call's stale target would leave the conversation owned by an agent the Goal
+   * is not assigned to. The Goal row is locked, like every other receipt write.
+   */
+  moveConversationTo = async (
+    goalId: string,
+    agentId: string,
+  ): Promise<GoalManagerState | undefined> =>
+    this.db.transaction(async (db) => {
+      const model = new GoalModel(db, this.userId, this.workspaceId);
+      const goal = await model.lockById(goalId);
+      const state = goal?.config?.managerState;
+      if (!goal || !state || !state.consumed || goal.agentId !== agentId) return;
+      const topicModel = new TopicModel(db, this.userId, this.workspaceId);
+      const current = await topicModel.findById(state.topicId);
+      if (current?.agentId === agentId) return;
+      const topic = await topicModel.create({
+        agentId,
+        title: `Goal management: ${goal.title}`,
+        // Read from the goal page's supervision panel; keeps the planning
+        // conversation out of the agent's chat sidebar and Recent.
+        trigger: TopicTrigger.GoalSupervision,
+      });
+      const next: GoalManagerState = {
+        ...state,
+        topicId: topic.id,
+        previousTopicIds: [...new Set([...(state.previousTopicIds ?? []), state.topicId])],
+      };
+      await this.save(db, goalId, next);
+      return next;
+    });
+
   private save = async (db: LobeChatDatabase, id: string, state: GoalManagerState) => {
     // Caller holds the owned Goal row lock. Do not overwrite concurrent policy namespaces.
     await db
@@ -257,6 +339,7 @@ export class GoalManagerService {
       graph.nodes.flatMap((n) => (n.taskId ? [n.taskId] : [])),
     );
     const management = await new GoalManagerService(db, this.userId, this.workspaceId).usage(
+      graph.goal.id,
       graph.goal.config?.managerState,
     );
     const goal = graph.goal;
@@ -383,7 +466,30 @@ export class GoalManagerService {
       // An adopted local desktop run has no server operation to watch exit; its
       // submitted plan is the only settlement the server can observe.
       const settledLocally = !!state.adopted && !operation && !!state.submitted;
-      if (!settledLocally && (!operation || !terminalOperations.has(operation.status))) {
+      // A dispatched turn never ran when its dispatch was refused the topic
+      // reservation — the verdict `recordUnstartedDispatch` stored from the
+      // error itself. That refusal comes before the planning message or any
+      // operation is written, and the planning topic can be the owner's busy
+      // conversation, which is how a turn gets stuck. With no run to confirm,
+      // settle it like a turn that exited without a plan instead of pausing:
+      // pausing left the Goal stuck for good, because every resume re-read this
+      // same turn and paused again.
+      //
+      // Nothing is inferred from rows: a missing operation row proves nothing
+      // (the runtime keeps going when that insert fails), and a missing planning
+      // message may be one the owner deleted or one a still-pending call has not
+      // written yet. Every other turn still pauses as unconfirmed; the owner can
+      // confirm its exit on resume. An adopted turn is exempt.
+      const neverStarted =
+        !state.adopted &&
+        !operation &&
+        !!state.dispatchNeverStarted &&
+        Date.now() - Date.parse(state.startedAt) > TIMEOUT_MS;
+      if (
+        !settledLocally &&
+        !neverStarted &&
+        (!operation || !terminalOperations.has(operation.status))
+      ) {
         if (operation?.status === 'waiting_for_human') {
           await this.wait(goal.id, 'Main Agent is waiting for a human decision');
           return {
@@ -395,7 +501,7 @@ export class GoalManagerService {
         if (Date.now() - Date.parse(state.startedAt) > TIMEOUT_MS) {
           return this.pause(
             goal.id,
-            'Main Agent execution is unconfirmed or timed out. Confirm its exit before resuming; no replacement was dispatched.',
+            `Main Agent execution is unconfirmed or timed out; no replacement was dispatched. Once its run has ended, confirm and resume with: lh goal resume ${goal.id} --confirm-exit`,
           );
         }
         return this.wait(goal.id, 'Waiting for main Agent CLI planning turn');
@@ -418,7 +524,9 @@ export class GoalManagerService {
         outcome: 'advanced',
         message: state.submitted
           ? 'Main Agent plan committed; normal Task coordination continues'
-          : 'Main Agent exited without a plan; a new bounded turn will reread durable state',
+          : neverStarted
+            ? 'Main Agent turn never started; a new bounded turn will reread durable state'
+            : 'Main Agent exited without a plan; a new bounded turn will reread durable state',
       };
     }
     return null;
@@ -450,7 +558,7 @@ export class GoalManagerService {
           runs[0].operationId,
         )
       : undefined;
-    return !recoveryEligibility(graph, failed, op).eligible;
+    return !recoveryEligibility(graph, failed, op, false, countDeviceOfflineRuns(runs)).eligible;
   };
 
   private startTurn = async (
@@ -515,8 +623,14 @@ export class GoalManagerService {
         return;
       // The management conversation lives in the goal agent's own history. After
       // a handoff the previous agent's topic is not this agent's to continue.
+      // Read it from the LOCKED row, not the caller's graph: `moveConversationTo`
+      // can have migrated the conversation between the graph read and this claim,
+      // and going by the stale topic would mint a second one for the same agent.
+      const freshState = fresh.config?.managerState;
       const topicModel = new TopicModel(db, this.userId, this.workspaceId);
-      const previousTopic = state?.topicId ? await topicModel.findById(state.topicId) : undefined;
+      const previousTopic = freshState?.topicId
+        ? await topicModel.findById(freshState.topicId)
+        : undefined;
       const topicId =
         previousTopic?.agentId === agentId
           ? previousTopic.id
@@ -529,6 +643,16 @@ export class GoalManagerService {
                 trigger: TopicTrigger.GoalSupervision,
               })
             ).id;
+      // This claim is the other place the management topic changes (besides
+      // `moveConversationTo`, which only runs between turns): a handoff that
+      // landed mid-turn migrates here. The conversation being left keeps
+      // counting, so it joins the history the receipt carries forward.
+      const previousTopicIds = [
+        ...new Set([
+          ...(freshState?.previousTopicIds ?? []),
+          ...(freshState?.topicId && freshState.topicId !== topicId ? [freshState.topicId] : []),
+        ]),
+      ];
       const reviews = await this.reviews(current, db);
       const next: GoalManagerState = {
         ...(problem
@@ -538,10 +662,11 @@ export class GoalManagerService {
             }
           : {}),
         ...(state?.adoptedOperationId && { adoptedOperationId: state.adoptedOperationId }),
+        ...(previousTopicIds.length > 0 && { previousTopicIds }),
         reviewSnapshot: reviews.hash,
         topicId,
         turns: (state?.turns ?? 0) + 1,
-        token: randomUUID(),
+        token: managerTurnToken(goal.id),
         snapshot: managerSnapshot(current),
         startedAt: new Date().toISOString(),
       };
@@ -583,9 +708,51 @@ export class GoalManagerService {
         '[goal:manager] dispatch failed; next wakeup adopts any persisted operation',
         error,
       );
+      // Only a refused topic reservation proves the turn never started: it is
+      // raised before the planning message or any operation is written, and the
+      // call has returned. Any other failure may come after a run went live, so
+      // it stays unconfirmed. Decided from the error, never from rows the owner
+      // can edit or delete.
+      if (error instanceof TopicStartReservationError)
+        await this.recordUnstartedDispatch(goal.id, claimed.token).catch((saveError) =>
+          console.error('[goal:manager] failed to record the refused dispatch', saveError),
+        );
     }
     return this.wait(goal.id, 'Main Agent dispatched with CLI planning access');
   };
+
+  /**
+   * The owner confirms that the planning turn the Goal is paused on has ended,
+   * so resuming can settle it and plan afresh — the repair for a turn the server
+   * cannot classify on its own, including turns recorded before
+   * `dispatchNeverStarted` existed. Refused while the turn's run is still live:
+   * interrupt it first, or a replacement would run beside it.
+   */
+  confirmTurnExit = async (goalId: string) =>
+    this.db.transaction(async (db) => {
+      const fresh = await new GoalModel(db, this.userId, this.workspaceId).lockById(goalId);
+      const state = fresh?.config?.managerState;
+      if (!state || state.consumed) return false;
+      const operation = await this.turnOperation(
+        new AgentOperationModel(db, this.userId, this.workspaceId),
+        state,
+      );
+      if (operation && !terminalOperations.has(operation.status))
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `The main Agent run ${operation.id} is still ${operation.status}; interrupt it before confirming its exit`,
+        });
+      await this.save(db, goalId, { ...state, consumed: true });
+      return true;
+    });
+
+  /** Mark a turn whose dispatch was refused its topic reservation as never started. */
+  private recordUnstartedDispatch = async (goalId: string, token: string) =>
+    this.db.transaction(async (db) => {
+      const fresh = await new GoalModel(db, this.userId, this.workspaceId).lockById(goalId);
+      if (fresh?.config?.managerState?.token === token)
+        await this.save(db, goalId, { ...fresh.config.managerState, dispatchNeverStarted: true });
+    });
 
   submit = async (goalId: string, token: string, operationId: string, input: GoalPlan) => {
     const plan = goalPlanSchema.parse(input);
@@ -770,7 +937,7 @@ export class GoalManagerService {
         if (
           !task ||
           runs[0]?.operationId !== plan.failedOperationId ||
-          !recoveryEligibility(graph, task, failure).eligible
+          !recoveryEligibility(graph, task, failure, false, countDeviceOfflineRuns(runs)).eligible
         )
           throw new TRPCError({
             code: 'CONFLICT',

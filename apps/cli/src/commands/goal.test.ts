@@ -16,6 +16,8 @@ const { mockClient } = vi.hoisted(() => ({
       submitOperationReport: { mutate: vi.fn() },
       submitReport: { mutate: vi.fn() },
       graph: { query: vi.fn() },
+      resume: { mutate: vi.fn() },
+      retireNodes: { mutate: vi.fn() },
       setBudget: { mutate: vi.fn() },
       supervision: { query: vi.fn() },
       tick: { mutate: vi.fn() },
@@ -153,6 +155,28 @@ describe('goal report authentication', () => {
       expect(other.mutate).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('goal resume', () => {
+  it('asks the server to settle the stuck planning turn only with --confirm-exit', async () => {
+    vi.clearAllMocks();
+    mockClient.goal.resume.mutate.mockResolvedValue({ message: 'Goal resumed' });
+    await createProgram().parseAsync(['node', 'test', 'goal', 'resume', 'goal-1']);
+    expect(mockClient.goal.resume.mutate).toHaveBeenLastCalledWith({ id: 'goal-1' });
+
+    await createProgram().parseAsync([
+      'node',
+      'test',
+      'goal',
+      'resume',
+      'goal-1',
+      '--confirm-exit',
+    ]);
+    expect(mockClient.goal.resume.mutate).toHaveBeenLastCalledWith({
+      confirmExit: true,
+      id: 'goal-1',
+    });
+  });
 });
 
 describe('goal run command', () => {
@@ -516,7 +540,6 @@ describe('goal create command', () => {
       'Repair',
       '--max-attempts-per-task',
       '4',
-      '--supervise',
       '--max-supervision-incidents',
       '6',
     ]);
@@ -528,6 +551,30 @@ describe('goal create command', () => {
           supervision: { enabled: true, maxIncidents: 6 },
         }),
         tasks: ['Inspect', 'Repair'],
+      }),
+    );
+  });
+
+  it('sends supervision even when no incident cap is given', async () => {
+    mockClient.goal.create.mutate.mockResolvedValue({
+      data: {
+        decisions: [],
+        edges: [],
+        events: [],
+        goal: { id: 'goal-1', requirement: null, status: 'planning', title: 'Fix bugs' },
+        nodes: [],
+        workVersions: [],
+      },
+    });
+
+    await createProgram().parseAsync(['node', 'test', 'goal', 'create', 'Fix bugs']);
+
+    // An independently distributed CLI can be pointed at a server that predates
+    // the creation invariant, so supervision must not depend on the server
+    // filling it in — nor on the user remembering to pass an incident cap.
+    expect(mockClient.goal.create.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ supervision: { enabled: true } }),
       }),
     );
   });
@@ -614,5 +661,42 @@ describe('goal delete', () => {
 
     expect(confirm).toHaveBeenCalledOnce();
     expect(mockClient.goal.delete.mutate).not.toHaveBeenCalled();
+  });
+});
+
+describe('goal retire', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(log, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('retires every listed node in one call', async () => {
+    mockClient.goal.retireNodes.mutate.mockResolvedValue({
+      message: 'Retired 2 node(s)',
+      success: true,
+    });
+
+    await createProgram().parseAsync([
+      'node',
+      'test',
+      'goal',
+      'retire',
+      'goal-1',
+      'node-a',
+      'node-b',
+      '--reason',
+      'duplicate branch',
+    ]);
+
+    expect(mockClient.goal.retireNodes.mutate).toHaveBeenCalledWith({
+      id: 'goal-1',
+      nodeIds: ['node-a', 'node-b'],
+      reason: 'duplicate branch',
+    });
+    expect(log.info).toHaveBeenCalledWith('Retired 2 node(s)');
   });
 });

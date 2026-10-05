@@ -253,15 +253,56 @@ export interface ReviewProposalOutcome {
 }
 
 /**
+ * Where on a video evidence an annotation sits, in seconds from the start.
+ * `start` alone pins one frame; `start` + `end` marks a span.
+ */
+export interface AcceptanceReviewAnnotationTime {
+  end?: number;
+  start: number;
+}
+
+/**
  * A user-drawn region on one evidence image, in coordinates normalized to the
- * image box (0–1) so the overlay renders at any display size.
+ * image box (0–1) so the overlay renders at any display size. On video evidence
+ * the region is drawn on the frame at `time.start`; a note that marks a moment
+ * or a span without circling an area carries the whole frame
+ * (`FULL_FRAME_RECT` in `@lobechat/const/verify`).
  */
 export interface AcceptanceReviewAnnotation {
   /** The note attached to this region. */
   comment?: string;
+  /**
+   * The agent chapter this note disputes, quoted so the objection still reads
+   * correctly after the evidence is re-uploaded.
+   */
+  disputes?: Pick<VerifyEvidenceChapter, 'kind' | 'note' | 't'>;
   /** The evidence row (`verify_evidence.id`) the region was drawn on. */
   evidenceId: string;
   rect: { height: number; width: number; x: number; y: number };
+  /** Video evidence only: the frame or span the note is about. */
+  time?: AcceptanceReviewAnnotationTime;
+}
+
+/**
+ * How an agent marker on a video reads (runtime set: `verifyEvidenceChapterKinds`).
+ *
+ * - `step`: an action the agent performed, logged while driving the recording.
+ * - `check`: something the agent verified on this frame — a claim for the reviewer
+ *   to audit, never a pass.
+ * - `flag`: an anomaly the agent noticed and judged harmless, disclosed so the
+ *   reviewer can disagree.
+ */
+export type VerifyEvidenceChapterKind = 'check' | 'flag' | 'step';
+
+/** An agent-authored marker on a video evidence (`verify_evidence.metadata.chapters`). */
+export interface VerifyEvidenceChapter {
+  kind: VerifyEvidenceChapterKind;
+  /** Short name shown on the timeline; required for `step`. */
+  label?: string;
+  /** What the agent claims or noticed; required for `check` and `flag`. */
+  note?: string;
+  /** Seconds from the start of the video. */
+  t: number;
 }
 
 /**
@@ -732,6 +773,25 @@ export interface VerifyVisualizationManifest {
 export interface VerifyCheckResultMetadata {
   [key: string]: unknown;
   visualization?: VerifyVisualizationManifest;
+}
+
+/**
+ * How one round's checks came out, counted — what a surface shows as
+ * "3 passed · 1 undecided" without reading the checks themselves.
+ *
+ * Deliberately the same three-way split the acceptance's criteria list uses
+ * (`CriterionOutcomeState`): a check with no verdict falls back to its status,
+ * and everything else is undecided. Two surfaces reading the same round must
+ * not be able to disagree about it.
+ */
+export interface VerifyCheckTally {
+  /** Judged failed — a failed verdict, or a failed status where no verdict landed. */
+  failed: number;
+  /** Judged passed — a passed verdict, or a passed status where no verdict landed. */
+  passed: number;
+  total: number;
+  /** Planned but never judged: neither passed nor failed. */
+  unjudged: number;
 }
 
 /**

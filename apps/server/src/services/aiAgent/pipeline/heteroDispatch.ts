@@ -344,7 +344,7 @@ export const dispatchHeteroAgent = async (
   // Hooks belong to this operation's lifecycle. Persist their serializable
   // form on the durable operation row before dispatch; runningOperation below
   // remains a compatibility mirror for older terminal consumers.
-  if (hooks?.length) hookDispatcher.register(operationId, hooks);
+  hookDispatcher.register(operationId, hooks ?? []);
   const serializedHooks = hookDispatcher.getSerializedHooks(operationId);
 
   // Persist a first-class agent_operations row for the hetero run. The id is
@@ -989,6 +989,9 @@ export const dispatchHeteroAgent = async (
         devicePlatform: boundDevice?.platform,
         initialWorkingDirectory: appContext?.initialTopicMetadata?.workingDirectory,
         initialWorkingDirectoryConfig: appContext?.initialTopicMetadata?.workingDirectoryConfig,
+        // The run's repos, so a directory that IS one of them is skipped: this
+        // device cannot have it (`owner/repo` is a cloud repo identifier).
+        repos: topicRepos,
         topicDeviceId: topic?.metadata?.boundDeviceId,
         topicWorkingDirectory: topic?.metadata?.workingDirectory,
         topicWorkingDirectoryConfig: topic?.metadata?.workingDirectoryConfig,
