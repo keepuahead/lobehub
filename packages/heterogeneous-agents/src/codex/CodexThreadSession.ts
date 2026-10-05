@@ -353,6 +353,9 @@ export class CodexThreadSession {
           toThreadForkParams(sourceThreadId, lastTurnId, this.threadParams),
         );
         if (this.closedByHost) return;
+        // Source-tip usage includes turns excluded by lastTurnId. The first
+        // child total/last notification supplies its actual retained baseline.
+        this.cumulativeUsage = undefined;
         await this.attachThread(response.thread.id, response.model);
       }
 

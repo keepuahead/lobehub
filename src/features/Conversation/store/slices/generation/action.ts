@@ -1426,8 +1426,12 @@ export const generationSlice: StateCreator<
         isWorkspaceAgent,
         workspaceScoped,
       });
-      if (runtimeType !== 'hetero' || heterogeneousProvider?.type !== 'codex') {
-        throw new Error('Codex message branches require the local Codex runtime');
+      if (
+        runtimeType !== 'hetero' ||
+        heterogeneousProvider?.type !== 'codex' ||
+        heterogeneousProvider.authMode === 'api'
+      ) {
+        throw new Error('Codex message branches require the local native Codex runtime');
       }
       const runtime = resolveHeteroRunContext(
         useChatStore.getState(),

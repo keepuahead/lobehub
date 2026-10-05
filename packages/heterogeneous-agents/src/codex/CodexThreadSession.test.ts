@@ -408,6 +408,81 @@ describe('CodexThreadSession', () => {
   });
 
   // ROOT CAUSE:
+  // A retained-prefix fork copied source-tip cumulative usage, including later turns.
+  // The child's native total still includes only retained history, so subtracting
+  // the tip either undercounts or charges all inherited tokens after a counter reset.
+  // Rebase from the first native total/last pair, then accumulate all child steps.
+  /** @example Both counter relationships exclude unrelated later source turns. */
+  it.each([140, 350])(
+    'rebases retained fork usage when the first child total is %i',
+    async (firstTotal) => {
+      const harness = createClientHarness({
+        autoComplete: false,
+        sourceTurnIds: ['retained', 'later'],
+      });
+      const { events, session } = createSession(harness, {
+        forkTarget: { position: 'after', threadId: 'source-thread', turnId: 'retained' },
+        initialThreadId: 'source-thread',
+        initialCumulativeUsage: {
+          inputCacheMissTokens: 300,
+          totalInputTokens: 300,
+          totalOutputTokens: 0,
+          totalTokens: 300,
+        },
+      });
+      const run = session.run({ input: [], operationId: 'fork-usage', onRawMessage: vi.fn() });
+      await vi.waitFor(() => {
+        /** @example Usage is observed only after the child starts its native turn. */
+        expect(harness.requests.some((request) => request.method === 'turn/start')).toBe(true);
+      });
+      await harness.notify('turn/started', {
+        threadId: 'thread-1',
+        turn: turn('turn-1', 'inProgress'),
+      });
+      for (const [total, last] of [
+        [firstTotal, firstTotal - 100],
+        [firstTotal + 20, 20],
+      ]) {
+        await harness.notify('thread/tokenUsage/updated', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: {
+            total: {
+              inputTokens: total,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+              totalTokens: total,
+            },
+            last: {
+              inputTokens: last,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+              totalTokens: last,
+            },
+          },
+        });
+      }
+      await harness.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: turn('turn-1', 'completed'),
+      });
+      await run;
+      /** @example Both new steps are billed once; the retained 100 tokens are excluded. */
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'step_complete',
+          data: expect.objectContaining({
+            usage: expect.objectContaining({ totalInputTokens: firstTotal - 100 + 20 }),
+          }),
+        }),
+      );
+      session.close();
+    },
+  );
+
+  // ROOT CAUSE:
   // Re-entering ensureThread after a disconnect reused the original fork boundary against
   // the child. Consuming the fork target once makes subsequent connections resume the child.
   /** @example A completed child reconnects without forking its original boundary again. */

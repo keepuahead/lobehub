@@ -445,9 +445,18 @@ export class CodexAppServerAdapter {
         return this.handlePlanUpdated(rawParams as TurnPlanUpdatedNotification);
       }
       case 'thread/tokenUsage/updated': {
-        this.latestCumulativeUsage = toUsage(
-          (rawParams as ThreadTokenUsageUpdatedNotification).tokenUsage.total,
-        );
+        const { tokenUsage } = rawParams as ThreadTokenUsageUpdatedNotification;
+        const cumulativeUsage = toUsage(tokenUsage.total);
+        if (!this.lastCumulativeUsage && !this.latestCumulativeUsage && tokenUsage.last) {
+          // Forks inherit native usage only through their selected boundary.
+          // Reconstruct that baseline from the first new request, including
+          // when a refresh resumes a child whose first attempt never started.
+          this.lastCumulativeUsage = toTurnUsageFromCumulative(
+            cumulativeUsage,
+            toUsage(tokenUsage.last),
+          );
+        }
+        this.latestCumulativeUsage = cumulativeUsage;
         return [];
       }
       case 'error': {

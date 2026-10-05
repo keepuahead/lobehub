@@ -342,6 +342,30 @@ describe('forkCodexMessage', () => {
     expect(executor.executeHeterogeneousAgent).not.toHaveBeenCalled();
   });
 
+  // ROOT CAUSE:
+  // Switching a native conversation to API auth still selects the hetero runtime.
+  // The action persisted a child before Desktop rejected its hosted provider binding.
+  // Reject unsupported auth before either user or assistant thread creation.
+  /** @example Existing native provenance cannot make an API-bound fork runnable. */
+  it.each(['user', 'assistant'] as const)(
+    'rejects API-bound %s forks before creating a child',
+    async (role) => {
+      vi.mocked(agentSelectors.getAgentConfigById).mockReturnValue(() => ({
+        ...DEFAULT_AGENT_CONFIG,
+        agencyConfig: {
+          executionTarget: 'local',
+          heterogeneousProvider: { type: 'codex', command: 'codex', authMode: 'api' },
+        },
+      }));
+      const store = createStore({ context, initialMessages: [{ ...source, role }] });
+      /** @example Validation precedes every branch write and native dispatch. */
+      await expect(store.getState().forkCodexMessage(source.id)).rejects.toThrow('native Codex');
+      expect(threadService.createThread).not.toHaveBeenCalled();
+      expect(threadService.createThreadWithMessage).not.toHaveBeenCalled();
+      expect(executor.executeHeterogeneousAgent).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not create a branch when the selected message has no native provenance', async () => {
     const store = createStore({ context, initialMessages: [{ ...source, metadata: {} }] });
     await expect(store.getState().forkCodexMessage(source.id)).rejects.toThrow(
