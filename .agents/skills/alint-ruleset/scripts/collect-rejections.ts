@@ -88,10 +88,7 @@ for (const acceptance of inWindow) {
   try {
     feedback = feedbackEntries(
       lh([
-        'acceptance',
-        'feedback',
-        acceptance.id,
-        '--json',
+        'acceptance', 'feedback', acceptance.id, '--json',
         ...(actionableOnly ? ['--actionable'] : []),
       ]),
     );
@@ -110,11 +107,7 @@ groups.sort((a, b) => (b.acceptance.createdAt ?? '').localeCompare(a.acceptance.
 await mkdir(outDir, { recursive: true });
 await writeFile(
   path.join(outDir, 'rejections.json'),
-  JSON.stringify(
-    { generatedAt: new Date().toISOString(), since: since.toISOString(), groups },
-    null,
-    2,
-  ) + '\n',
+  JSON.stringify({ generatedAt: new Date().toISOString(), since: since.toISOString(), groups }, null, 2) + '\n',
 );
 
 const lines: string[] = [
@@ -136,11 +129,7 @@ for (const { acceptance, feedback } of groups) {
     '',
   );
   for (const entry of feedback) {
-    const where = [
-      entry.kind,
-      entry.checkSeq !== undefined ? `C${entry.checkSeq}` : '',
-      entry.title,
-    ]
+    const where = [entry.kind, entry.checkSeq !== undefined ? `C${entry.checkSeq}` : '', entry.title]
       .filter(Boolean)
       .join(' ');
     const flag = entry.actionable ? '▶ ' : '';

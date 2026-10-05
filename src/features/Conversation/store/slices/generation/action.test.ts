@@ -1875,10 +1875,7 @@ describe('Generation Actions', () => {
       expect(executeHeterogeneousAgentSpy).toHaveBeenCalledWith(
         expect.any(Function),
         expect.objectContaining({
-          heterogeneousProvider: expect.objectContaining({
-            model: pinnedModel,
-            type: providerType,
-          }),
+          heterogeneousProvider: expect.objectContaining({ model: pinnedModel, type: providerType }),
         }),
       );
     });

@@ -37,7 +37,7 @@ node_modules/.bin/alint --format json --rule-concurrency 32 <scope...> > /tmp/al
 ```
 
 `--rule-concurrency 32` is the working figure for a whole-repo scan (about 10 min for
-`apps/server`, `packages`, `src`; \~14.7k model calls, \~40M input tokens). For a single rule
+`apps/server`, `packages`, `src`; ~14.7k model calls, ~40M input tokens). For a single rule
 being iterated, scan its scope only — a full cold scan is the cost driver (see
 [cost.md](cost.md)).
 
@@ -54,13 +54,12 @@ bun .agents/skills/alint-ruleset/scripts/sample-findings.ts /tmp/alint-scan/raw.
 ### 3. Classify — TP / FP / DUP
 
 Open the actual file at each line and judge. This is a **read-only** pass: do not edit the
-tree while classifying. Dispatch it to sub-agents, one batch of \~3 rules per agent, with this
+tree while classifying. Dispatch it to sub-agents, one batch of ~3 rules per agent, with this
 prompt:
 
 > You are calibrating model-backed lint rules for the LobeHub repo. Work read-only in
 > `<worktree>` (do not edit any file there).
 > For each of these rules: `<rule-a>`, `<rule-b>`, `<rule-c>`
->
 > 1. Read the rule definition at `packages/alint/rules/<rule>/rule.alint.toml`. It contains the
 >    product owner's own review quotes; those quotes ARE the standard. Judge like that owner.
 > 2. Read `/tmp/alint-scan/sample-<rule>.txt` (20 sampled findings: file:line, confidence,
@@ -70,11 +69,11 @@ prompt:
 >    **FP** (not a violation — name the exclusion or the misread),
 >    **DUP** (same issue already reported by another finding in the sample).
 >    Note repo conventions: UI comes from `@lobehub/ui/base-ui`; styles use `createStaticStyles`
->    - `cssVar`.
->      Report per rule: counts TP/FP/DUP and precision = TP/(TP+FP); one line per finding
->      (index, verdict, 1-sentence reason); the **recurring FP patterns, each phrased as a concrete
->      "do not report X" sentence**; and the 3 most valuable TPs (file:line and what is wrong).
->      Under 900 words.
+>    + `cssVar`.
+> Report per rule: counts TP/FP/DUP and precision = TP/(TP+FP); one line per finding
+> (index, verdict, 1-sentence reason); the **recurring FP patterns, each phrased as a concrete
+> "do not report X" sentence**; and the 3 most valuable TPs (file:line and what is wrong).
+> Under 900 words.
 
 For a rule about links or routes, the classifier must check the real router
 (`src/spa/router/*`, redirects in `src/libs/next/config/define-config.ts`) — a link is only a

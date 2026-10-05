@@ -63,25 +63,15 @@ const since = new Date(Date.now() - days * 86_400_000);
 
 let repo: string;
 try {
-  repo =
-    flags.get('repo') ??
-    ghText(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
+  repo = flags.get('repo') ?? ghText(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
 } catch {
-  console.error(
-    'gh could not resolve the repository. Run `gh auth status` and `gh repo set-default`.',
-  );
+  console.error('gh could not resolve the repository. Run `gh auth status` and `gh repo set-default`.');
   process.exit(2);
 }
 
 const pulls = gh([
-  'pr',
-  'list',
-  '--state',
-  'all',
-  '--limit',
-  String(maxPrs),
-  '--json',
-  'number,headRefOid,baseRefName,updatedAt,title,url,state',
+  'pr', 'list', '--state', 'all', '--limit', String(maxPrs),
+  '--json', 'number,headRefOid,baseRefName,updatedAt,title,url,state',
 ]) as PullRequest[];
 
 const window = pulls
@@ -115,11 +105,9 @@ const findings = new Map<string, WorksheetEntry>();
 for (const pull of window) {
   let checkRuns: CheckRun[];
   try {
-    checkRuns = (
-      gh(['api', `repos/${repo}/commits/${pull.headRefOid}/check-runs?per_page=100`]) as {
-        check_runs: CheckRun[];
-      }
-    ).check_runs;
+    checkRuns = (gh(['api', `repos/${repo}/commits/${pull.headRefOid}/check-runs?per_page=100`]) as {
+      check_runs: CheckRun[];
+    }).check_runs;
   } catch {
     continue;
   }
@@ -132,10 +120,7 @@ for (const pull of window) {
 
   let annotations: Annotation[];
   try {
-    annotations = gh([
-      'api',
-      `repos/${repo}/check-runs/${latest.id}/annotations?per_page=100`,
-    ]) as Annotation[];
+    annotations = gh(['api', `repos/${repo}/check-runs/${latest.id}/annotations?per_page=100`]) as Annotation[];
   } catch {
     annotations = [];
   }
@@ -182,13 +167,7 @@ await mkdir(outDir, { recursive: true });
 await writeFile(
   path.join(outDir, 'worksheet.json'),
   JSON.stringify(
-    {
-      generatedAt: new Date().toISOString(),
-      repo,
-      runs,
-      since: since.toISOString(),
-      window: { days, prs: window.length },
-    },
+    { generatedAt: new Date().toISOString(), repo, runs, since: since.toISOString(), window: { days, prs: window.length } },
     null,
     2,
   ) + '\n',

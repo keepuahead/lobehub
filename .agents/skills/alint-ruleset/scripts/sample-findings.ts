@@ -47,9 +47,7 @@ if (!input) {
 }
 
 const sampleSize = Number(flags.get('sample') ?? 20);
-const outDir = path.resolve(
-  flags.get('out') ?? path.join(path.dirname(path.resolve(input)), 'samples'),
-);
+const outDir = path.resolve(flags.get('out') ?? path.join(path.dirname(path.resolve(input)), 'samples'));
 const root = process.cwd();
 
 const output = JSON.parse(await readFile(input, 'utf8')) as AlintOutput;
@@ -67,17 +65,12 @@ await mkdir(outDir, { recursive: true });
 /** Cells are tab-separated; strip tabs/newlines from free text so a row stays one line. */
 const cell = (value: string) => value.replaceAll('\t', ' ').replaceAll('\n', ' ').trim();
 
-const table: string[] = [
-  '| rule | findings | sampled | sample file |',
-  '| --- | ---: | ---: | --- |',
-];
+const table: string[] = ['| rule | findings | sampled | sample file |', '| --- | ---: | ---: | --- |'];
 const index: Record<string, { findings: number; sampleFile: string; sampled: number }> = {};
 
 for (const [rule, list] of [...byRule].sort((a, b) => b[1].length - a[1].length)) {
   const picked = list.slice(0, sampleSize);
-  const header = ['index', 'location', 'confidence', 'severity', 'message', 'suggestion'].join(
-    '\t',
-  );
+  const header = ['index', 'location', 'confidence', 'severity', 'message', 'suggestion'].join('\t');
   const rows = picked.map((diagnostic, position) => {
     const location = `${path.relative(root, diagnostic.filePath)}:${diagnostic.loc?.start?.line ?? 0}`;
     return [
@@ -97,14 +90,9 @@ for (const [rule, list] of [...byRule].sort((a, b) => b[1].length - a[1].length)
 
 await writeFile(
   path.join(outDir, 'index.json'),
-  JSON.stringify(
-    { byRule: index, generatedAt: new Date().toISOString(), source: path.resolve(input) },
-    null,
-    2,
-  ) + '\n',
+  JSON.stringify({ byRule: index, generatedAt: new Date().toISOString(), source: path.resolve(input) }, null, 2) + '\n',
 );
 
 console.info(table.join('\n'));
 console.info(`\n${diagnostics.length} findings · ${byRule.size} rules · samples in ${outDir}`);
-if (diagnostics.length === 0)
-  console.info('No findings. If this was meant to be a scan, check the scope and the cache.');
+if (diagnostics.length === 0) console.info('No findings. If this was meant to be a scan, check the scope and the cache.');

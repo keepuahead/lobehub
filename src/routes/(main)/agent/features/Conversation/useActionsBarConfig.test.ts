@@ -67,7 +67,9 @@ describe('useActionsBarConfig', () => {
     /** @example Claude Code keeps its current quick actions. */
     expect(result.current.assistant?.bar).toEqual(['copy']);
     /** @example Claude Code keeps its current overflow menu. */
-    expect(result.current.assistant?.menu).toEqual(['copy', 'divider', 'select', 'divider', 'del']);
+    expect(result.current.assistant?.menu).toEqual([
+      'copy', 'divider', 'select', 'divider', 'del',
+    ]);
   });
 
   /** @example A native agent keeps the default actions provided by the message components. */

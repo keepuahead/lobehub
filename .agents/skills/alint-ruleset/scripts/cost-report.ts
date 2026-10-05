@@ -54,9 +54,7 @@ const parseArgs = (argv: string[]) => {
 
 const { flags, positional } = parseArgs(process.argv.slice(2));
 if (positional.length === 0) {
-  console.error(
-    'usage: cost-report.ts <run.json ...> [--price-in 1] [--price-in-hit 0.1] [--price-out 2]',
-  );
+  console.error('usage: cost-report.ts <run.json ...> [--price-in 1] [--price-in-hit 0.1] [--price-out 2]');
   process.exit(2);
 }
 
@@ -80,10 +78,7 @@ interface Row {
 
 const toNumber = (value: string | undefined): number => {
   if (!value) return 0;
-  const match = value
-    .replaceAll(',', '')
-    .trim()
-    .match(/^([\d.]+)\s*([km])?$/i);
+  const match = value.replaceAll(',', '').trim().match(/^([\d.]+)\s*([km])?$/i);
   if (!match) return 0;
   const unit = match[2]?.toLowerCase();
   const scale = unit === 'm' ? 1_000_000 : unit === 'k' ? 1000 : 1;
@@ -131,10 +126,7 @@ for (const file of positional) {
     rows.push({
       cached: raw.execution?.cached ?? 0,
       completed: raw.execution?.completed ?? 0,
-      cost:
-        perMillion(input - hit, priceIn) +
-        perMillion(hit, priceInHit) +
-        perMillion(output, priceOut),
+      cost: perMillion(input - hit, priceIn) + perMillion(hit, priceInHit) + perMillion(output, priceOut),
       input,
       name,
       output,
@@ -167,9 +159,7 @@ for (const file of positional) {
       output,
       rules: 0,
     });
-    console.info(
-      `${unparsed}/${raw.runs.length} runs had no parsable usage line — CI cost is unknown for those, not zero.`,
-    );
+    console.info(`${unparsed}/${raw.runs.length} runs had no parsable usage line — CI cost is unknown for those, not zero.`);
     continue;
   }
 
@@ -193,22 +183,12 @@ for (const row of rows) {
 const totalCost = rows.reduce((sum, row) => sum + row.cost, 0);
 const totalInput = rows.reduce((sum, row) => sum + row.input, 0);
 const totalOutput = rows.reduce((sum, row) => sum + row.output, 0);
-table.push(
-  `| **total** | | | | **${totalInput.toLocaleString()}** | **${totalOutput.toLocaleString()}** | **${money(totalCost)}** |`,
-);
+table.push(`| **total** | | | | **${totalInput.toLocaleString()}** | **${totalOutput.toLocaleString()}** | **${money(totalCost)}** |`);
 
 if (ruleTotals.size > 0) {
-  table.push(
-    '',
-    '## By rule',
-    '',
-    '| rule | input | output | total |',
-    '| --- | ---: | ---: | ---: |',
-  );
+  table.push('', '## By rule', '', '| rule | input | output | total |', '| --- | ---: | ---: | ---: |');
   for (const [rule, agg] of [...ruleTotals].sort((a, b) => b[1].total - a[1].total)) {
-    table.push(
-      `| \`${rule}\` | ${agg.input.toLocaleString()} | ${agg.output.toLocaleString()} | ${agg.total.toLocaleString()} |`,
-    );
+    table.push(`| \`${rule}\` | ${agg.input.toLocaleString()} | ${agg.output.toLocaleString()} | ${agg.total.toLocaleString()} |`);
   }
 }
 

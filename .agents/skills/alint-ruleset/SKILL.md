@@ -1,7 +1,7 @@
 ---
 name: alint-ruleset
 description: "Maintain LobeHub's model-backed alint rule set in packages/alint: author a rule, calibrate its false positives against real source, decide its severity (warn vs error) from real PR data, and track its token cost. Use for adding or narrowing an alint rule, classifying findings as true/false positives, promoting or demoting a rule, or running the weekly rule-set review."
-argument-hint: 'add <rule> | calibrate <rule> | promote | weekly'
+argument-hint: "add <rule> | calibrate <rule> | promote | weekly"
 ---
 
 # alint rule set
@@ -21,14 +21,14 @@ contract — that is `packages/alint/README.md`. Read that file once before edit
 Everything below is one cycle. An ad-hoc task runs the phase it needs; the
 [weekly review](references/weekly.md) runs the incremental phases on a schedule.
 
-| Phase                        | What it does                                                                                            | Reference                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| **A · Collect the standard** | Pull the owner's recent review rejections, read them, keep the part that recurs and one file decides    | [calibration.md](references/calibration.md#a--collect-the-standard) |
-| **B · Author the rule**      | `rule.alint.toml`: what to report, where to anchor, and an explicit "do not report" list                | [rule-authoring.md](references/rule-authoring.md)                   |
-| **C · Calibrate**            | Scan → sample → classify TP/FP → write the recurring FP patterns back as carve-outs → cold-run fixtures | [calibration.md](references/calibration.md#c--calibrate)            |
-| **D · Map the problems**     | Cluster findings across rules by file/area; that is the cleanup backlog                                 | [calibration.md](references/calibration.md#d--map-the-problems)     |
-| **E · Promote**              | Read the rule's findings on real PRs; `warn → error` only at zero false positives                       | [promotion.md](references/promotion.md)                             |
-| **F · Account for the cost** | Token usage per run; cache invalidation is the cost driver                                              | [cost.md](references/cost.md)                                       |
+| Phase                          | What it does                                                                                       | Reference                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| **A · Collect the standard**   | Pull the owner's recent review rejections, read them, keep the part that recurs and one file decides | [calibration.md](references/calibration.md#a--collect-the-standard) |
+| **B · Author the rule**        | `rule.alint.toml`: what to report, where to anchor, and an explicit "do not report" list            | [rule-authoring.md](references/rule-authoring.md)              |
+| **C · Calibrate**              | Scan → sample → classify TP/FP → write the recurring FP patterns back as carve-outs → cold-run fixtures | [calibration.md](references/calibration.md#c--calibrate)       |
+| **D · Map the problems**       | Cluster findings across rules by file/area; that is the cleanup backlog                             | [calibration.md](references/calibration.md#d--map-the-problems) |
+| **E · Promote**                | Read the rule's findings on real PRs; `warn → error` only at zero false positives                   | [promotion.md](references/promotion.md)                        |
+| **F · Account for the cost**   | Token usage per run; cache invalidation is the cost driver                                          | [cost.md](references/cost.md)                                  |
 
 ## Decision rules
 

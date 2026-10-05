@@ -61,27 +61,19 @@ Lead with the result, then the detail (business first, mechanics after). Keep it
 <one or two sentences: what changed for the rule set this week, and whether anything needs a decision>
 
 ## 本周期结论
-
 - 晋升 / 降级：<rule> → <severity>（依据：<n> 条真实结果，TP/FP）
 - 新规则候选：<n> 条（<names>）
 - 成本：CI ¥<x>（<key>），较上周 <±%>，原因 <…>
 
 ## 需要你拍板
-
 - <decision> — 我的建议：<…>
 
 ## 明细
-
 ### 真实数据（<window>）
-
 | rule | 结果数 | 真/误 | 建议 |
-
 ### 新打回意见
-
 | 类别 | 条数 | 例 | 去向 |
-
 ### 成本
-
 | key | token | 金额 | 备注 |
 ```
 

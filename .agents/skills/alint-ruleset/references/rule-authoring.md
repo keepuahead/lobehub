@@ -31,10 +31,10 @@ positives live — write them before the report list, not after.
 
 ## Two homes, two prefixes
 
-| Kind             | Rule path                            | Fixtures path                           | Prefix    |
-| ---------------- | ------------------------------------ | --------------------------------------- | --------- |
-| Repo-wide        | `packages/alint/rules/<name>/`       | `packages/alint/fixtures/<name>/`       | `lobehub` |
-| One package only | `packages/<pkg>/alint/rules/<name>/` | `packages/<pkg>/alint/fixtures/<name>/` | `<pkg>…`  |
+| Kind             | Rule path                            | Fixtures path                            | Prefix    |
+| ---------------- | ------------------------------------ | ---------------------------------------- | --------- |
+| Repo-wide        | `packages/alint/rules/<name>/`       | `packages/alint/fixtures/<name>/`        | `lobehub` |
+| One package only | `packages/<pkg>/alint/rules/<name>/` | `packages/<pkg>/alint/fixtures/<name>/`  | `<pkg>…`  |
 
 A package-level rule is only ever scoped to its package (`hetero/*` rules live next to
 `heterogeneous-agents`). Put a rule in `packages/alint` only when more than one package or

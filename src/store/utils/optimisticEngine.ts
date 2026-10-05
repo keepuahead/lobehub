@@ -8,7 +8,11 @@ type Recipe<S> = (draft: Draft<S>) => void;
 type RemoteFn<T> = () => Promise<T>;
 
 export type OptimisticMutationStatus =
-  'failed' | 'inflight' | 'pending' | 'rolled-back' | 'success';
+  | 'failed'
+  | 'inflight'
+  | 'pending'
+  | 'rolled-back'
+  | 'success';
 
 export type StoreHandle<S extends StoreState = StoreState> = Pick<
   StoreApi<S>,

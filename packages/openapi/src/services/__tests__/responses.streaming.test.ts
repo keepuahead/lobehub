@@ -1,16 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { InMemoryStreamEventManager } from '@/server/modules/AgentRuntime/InMemoryStreamEventManager';
-
-import { ResponsesService } from '../responses.service';
-
-const { createStreamEventManagerMock, drainPushesMock, executeSyncMock, execAgentMock } =
-  vi.hoisted(() => ({
+const { createStreamEventManagerMock, drainPushesMock, executeSyncMock, execAgentMock } = vi.hoisted(
+  () => ({
     createStreamEventManagerMock: vi.fn(),
     drainPushesMock: vi.fn(),
     executeSyncMock: vi.fn(),
     execAgentMock: vi.fn(),
-  }));
+  }),
+);
 
 vi.mock('@/server/modules/AgentRuntime/factory', () => ({
   createStreamEventManager: createStreamEventManagerMock,
@@ -34,6 +31,10 @@ vi.mock('../../common/base.service', () => ({
     log() {}
   },
 }));
+
+import { InMemoryStreamEventManager } from '@/server/modules/AgentRuntime/InMemoryStreamEventManager';
+
+import { ResponsesService } from '../responses.service';
 
 const buildService = () => new (ResponsesService as any)(null, 'user_1', { workspaceId: 'ws_1' });
 
