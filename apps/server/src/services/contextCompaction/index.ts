@@ -211,10 +211,7 @@ export class ContextCompactionService {
     // One read past the cap is the sentinel: exhaustion is only observable by
     // asking the cursor once more, so a history of exactly the cap still passes.
     for (let pageIndex = 0; pageIndex <= MAX_HISTORY_PAGES; pageIndex++) {
-      const page = await this.messageService.queryMessages(
-        { ...scope, before },
-        { skipToolProjection: true },
-      );
+      const page = await this.messageService.queryMessages({ ...scope, before });
       const fresh = page.filter((message) => !seen.has(message.id));
       for (const message of fresh) seen.add(message.id);
 

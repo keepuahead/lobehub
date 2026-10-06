@@ -44,11 +44,10 @@ vi.mock('@lobechat/model-runtime', () => ({
 const scope = { agentId: 'agent-1', groupId: undefined, threadId: undefined, topicId: 'topic-1' };
 const settled = [{ content: 'New summary', id: 'cg-new', role: 'compressedGroup' }];
 
-/** History reads walk the `before` cursor; the settled read after finalize has no options. */
+/** History reads walk the `before` cursor until finalize; later reads return the settled list. */
 const serveHistory = (pages: (before?: { id: string }) => unknown[]) =>
-  mocks.queryMessages.mockImplementation(
-    async (params: { before?: { id: string } }, options?: { skipToolProjection?: boolean }) =>
-      options?.skipToolProjection ? pages(params.before) : settled,
+  mocks.queryMessages.mockImplementation(async (params: { before?: { id: string } }) =>
+    mocks.finalizeCompressionGroup.mock.calls.length > 0 ? settled : pages(params.before),
   );
 
 const history = [
@@ -82,10 +81,7 @@ describe('ContextCompactionService', () => {
 
     const result = await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
 
-    expect(mocks.queryMessages).toHaveBeenCalledWith(
-      { ...scope, before: undefined },
-      { skipToolProjection: true },
-    );
+    expect(mocks.queryMessages).toHaveBeenCalledWith({ ...scope, before: undefined });
     // Only live rows move into the new group; the old group is folded in by summary.
     expect(mocks.createCompressionGroup).toHaveBeenCalledWith({
       content: '...',
@@ -190,7 +186,7 @@ describe('ContextCompactionService', () => {
     await service.compact({ agentId: 'agent-1', topicId: 'topic-1' });
 
     // Walks the round cursor from the oldest raw row of each page.
-    const historyReads = mocks.queryMessages.mock.calls.filter(([, options]) => options);
+    const historyReads = mocks.queryMessages.mock.calls.filter(([params]) => 'before' in params);
     expect(historyReads.map(([params]) => params.before)).toEqual([
       undefined,
       { createdAt: new Date(3001), id: 'msg-1' },
@@ -302,8 +298,8 @@ describe('ContextCompactionService', () => {
   });
 
   it('deletes the finalized group when the settled list cannot be read back', async () => {
-    mocks.queryMessages.mockImplementation(async (_params, options) => {
-      if (options?.skipToolProjection) return history;
+    mocks.queryMessages.mockImplementation(async () => {
+      if (mocks.finalizeCompressionGroup.mock.calls.length === 0) return history;
       throw new RangeError('Maximum call stack size exceeded');
     });
     const service = new ContextCompactionService({} as never, 'user-1');
