@@ -116,6 +116,20 @@ describe('GroupActionsBar — hetero (assistantGroup) forward/select gating', ()
     expect(screen.getByTestId('action-bar')).toHaveAttribute('data-menu', 'regenerate,select,del');
   });
 
+  it('keeps the defaults for a completed group when the override has no regenerate', () => {
+    storeMock.isGenerating = false;
+    render(
+      <GroupActionsBar
+        actionsConfig={{ bar: ['copy'], menu: ['copy', 'divider', 'select', 'divider', 'del'] }}
+        data={data}
+        id="group-1"
+      />,
+    );
+    const bar = screen.getByTestId('action-bar');
+    expect(bar).toHaveAttribute('data-bar', 'delAndRegenerate');
+    expect(bar.getAttribute('data-menu')?.split(',')).toContain('share');
+  });
+
   /** @example Streaming tool-only groups remain restricted even with a Codex override. */
   it('keeps streaming no-text groups restricted with an override', () => {
     storeMock.isGenerating = true;
