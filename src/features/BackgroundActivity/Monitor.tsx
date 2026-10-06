@@ -9,6 +9,7 @@ import { electronDevtoolsService } from '@/services/electron/devtools';
 import { useGlobalStore } from '@/store/global';
 
 import { topicName } from './ActivityTable';
+import { agentName } from './AgentName';
 import {
   formatCpu,
   formatMemory,
@@ -28,12 +29,14 @@ export default function BackgroundActivityMonitor() {
     if (state.error || sampled.current === state.sampledAt) return;
     sampled.current = state.sampledAt;
     for (const activity of alerts.update(state.activities)) {
-      const topic = topicName(activity.topicId);
+      const owner = [agentName(activity.agentId), topicName(activity.topicId)]
+        .filter(Boolean)
+        .join(' / ');
       toast.warning({
         title: t('backgroundActivity.highUsage'),
         id: `background-${activity.rootId}`,
         description: t('backgroundActivity.alertDesc', {
-          name: topic ? `${activity.label} · ${topic}` : activity.label,
+          name: owner ? `${activity.label} · ${owner}` : activity.label,
           memory: formatMemory(activity.memoryMB),
           cpu: formatCpu(activity.cpuPercent),
         }),

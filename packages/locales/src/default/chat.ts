@@ -1,4 +1,5 @@
 export default {
+  'backgroundActivity.agent': 'Agent',
   'backgroundActivity.alertDesc': '{{name}} is using {{memory}} of memory and {{cpu}} CPU.',
   'backgroundActivity.cpu': 'CPU',
   'backgroundActivity.details': 'View details',

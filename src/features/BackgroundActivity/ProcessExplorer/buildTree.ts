@@ -6,6 +6,7 @@ import type { Activity, ProcessRow } from '../state';
 export type SortKey = 'cpu' | 'memory';
 
 export interface RowModel {
+  agentId?: string;
   appType?: string;
   cpu: number | null;
   cpuHot?: boolean;
@@ -33,6 +34,7 @@ export interface TreeLabels {
 
 export interface BuildTreeInput {
   activities: Activity[];
+  agentTitle: (id: string) => string | undefined;
   appProcesses: AppProcessRow[] | null;
   labels: TreeLabels;
   query: string;
@@ -106,6 +108,7 @@ const processDrafts = (processes: ProcessRow[]): Draft[] => {
 
 export const buildProcessTree = ({
   activities,
+  agentTitle,
   appProcesses,
   labels,
   query,
@@ -121,9 +124,12 @@ export const buildProcessTree = ({
 
   const topics = [...new Set(activities.map((row) => row.topicId))];
   const conversations: Draft[] = topics.flatMap((topicId) => {
-    const title = topicId ? (topicTitle(topicId) ?? labels.conversation) : labels.shared;
-    const children = activities
-      .filter((row) => row.topicId === topicId)
+    const topicActivities = activities.filter((row) => row.topicId === topicId);
+    const agentId = topicId ? topicActivities.find((row) => row.agentId)?.agentId : undefined;
+    const agent = agentId && agentTitle(agentId);
+    const topic = topicId ? (topicTitle(topicId) ?? labels.conversation) : labels.shared;
+    const title = agent ? `${agent} / ${topic}` : topic;
+    const children = topicActivities
       .filter((row) => matches(title, row.label, ...row.processes.flatMap((p) => [p.name, p.pid])))
       .map<Draft>((activity) => {
         const hot = activity.severity !== 'normal';
@@ -150,7 +156,13 @@ export const buildProcessTree = ({
       {
         children,
         key: `conversation:${topicId ?? 'shared'}`,
-        row: { ...sum(children.map((c) => c.row)), kind: 'conversation', label: title, topicId },
+        row: {
+          ...sum(children.map((c) => c.row)),
+          agentId,
+          kind: 'conversation',
+          label: title,
+          topicId,
+        },
       },
     ];
   });

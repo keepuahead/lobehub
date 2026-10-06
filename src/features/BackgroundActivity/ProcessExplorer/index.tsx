@@ -25,7 +25,8 @@ import { useTranslation } from 'react-i18next';
 
 import { useAppProcessMetrics } from '@/features/DevDock/widgets/appProcessMetrics';
 
-import { topicName, TopicTitle } from '../ActivityTable';
+import { ConversationTitle, topicName } from '../ActivityTable';
+import { agentName } from '../AgentName';
 import { formatCpu, formatMemory, stopActivity, useActivities } from '../state';
 import StopButton from '../StopButton';
 import {
@@ -47,7 +48,10 @@ const APP_ICONS: Record<string, LucideIcon> = {
 const rowIcon = (row: RowModel): LucideIcon | undefined => {
   if (row.kind === 'app') return APP_ICONS[row.appType ?? ''] ?? BoxIcon;
   if (row.kind === 'activity') return SquareTerminalIcon;
-  if (row.kind === 'conversation') return row.topicId ? MessageSquareIcon : CpuIcon;
+  if (row.kind === 'conversation') {
+    if (row.agentId && row.topicId) return undefined;
+    return row.topicId ? MessageSquareIcon : CpuIcon;
+  }
 };
 
 function Cells({ row }: { row: RowModel }) {
@@ -59,7 +63,11 @@ function Cells({ row }: { row: RowModel }) {
         {icon && <Icon className={styles.kind} icon={icon} size={14} />}
         {hot && <i className={styles.dot} />}
         <span className={styles.label} title={row.label}>
-          {row.kind === 'conversation' && row.topicId ? <TopicTitle id={row.topicId} /> : row.label}
+          {row.kind === 'conversation' && row.topicId ? (
+            <ConversationTitle agentId={row.agentId} topicId={row.topicId} />
+          ) : (
+            row.label
+          )}
         </span>
         {row.sub && <span className={styles.sub}>{row.sub}</span>}
       </span>
@@ -106,6 +114,7 @@ export default function ProcessExplorer() {
     () =>
       buildProcessTree({
         activities,
+        agentTitle: agentName,
         appProcesses: metrics?.processes ?? null,
         labels: {
           app: BRANDING_NAME,

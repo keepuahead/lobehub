@@ -79,6 +79,7 @@
   "audioPlayer.seek": "Seek audio",
   "availableAgents": "Available Agents",
   "backToBottom": "Jump to latest",
+  "backgroundActivity.agent": "Agent",
   "backgroundActivity.alertDesc": "{{name}} is using {{memory}} of memory and {{cpu}} CPU.",
   "backgroundActivity.cpu": "CPU",
   "backgroundActivity.details": "View details",

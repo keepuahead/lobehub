@@ -20,7 +20,9 @@ const activity = (
   topicId: string | undefined,
   cpu: number,
   names: string[],
+  agentId?: string,
 ): Activity => ({
+  agentId,
   cpuPercent: cpu,
   label: rootId,
   memoryMB: 10,
@@ -32,6 +34,7 @@ const activity = (
     pid: index + rootId.length * 100,
     ppid: index === 0 ? 1 : rootId.length * 100,
     rootId,
+    agentId,
     topicId,
   })),
   rootId,
@@ -43,9 +46,10 @@ const build = (query = '') =>
   buildProcessTree({
     activities: [
       activity('unowned', undefined, 90, ['tail']),
-      activity('slow', 't1', 1, ['sh', 'node']),
-      activity('busy', 't1', 50, ['vite']),
+      activity('slow', 't1', 1, ['sh', 'node'], 'a1'),
+      activity('busy', 't1', 50, ['vite'], 'a1'),
     ],
+    agentTitle: (id) => (id === 'a1' ? 'Coder' : undefined),
     appProcesses: [
       { cpuPercent: 1, name: null, pid: 7, type: 'Browser', windowTitle: null, workingSetMB: 300 },
       {
@@ -90,5 +94,18 @@ describe('buildProcessTree', () => {
     expect(background.children!.map((node) => node.key)).toEqual(['conversation:t1']);
     expect(background.children![0].children!.map((node) => node.key)).toEqual(['activity:slow']);
     expect(app.children).toBeUndefined();
+  });
+
+  it('names each conversation by its owning agent and topic, and filters by agent name', () => {
+    const { rows } = build();
+    expect(rows.get('conversation:t1')).toMatchObject({
+      agentId: 'a1',
+      label: 'Coder / Auth topic',
+      topicId: 't1',
+    });
+    expect(rows.get('conversation:shared')).toMatchObject({ agentId: undefined, label: 'Shared' });
+
+    const [background] = build('coder').treeData;
+    expect(background.children!.map((node) => node.key)).toEqual(['conversation:t1']);
   });
 });

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useChatStore } from '@/store/chat';
 
+import { AgentName } from './AgentName';
 import {
   type Activity,
   formatCpu,
@@ -58,8 +59,20 @@ const tableStyles = createStaticStyles(({ css }) => ({
   chevronOpen: css`
     transform: rotate(90deg);
   `,
+  conversation: css`
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+  `,
   critical: css`
     color: ${cssVar.colorError};
+  `,
+  ellipsis: css`
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   `,
   group: css`
     position: sticky;
@@ -161,10 +174,27 @@ const tableStyles = createStaticStyles(({ css }) => ({
   stale: css`
     opacity: 0.55;
   `,
+  separator: css`
+    color: ${cssVar.colorTextQuaternary};
+  `,
   warning: css`
     color: ${cssVar.colorWarning};
   `,
 }));
+
+/** "Agent / Topic" — tells the user which conversation a background process belongs to. */
+export function ConversationTitle({ agentId, topicId }: { agentId?: string; topicId: string }) {
+  if (!agentId) return <TopicTitle id={topicId} />;
+  return (
+    <span className={tableStyles.conversation}>
+      <AgentName id={agentId} />
+      <span className={tableStyles.separator}>/</span>
+      <span className={tableStyles.ellipsis}>
+        <TopicTitle id={topicId} />
+      </span>
+    </span>
+  );
+}
 
 export function TopicTitle({ id }: { id: string }) {
   const { t } = useTranslation('chat');
@@ -287,23 +317,34 @@ export default function ActivityTable() {
             <span className={tableStyles.headNum}>{t('backgroundActivity.cpu')}</span>
             <span />
           </div>
-          {groups.map((group) => (
-            <div key={group ?? 'shared'}>
-              <div className={tableStyles.group}>
-                <Icon icon={group ? MessageSquareIcon : CpuIcon} size={13} />
-                {group ? <TopicTitle id={group} /> : t('backgroundActivity.shared')}
-              </div>
-              {state.activities
-                .filter((row) => row.topicId === group)
-                .map((activity) => (
+          {groups.map((group) => {
+            const activities = state.activities.filter((row) => row.topicId === group);
+            const agentId = activities.find((row) => row.agentId)?.agentId;
+            return (
+              <div key={group ?? 'shared'}>
+                <div className={tableStyles.group}>
+                  {group ? (
+                    <>
+                      {!agentId && <Icon icon={MessageSquareIcon} size={13} />}
+                      <ConversationTitle agentId={agentId} topicId={group} />
+                    </>
+                  ) : (
+                    <>
+                      <Icon icon={CpuIcon} size={13} />
+                      {t('backgroundActivity.shared')}
+                    </>
+                  )}
+                </div>
+                {activities.map((activity) => (
                   <ActivityRows
                     activity={activity}
                     key={activity.rootId}
                     selected={state.selected === activity.rootId}
                   />
                 ))}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </Flexbox>
