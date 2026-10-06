@@ -3,32 +3,20 @@ import type { MiddlewareHandler } from 'hono';
 import { Credential, Receipt } from 'mppx';
 
 import type {
+  MachinePaymentMppx,
   MachinePaymentPrice,
   MachinePaymentPriceParams,
   MachinePaymentRecordParams,
 } from '@/business/server/machine-payments/types';
 
+export type {
+  ComposedPaymentResult,
+  MachinePaymentMppx,
+} from '@/business/server/machine-payments/types';
+
 const log = debug('lobe-hono:machine-payment');
 
 const RECEIPT_HEADER = 'Payment-Receipt';
-
-/** Outcome of a composed mppx handler for one HTTP request. */
-export type ComposedPaymentResult =
-  | { challenge: Response; status: 402 }
-  | { status: 200; withReceipt: (response: Response) => Response };
-
-/**
- * Structural view of the mppx instance this middleware needs.
- *
- * Kept structural on purpose: which payment methods the instance carries
- * (Stripe SPT, Tempo stablecoin, …) is a deployment decision that belongs to
- * the layer that constructs it, not to the protocol plumbing here.
- */
-export interface MachinePaymentMppx {
-  compose: (
-    ...entries: [string, Record<string, unknown>][]
-  ) => (input: Request) => Promise<ComposedPaymentResult>;
-}
 
 export interface MachinePaymentConfig {
   /** Canonical `name/intent` key of the configured method, e.g. `stripe/charge`. */
