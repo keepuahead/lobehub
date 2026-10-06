@@ -244,7 +244,7 @@ export default {
   'capture.captured': 'Captured content',
   'capture.counterExample': 'counter-example',
   'capture.counterExampleHint':
-    'Kept as a counter-example for the judge. It is not written to "Expected output".',
+    'Kept on the case for reference only. The judge never sees it, so write what makes it wrong into the criteria. It is not written to "Expected output".',
   'capture.kind.negative': 'Counter-example',
   'capture.kind.positive': 'Good example',
   'capture.positiveHint': 'Kept as the expected output — the answer a good one should match.',
@@ -549,7 +549,7 @@ export default {
   'testCaseDetail.breadcrumb.eval': 'Eval',
   'testCaseDetail.capturedOutput': 'Captured answer',
   'testCaseDetail.capturedOutputHint':
-    'The answer this case was captured from \u2014 kept as a counter-example for the judge, not as the expected output.',
+    'The answer this case was captured from \u2014 kept for reference only. The judge never sees it; it scores against the criteria and, if set, the expected output.',
   'testCaseDetail.context_one': 'Prior context · {{count}} turn',
   'testCaseDetail.context_other': 'Prior context · {{count}} turns',
   'testCaseDetail.counterExample': 'counter-example',
