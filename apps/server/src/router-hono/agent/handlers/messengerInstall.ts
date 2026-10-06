@@ -3,7 +3,10 @@ import type { Context } from 'hono';
 
 import { auth } from '@/auth';
 import { appEnv } from '@/envs/app';
-import { peekBindSession } from '@/server/services/messenger/bind/sessionStore';
+import {
+  isBindSessionExpired,
+  peekBindSession,
+} from '@/server/services/messenger/bind/sessionStore';
 import { issueOAuthState } from '@/server/services/messenger/oauth/stateStore';
 import { messengerPlatformRegistry } from '@/server/services/messenger/platforms';
 
@@ -83,7 +86,8 @@ export async function messengerInstall(c: Context): Promise<Response> {
   const bindPollId =
     bindSession?.platform === platform &&
     bindSession.kind === 'oauth' &&
-    bindSession.result.status === 'pending'
+    bindSession.result.status === 'pending' &&
+    !isBindSessionExpired(bindSession)
       ? bindSession.pollId
       : undefined;
   const state = await issueOAuthState({ bindPollId, lobeUserId: session.user.id, returnTo });

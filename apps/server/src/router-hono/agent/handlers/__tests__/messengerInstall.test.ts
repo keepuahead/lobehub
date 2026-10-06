@@ -21,6 +21,7 @@ vi.mock('@/server/services/messenger/oauth/stateStore', () => ({
 }));
 
 vi.mock('@/server/services/messenger/bind/sessionStore', () => ({
+  isBindSessionExpired: (session: { createdAt: number }) => session.createdAt < 0,
   peekBindSession: vi.fn(),
 }));
 
@@ -177,6 +178,16 @@ describe('GET /api/agent/messenger/:platform/install', () => {
 
     it('drops a bind id that belongs to another platform (or nobody)', async () => {
       vi.mocked(peekBindSession).mockResolvedValue({ ...pendingBind, platform: 'discord' });
+
+      await messengerInstall(
+        buildContext('slack', '/api/agent/messenger/slack/install?bind=poll-1'),
+      );
+
+      expect(vi.mocked(issueOAuthState).mock.calls[0][0].bindPollId).toBeUndefined();
+    });
+
+    it('drops a bind id whose session has already expired', async () => {
+      vi.mocked(peekBindSession).mockResolvedValue({ ...pendingBind, createdAt: -1 });
 
       await messengerInstall(
         buildContext('slack', '/api/agent/messenger/slack/install?bind=poll-1'),

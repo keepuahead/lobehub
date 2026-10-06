@@ -10,7 +10,7 @@ import type { LobeChatDatabase } from '@/database/type';
 
 import type { NormalizedInstallation } from '../platforms/types';
 import { greetAfterBind } from './greeting';
-import { peekBindSession, settleBindSession } from './sessionStore';
+import { isBindSessionExpired, peekBindSession, settleBindSession } from './sessionStore';
 import type { BindPollStatus } from './types';
 
 const log = debug('lobe-server:messenger:bind:oauth');
@@ -37,8 +37,15 @@ export const completeOAuthBind = async (params: {
   const { install, platform, pollId, serverDB, userId } = params;
 
   const session = await peekBindSession(pollId, userId);
-  if (!session || session.platform !== platform || session.result.status !== 'pending') {
-    log('completeOAuthBind: no pending %s session %s for user=%s', platform, pollId, userId);
+  // The record outlives the advertised `expiresAt` by a day so a late poll can
+  // still read its outcome; a consent finished after that window must not bind.
+  if (
+    !session ||
+    session.platform !== platform ||
+    session.result.status !== 'pending' ||
+    isBindSessionExpired(session)
+  ) {
+    log('completeOAuthBind: no live %s session %s for user=%s', platform, pollId, userId);
     return { status: 'expired' };
   }
 

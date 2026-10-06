@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./greeting', () => ({ greetAfterBind: mocks.greetAfterBind }));
 vi.mock('./sessionStore', () => ({
+  isBindSessionExpired: (session: { createdAt: number }) => session.createdAt < 0,
   peekBindSession: mocks.peekBindSession,
   settleBindSession: mocks.settleBindSession,
 }));
@@ -144,6 +145,22 @@ describe('completeOAuthBind', () => {
 
     expect(result).toEqual({ reason: 'identity_unavailable', status: 'failed' });
     expect(mocks.settleBindSession).toHaveBeenCalledWith('poll-1', result);
+  });
+
+  it('refuses a consent finished after the bind expired', async () => {
+    mocks.peekBindSession.mockResolvedValue({ ...pendingSession('slack'), createdAt: -1 });
+
+    await expect(
+      completeOAuthBind({
+        install: install(),
+        platform: 'slack',
+        pollId: 'poll-1',
+        serverDB,
+        userId: 'user-alice',
+      }),
+    ).resolves.toEqual({ status: 'expired' });
+    expect(mocks.upsertForPlatform).not.toHaveBeenCalled();
+    expect(mocks.greetAfterBind).not.toHaveBeenCalled();
   });
 
   it('ignores a session for another platform or one already settled', async () => {

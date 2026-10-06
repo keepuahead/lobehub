@@ -73,6 +73,7 @@ import {
   isBindSessionExpired,
   peekBindSession,
   saveBindSession,
+  settleBindSession,
 } from '@/server/services/messenger/bind/sessionStore';
 import type {
   BindFailureReason,
@@ -848,6 +849,12 @@ export const messengerRouter = router({
       let result: BindPollStatus;
       switch (session.platform) {
         case 'wechat': {
+          // A confirmed scan consumes the QR session, so a retried poll could
+          // no longer reach WeChat; answer from the recorded outcome instead.
+          if (session.result.status === 'linked' || session.result.status === 'failed') {
+            result = session.result;
+            break;
+          }
           try {
             const wechat = await finalizeWechatQrSession(ctx, input.pollId, {
               locale: session.locale,
@@ -869,6 +876,9 @@ export const messengerRouter = router({
             const reason = toBindFailureReason(error);
             if (!reason) throw error;
             result = { reason, status: 'failed' };
+          }
+          if (result.status === 'linked' || result.status === 'failed') {
+            await settleBindSession(input.pollId, result);
           }
           break;
         }

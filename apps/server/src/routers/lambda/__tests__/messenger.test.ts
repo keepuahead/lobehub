@@ -16,6 +16,7 @@ const {
   mockPeekBindSession,
   mockPeekLinkCodeStatus,
   mockSaveBindSession,
+  mockSettleBindSession,
   mockAssertBotFeatureAccess,
   mockConsumeLinkToken,
   mockConsumeWechatQrSession,
@@ -61,6 +62,7 @@ const {
   mockPeekBindSession: vi.fn(),
   mockPeekLinkCodeStatus: vi.fn(),
   mockSaveBindSession: vi.fn(),
+  mockSettleBindSession: vi.fn(),
   mockAssertBotFeatureAccess: vi.fn(),
   mockConsumeLinkToken: vi.fn(),
   mockConsumeWechatQrSession: vi.fn(),
@@ -229,6 +231,7 @@ vi.mock('@/server/services/messenger/bind/sessionStore', () => ({
   isBindSessionExpired: () => false,
   peekBindSession: mockPeekBindSession,
   saveBindSession: mockSaveBindSession,
+  settleBindSession: mockSettleBindSession,
 }));
 
 vi.mock('@/server/services/messenger/linkTokenStore', () => ({
@@ -1240,7 +1243,11 @@ describe('messengerRouter.pollBind', () => {
   });
 
   it('maps a WeChat scan in progress to scanned', async () => {
-    mockPeekBindSession.mockResolvedValue({ agentId: 'agent-toby', platform: 'wechat' });
+    mockPeekBindSession.mockResolvedValue({
+      agentId: 'agent-toby',
+      platform: 'wechat',
+      result: { status: 'pending' },
+    });
     mockPeekWechatQrSession.mockResolvedValue({ qrcode: 'qr-code', userId: 'user-1' });
     mockPollQrStatus.mockResolvedValue({ status: 'scaned' });
 
@@ -1249,6 +1256,56 @@ describe('messengerRouter.pollBind', () => {
       link: null,
       platform: 'wechat',
       status: 'scanned',
+    });
+    expect(mockSettleBindSession).not.toHaveBeenCalled();
+  });
+
+  it('answers a retried WeChat poll from the recorded link instead of the consumed QR', async () => {
+    const wechatLink = { id: 'wx-link', platform: 'wechat', platformUserId: 'wechat-user' };
+    mockListAccountLinks.mockResolvedValue([wechatLink]);
+    mockPeekBindSession.mockResolvedValue({
+      agentId: 'agent-toby',
+      platform: 'wechat',
+      result: { linkedAt: 7, platformUserId: 'wechat-user', status: 'linked' },
+    });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'wx-session-1' })).resolves.toEqual({
+      link: wechatLink,
+      linkedAt: 7,
+      platform: 'wechat',
+      platformUserId: 'wechat-user',
+      status: 'linked',
+    });
+    expect(mockPeekWechatQrSession).not.toHaveBeenCalled();
+    expect(mockPollQrStatus).not.toHaveBeenCalled();
+  });
+
+  it('records a WeChat refusal so later polls keep reporting it', async () => {
+    mockPeekBindSession.mockResolvedValue({
+      agentId: null,
+      platform: 'wechat',
+      result: { status: 'pending' },
+    });
+    mockPeekWechatQrSession.mockResolvedValue({ qrcode: 'qr-code', userId: 'user-1' });
+    mockPollQrStatus.mockResolvedValue({
+      baseurl: 'https://ilink.example.com',
+      bot_token: 'bot-token',
+      ilink_bot_id: 'wechat-bot',
+      ilink_user_id: 'wechat-user',
+      status: 'confirmed',
+    });
+    mockAcquireWechatQrFinalizeLock.mockResolvedValue('lock-token');
+    mockFindByPlatformUser.mockResolvedValue({ userId: 'user-2' });
+
+    const caller = createCaller(await createContextInner({ userId: 'user-1' }));
+    await expect(caller.pollBind({ pollId: 'wx-session-1' })).resolves.toMatchObject({
+      reason: 'already_linked_to_other',
+      status: 'failed',
+    });
+    expect(mockSettleBindSession).toHaveBeenCalledWith('wx-session-1', {
+      reason: 'already_linked_to_other',
+      status: 'failed',
     });
   });
 });
