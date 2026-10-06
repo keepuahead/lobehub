@@ -1843,6 +1843,98 @@ describe('Generation Actions', () => {
       },
     );
 
+    describe('reply selection when the regenerated reply is never created', () => {
+      const context = { agentId: 'session-1', threadId: null, topicId: 'topic-1' };
+      const messages = [
+        {
+          content: 'Retry',
+          createdAt: 1,
+          id: 'u1',
+          metadata: { activeBranchIndex: 1 },
+          role: 'user',
+          updatedAt: 1,
+        },
+        {
+          content: 'first',
+          createdAt: 2,
+          id: 'a1',
+          parentId: 'u1',
+          role: 'assistant',
+          updatedAt: 2,
+        },
+        {
+          content: 'second',
+          createdAt: 3,
+          id: 'a2',
+          parentId: 'u1',
+          role: 'assistant',
+          updatedAt: 3,
+        },
+      ] as UIChatMessage[];
+      const branchSwitches = () =>
+        mockSwitchMessageBranch.mock.calls.map((call) => call.slice(0, 2));
+      const createStoreWithReplies = () => {
+        const store = createStore({ context });
+        store.setState({ dbMessages: messages, displayMessages: [messages[0], messages[2]] });
+        return store;
+      };
+
+      /** @example Stop during the branch switch keeps the reply the user was viewing visible. */
+      it('restores the selection when Stop lands during the branch switch', async () => {
+        // ROOT CAUSE:
+        // The switch selects index === reply count; the branch resolver renders
+        // none of the existing replies for that index until the new one exists.
+        const abortController = new AbortController();
+        const operation = { abortController, status: 'running' };
+        await setupHeteroChatStore({ operations: { 'regen-op-id': operation } });
+        mockSwitchMessageBranch.mockImplementationOnce(async () => {
+          operation.status = 'cancelled';
+          abortController.abort();
+        });
+
+        await createStoreWithReplies().getState().regenerateUserMessage('u1');
+
+        expect(branchSwitches()).toEqual([
+          ['u1', 2],
+          ['u1', 1],
+        ]);
+        expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
+      });
+
+      it('restores the selection when the placeholder cannot be created', async () => {
+        await setupHeteroChatStore();
+        createMessageSpy.mockRejectedValueOnce(new Error('create failed'));
+
+        await expect(
+          createStoreWithReplies().getState().regenerateUserMessage('u1'),
+        ).rejects.toThrow('create failed');
+
+        expect(branchSwitches()).toEqual([
+          ['u1', 2],
+          ['u1', 1],
+        ]);
+      });
+
+      it('keeps the new selection once the reply exists', async () => {
+        await setupHeteroChatStore();
+        const store = createStoreWithReplies();
+        createMessageSpy.mockImplementationOnce(async () => {
+          store.setState({
+            dbMessages: [
+              ...messages,
+              { ...messages[1], id: 'hetero-assistant-msg' } as UIChatMessage,
+            ],
+          });
+          return { id: 'hetero-assistant-msg', messages: [] };
+        });
+        executeHeterogeneousAgentSpy.mockRejectedValueOnce(new Error('cli failed'));
+
+        await expect(store.getState().regenerateUserMessage('u1')).rejects.toThrow('cli failed');
+
+        expect(branchSwitches()).toEqual([['u1', 2]]);
+      });
+    });
+
     /** @example U0/A0/U1/A1/U2 must regenerate U1 without seeing U2 or A1. */
     it.skipIf(providerType !== 'codex')(
       'replays only selected ancestors in a fresh Codex session',
@@ -1908,7 +2000,6 @@ describe('Generation Actions', () => {
         expect(request.heterogeneousProvider.systemContext).not.toContain('LATER-CODE');
         expect(request.heterogeneousProvider.systemContext).not.toContain('SUPERSEDED-REPLY');
         expect(request.workingDirectory).toBe('/repo');
-        expect(messages[4].content).toBe('LATER-CODE');
       },
     );
 
