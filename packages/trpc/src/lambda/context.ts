@@ -209,10 +209,15 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
   log('marketAccessToken from cookie:', marketAccessToken ? '[HIDDEN]' : 'undefined');
   const workspaceId = request.headers.get('X-Workspace-Id')?.trim() || undefined;
 
+  // One-shot relay headers name one channel for one procedure: procedures of a
+  // batch would share it (and its call ids). The browser sends relayed calls
+  // unbatched, so a batch is never relayed.
+  const isBatch = request.nextUrl.searchParams.get('batch') === '1';
+
   const commonContext = {
     clientMetadata,
     clientIp,
-    llmRelay: readLlmRelayRequest(request.headers),
+    llmRelay: isBatch ? undefined : readLlmRelayRequest(request.headers),
     marketAccessToken,
     userAgent,
     workspaceId,
