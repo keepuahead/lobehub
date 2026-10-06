@@ -88,6 +88,12 @@ export const agentHumanRequests = pgTable(
     notifiedAt: timestamptz('notified_at'),
     notifyAttempts: integer('notify_attempts').notNull().default(0),
     notifyAttemptedAt: timestamptz('notify_attempted_at'),
+    /**
+     * Token of the delivery attempt in flight. Only the attempt holding it may
+     * mark the outcome delivered, so a stale wake that returns after a retry
+     * or discard started a new outcome cannot acknowledge the new one.
+     */
+    notifyClaimId: text('notify_claim_id'),
 
     ...timestamps,
   },

@@ -43,7 +43,12 @@ export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 export const NOTIFY_REDELIVER_AFTER_MS = 60 * 1000;
 
 /** A new outcome on the same row starts a fresh delivery. */
-const RESET_DELIVERY = { notifiedAt: null, notifyAttemptedAt: null, notifyAttempts: 0 };
+const RESET_DELIVERY = {
+  notifiedAt: null,
+  notifyAttemptedAt: null,
+  notifyAttempts: 0,
+  notifyClaimId: null,
+};
 
 const MAX_TEXT_CHARS = 20_000;
 const MAX_REASON_CHARS = 500;
@@ -438,11 +443,11 @@ export class AgentHumanRequestService {
 
     const now = new Date(this.now());
     const claimed = await this.model.claimNotification(item.id, now, staleMs);
-    if (!claimed) return;
+    if (!claimed?.notifyClaimId) return;
 
     try {
       await this.options.notifier.notify(toAgentHumanRequestItem(claimed));
-      await this.model.markNotified(item.id, new Date(this.now()));
+      await this.model.markNotified(item.id, claimed.notifyClaimId, new Date(this.now()));
     } catch (error) {
       console.error(
         '[agentHumanRequest] waking the agent failed for %s (attempt %d), will retry:',

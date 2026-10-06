@@ -6,7 +6,7 @@
   },
   "dialect": "postgresql",
   "enums": {},
-  "id": "0e09fca7-ba90-4d5e-8eb0-c8a4187421b5",
+  "id": "8120bf78-cab7-4414-81ec-e672662a478c",
   "policies": {},
   "prevId": "e06fef0f-72b9-4691-9b97-b17619adc71c",
   "roles": {},
@@ -4719,6 +4719,12 @@
         "notify_attempted_at": {
           "name": "notify_attempted_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notify_claim_id": {
+          "name": "notify_claim_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

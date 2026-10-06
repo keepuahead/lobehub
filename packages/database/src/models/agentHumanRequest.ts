@@ -210,6 +210,7 @@ export class AgentHumanRequestModel {
       .update(agentHumanRequests)
       .set({
         notifyAttemptedAt: now,
+        notifyClaimId: crypto.randomUUID(),
         notifyAttempts: sql`${agentHumanRequests.notifyAttempts} + 1`,
       })
       .where(and(eq(agentHumanRequests.id, id), this.undelivered(now, staleMs)))
@@ -218,11 +219,27 @@ export class AgentHumanRequestModel {
     return row;
   };
 
-  markNotified = async (id: string, now: Date = new Date()) => {
-    await this.db
+  /**
+   * Acknowledge the delivery of the attempt identified by `claimId` (from
+   * {@link claimNotification}). A no-op when a newer outcome or attempt has
+   * replaced it since — that one is acknowledged by its own claim. Returns
+   * whether this attempt's acknowledgement was recorded.
+   */
+  markNotified = async (id: string, claimId: string, now: Date = new Date()) => {
+    const rows = await this.db
       .update(agentHumanRequests)
-      .set({ notifiedAt: now })
-      .where(and(eq(agentHumanRequests.id, id), this.ownership()));
+      .set({ notifiedAt: now, notifyClaimId: null })
+      .where(
+        and(
+          eq(agentHumanRequests.id, id),
+          eq(agentHumanRequests.notifyClaimId, claimId),
+          isNull(agentHumanRequests.notifiedAt),
+          this.ownership(),
+        ),
+      )
+      .returning({ id: agentHumanRequests.id });
+
+    return rows.length > 0;
   };
 
   /** Ids of this owner's outcomes that a previous wake failed to deliver. */

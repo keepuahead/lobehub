@@ -315,6 +315,58 @@ describe('outcome delivery to the agent', () => {
     expect(notified).toHaveLength(0);
   });
 
+  it('does not let a stale wake acknowledge the newer outcome of a retry', async () => {
+    let releaseFirstWake!: () => void;
+    const wakes: string[] = [];
+    let call = 0;
+    const svc = new AgentHumanRequestService(serverDB, userId, {
+      notifier: {
+        notify: async (item) => {
+          call += 1;
+          if (call === 1) {
+            // The wake for the failed send is still starting a run...
+            await new Promise<void>((resolve) => (releaseFirstWake = resolve));
+            wakes.push(item.status);
+            return;
+          }
+          if (call === 2) throw new Error('could not start the agent run');
+          wakes.push(item.status);
+        },
+      },
+      now: () => now,
+      sealer: await KeyVaultsGateKeeper.initWithEnvKey(),
+      sender: async (accountId, message) => {
+        sent.push({ accountId, message });
+        return sendImpl(message);
+      },
+    });
+    const item = await svc.requestApproval(origin, action);
+
+    sendImpl = async () => {
+      throw new Error('provider unavailable');
+    };
+    const firstDecision = svc.decide(item.id, { action: 'approve' });
+    await vi.waitFor(() => expect(call).toBe(1));
+
+    // ...when the owner retries; the send succeeds but its own wake fails.
+    sendImpl = async () => ({ providerMessageId: 'pm-retry' });
+    await svc.decide(item.id, { action: 'retry' });
+
+    // The stale wake now returns. It must not mark the retry's outcome delivered.
+    releaseFirstWake();
+    await firstDecision;
+    let row = await rowOf(item.id);
+    expect(row.status).toBe('completed');
+    expect(row.notifiedAt).toBeNull();
+
+    // So the completed outcome is still redelivered.
+    now += NOTIFY_REDELIVER_AFTER_MS + 1;
+    await svc.list({});
+    expect(wakes).toEqual(['failed', 'completed']);
+    row = await rowOf(item.id);
+    expect(row.notifiedAt).not.toBeNull();
+  });
+
   it('delivers a retried outcome even after the failure was delivered', async () => {
     const svc = await service();
     const item = await svc.requestApproval(origin, action);

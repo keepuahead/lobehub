@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS "agent_human_requests" (
 	"notified_at" timestamp with time zone,
 	"notify_attempts" integer DEFAULT 0 NOT NULL,
 	"notify_attempted_at" timestamp with time zone,
+	"notify_claim_id" text,
 	"accessed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
