@@ -34,7 +34,11 @@ export interface StartBindResult {
 }
 
 export type BindFailureReason =
-  'already_linked_to_other' | 'identity_unavailable' | 'unlink_before_relink';
+  | 'already_linked_to_other'
+  | 'identity_unavailable'
+  /** The OAuth round trip ended without an install (denied, exchange or persist failed). */
+  | 'oauth_failed'
+  | 'unlink_before_relink';
 
 /**
  * Unified poll outcome. `scanned` is WeChat-only (the QR was scanned but not

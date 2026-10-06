@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { NormalizedInstallation } from '../platforms/types';
-import { completeOAuthBind } from './oauthBind';
+import { completeOAuthBind, failOAuthBind } from './oauthBind';
 
 const mocks = vi.hoisted(() => ({
   findByPlatformUser: vi.fn(),
@@ -159,5 +159,32 @@ describe('completeOAuthBind', () => {
       }),
     ).resolves.toEqual({ status: 'expired' });
     expect(mocks.upsertForPlatform).not.toHaveBeenCalled();
+  });
+});
+
+describe('failOAuthBind', () => {
+  it('settles the pending session as oauth_failed', async () => {
+    mocks.peekBindSession.mockResolvedValue(pendingSession('slack'));
+
+    await failOAuthBind({ platform: 'slack', pollId: 'poll-1', userId: 'user-alice' });
+
+    expect(mocks.peekBindSession).toHaveBeenCalledWith('poll-1', 'user-alice');
+    expect(mocks.settleBindSession).toHaveBeenCalledWith('poll-1', {
+      reason: 'oauth_failed',
+      status: 'failed',
+    });
+  });
+
+  it('leaves an already settled or foreign session alone', async () => {
+    mocks.peekBindSession.mockResolvedValue({
+      ...pendingSession('slack'),
+      result: { linkedAt: 1, platformUserId: 'U', status: 'linked' },
+    });
+    await failOAuthBind({ platform: 'slack', pollId: 'poll-1', userId: 'user-alice' });
+
+    mocks.peekBindSession.mockResolvedValue(null);
+    await failOAuthBind({ platform: 'slack', pollId: 'poll-1', userId: 'user-bob' });
+
+    expect(mocks.settleBindSession).not.toHaveBeenCalled();
   });
 });

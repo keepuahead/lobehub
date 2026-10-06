@@ -5,8 +5,11 @@ import { getServerDB } from '@/database/core/db-adaptor';
 import { MessengerInstallationModel } from '@/database/models/messengerInstallation';
 import { appEnv } from '@/envs/app';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
-import { completeOAuthBind } from '@/server/services/messenger/bind/oauthBind';
-import { consumeOAuthState } from '@/server/services/messenger/oauth/stateStore';
+import { completeOAuthBind, failOAuthBind } from '@/server/services/messenger/bind/oauthBind';
+import {
+  consumeOAuthState,
+  type OAuthStatePayload,
+} from '@/server/services/messenger/oauth/stateStore';
 import { messengerPlatformRegistry } from '@/server/services/messenger/platforms';
 
 const log = debug('lobe-server:messenger:oauth-callback');
@@ -25,6 +28,24 @@ const errorRedirect = (origin: string, platform: string, code: string, extra?: U
   const params = new URLSearchParams(extra);
   params.set('error', code);
   return redirectToPlatform(origin, platform, params.toString());
+};
+
+/**
+ * A one-click bind waits on this callback; settle it as failed on every
+ * terminal error so the page that started it stops polling. Best-effort — the
+ * redirect still goes out if the settle itself fails.
+ */
+const settleFailedBind = async (platform: string, statePayload: OAuthStatePayload | null) => {
+  if (!statePayload?.bindPollId) return;
+  try {
+    await failOAuthBind({
+      platform,
+      pollId: statePayload.bindPollId,
+      userId: statePayload.lobeUserId,
+    });
+  } catch (error) {
+    log('callback[%s]: failed to settle bind %s: %O', platform, statePayload.bindPollId, error);
+  }
 };
 
 /**
@@ -62,6 +83,10 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
   const errorParam = url.searchParams.get('error');
   if (errorParam) {
     log('callback[%s]: user denied or upstream error: %s', platform, errorParam);
+    // Slack and Discord echo `state` on a denial; consuming it both burns the
+    // single-use token and tells us which bind to stop.
+    const deniedState = url.searchParams.get('state');
+    if (deniedState) await settleFailedBind(platform, await consumeOAuthState(deniedState));
     return errorRedirect(url.origin, platform, errorParam);
   }
 
@@ -105,6 +130,7 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
     });
   } catch (error) {
     log('callback[%s]: exchangeCode failed: %O', platform, error);
+    await settleFailedBind(platform, statePayload);
     return errorRedirect(url.origin, platform, 'exchange_failed');
   }
 
@@ -143,6 +169,7 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
       platform,
       error,
     );
+    await settleFailedBind(platform, statePayload);
     return new Response(
       `Server is missing KEY_VAULTS_SECRET — ${definition.name} install token cannot be encrypted.`,
       { status: 503 },
@@ -171,6 +198,7 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
     );
   } catch (error) {
     log('callback[%s]: failed to persist installation row: %O', platform, error);
+    await settleFailedBind(platform, statePayload);
     return errorRedirect(url.origin, platform, 'persist_failed');
   }
 
@@ -193,6 +221,7 @@ export async function messengerOAuthCallback(c: Context): Promise<Response> {
       }
     } catch (error) {
       log('callback[%s]: one-click bind failed: %O', platform, error);
+      await settleFailedBind(platform, statePayload);
       return errorRedirect(url.origin, platform, 'bind_failed');
     }
   }

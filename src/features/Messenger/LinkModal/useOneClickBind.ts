@@ -54,6 +54,9 @@ export const useOneClickBind = (platform: OneClickBindPlatform, locale: string) 
 
   return {
     failedReason: poll.data?.status === 'failed' ? poll.data.reason : undefined,
+    // Kept until a poll succeeds again — SWR clears `error` on the next good
+    // response — so a flaky network does not strand the modal on its spinner.
+    pollError: poll.error as unknown,
     retry,
     start: start.data,
     startError: start.error as unknown,

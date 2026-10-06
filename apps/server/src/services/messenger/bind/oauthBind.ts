@@ -98,3 +98,22 @@ export const completeOAuthBind = async (params: {
   });
   return result;
 };
+
+/**
+ * Settle a one-click bind whose OAuth round trip ended without an install —
+ * the person denied consent, or the code exchange / install write failed — so
+ * the polling page leaves its waiting state instead of spinning until expiry.
+ * Only the owner's still-pending session for this platform is touched.
+ */
+export const failOAuthBind = async (params: {
+  platform: string;
+  pollId: string;
+  userId: string;
+}): Promise<void> => {
+  const session = await peekBindSession(params.pollId, params.userId);
+  if (!session || session.platform !== params.platform || session.result.status !== 'pending') {
+    return;
+  }
+  await settleBindSession(params.pollId, { reason: 'oauth_failed', status: 'failed' });
+  log('failOAuthBind: %s session %s settled as oauth_failed', params.platform, params.pollId);
+};

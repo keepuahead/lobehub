@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessengerInstallationModel } from '@/database/models/messengerInstallation';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
-import { completeOAuthBind } from '@/server/services/messenger/bind/oauthBind';
+import { completeOAuthBind, failOAuthBind } from '@/server/services/messenger/bind/oauthBind';
 import { exchangeCode } from '@/server/services/messenger/oauth/slackOAuth';
 import { consumeOAuthState } from '@/server/services/messenger/oauth/stateStore';
 
@@ -27,6 +27,7 @@ vi.mock('@/server/services/messenger/oauth/stateStore', () => ({
 
 vi.mock('@/server/services/messenger/bind/oauthBind', () => ({
   completeOAuthBind: vi.fn(),
+  failOAuthBind: vi.fn(),
 }));
 
 vi.mock('@/server/services/messenger/oauth/slackOAuth', () => ({
@@ -454,6 +455,40 @@ describe('one-click bind on the OAuth callback', () => {
     const loc = new URL(res.headers.get('location')!);
     expect(loc.pathname).toBe('/settings/messenger/slack');
     expect(loc.searchParams.get('error')).toBe('bind_already_linked_to_other');
+  });
+
+  it('stops the waiting page when the person denies consent', async () => {
+    const res = await messengerOAuthCallback(buildContext('slack', 'error=access_denied&state=s'));
+
+    expect(consumeOAuthState).toHaveBeenCalledWith('s');
+    expect(failOAuthBind).toHaveBeenCalledWith({
+      platform: 'slack',
+      pollId: 'poll-1',
+      userId: 'lobe-user-1',
+    });
+    expect(new URL(res.headers.get('location')!).searchParams.get('error')).toBe('access_denied');
+  });
+
+  it('stops the waiting page when the code exchange fails', async () => {
+    vi.mocked(exchangeCode).mockRejectedValue(new Error('invalid_code'));
+
+    const res = await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    expect(failOAuthBind).toHaveBeenCalledWith({
+      platform: 'slack',
+      pollId: 'poll-1',
+      userId: 'lobe-user-1',
+    });
+    expect(completeOAuthBind).not.toHaveBeenCalled();
+    expect(new URL(res.headers.get('location')!).searchParams.get('error')).toBe('exchange_failed');
+  });
+
+  it('stops the waiting page when the install cannot be saved', async () => {
+    vi.mocked(MessengerInstallationModel.upsert).mockRejectedValueOnce(new Error('db down'));
+
+    await messengerOAuthCallback(buildContext('slack', 'code=c&state=s'));
+
+    expect(failOAuthBind).toHaveBeenCalledWith(expect.objectContaining({ pollId: 'poll-1' }));
   });
 
   it('leaves a plain install (no bind) untouched', async () => {

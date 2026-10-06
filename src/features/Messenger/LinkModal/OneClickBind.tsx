@@ -40,6 +40,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 const FAILED_REASON_KEYS = {
   already_linked_to_other: 'messenger.bind.failed.alreadyLinkedToOther',
   identity_unavailable: 'messenger.bind.failed.identityUnavailable',
+  oauth_failed: 'messenger.bind.failed.oauthFailed',
   unlink_before_relink: 'messenger.bind.failed.unlinkBeforeRelink',
 } as const;
 
@@ -60,6 +61,7 @@ const OneClickBind = memo<OneClickBindProps>(({ name, platform }) => {
   const { t, i18n } = useTranslation('messenger');
   const {
     failedReason,
+    pollError,
     retry: restart,
     start,
     startError,
@@ -119,6 +121,18 @@ const OneClickBind = memo<OneClickBindProps>(({ name, platform }) => {
       <>
         <PlatformAvatar platform={platform} size={64} />
         <Text type="secondary">{t('messenger.bind.expired')}</Text>
+        {retry}
+      </>
+    );
+  }
+
+  if (pollError) {
+    return (
+      <>
+        <PlatformAvatar platform={platform} size={64} />
+        <Text style={{ textAlign: 'center' }} type="danger">
+          {getMessengerErrorMessage(pollError, t, 'messenger.bind.pollFailed')}
+        </Text>
         {retry}
       </>
     );

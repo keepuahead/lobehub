@@ -96,6 +96,16 @@ describe('useOneClickBind', () => {
     expect(result.current.failedReason).toBe('already_linked_to_other');
   });
 
+  it('exposes a polling failure instead of reporting pending forever', async () => {
+    messengerServiceMocks.startBind.mockResolvedValue(deeplinkStart('poll-err'));
+    messengerServiceMocks.pollBind.mockRejectedValue(new Error('network down'));
+
+    const { result } = renderHook(() => useOneClickBind('telegram', 'en-US'), { wrapper });
+
+    await waitFor(() => expect(result.current.pollError).toBeInstanceOf(Error));
+    expect((result.current.pollError as Error).message).toBe('network down');
+  });
+
   it('exposes a start failure without polling', async () => {
     messengerServiceMocks.startBind.mockRejectedValue(new Error('not configured'));
 
