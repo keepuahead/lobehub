@@ -4,17 +4,12 @@ import { Flexbox, Icon } from '@lobehub/ui';
 import { Button, QRCode, Spin, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { CircleCheckIcon, RefreshCwIcon } from 'lucide-react';
-import { memo, useEffect, useState } from 'react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import useSWR, { useSWRConfig } from 'swr';
-
-import { messengerKeys } from '@/libs/swr/keys';
-import { messengerService } from '@/services/messenger';
 
 import { PlatformAvatar } from '../constants';
 import { getMessengerErrorMessage } from '../i18n';
-
-const POLL_INTERVAL_MS = 2000;
+import { type OneClickBindPlatform, useOneClickBind } from './useOneClickBind';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   qrIconOverlay: css`
@@ -42,8 +37,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-export type OneClickBindPlatform = 'discord' | 'slack' | 'telegram';
-
 const FAILED_REASON_KEYS = {
   already_linked_to_other: 'messenger.bind.failed.alreadyLinkedToOther',
   identity_unavailable: 'messenger.bind.failed.identityUnavailable',
@@ -65,60 +58,33 @@ interface OneClickBindProps {
  */
 const OneClickBind = memo<OneClickBindProps>(({ name, platform }) => {
   const { t, i18n } = useTranslation('messenger');
-  const { mutate } = useSWRConfig();
-  const [attempt, setAttempt] = useState(0);
-
-  const start = useSWR(
-    messengerKeys.startBind(platform, attempt),
-    () => messengerService.startBind({ locale: i18n.language, platform }),
-    {
-      revalidateIfStale: false,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      shouldRetryOnError: false,
-    },
-  );
-  const pollId = start.data?.pollId;
-  const poll = useSWR(
-    pollId ? messengerKeys.pollBind(pollId) : null,
-    () => messengerService.pollBind(pollId!),
-    {
-      refreshInterval: (latest) =>
-        !latest || latest.status === 'pending' || latest.status === 'scanned'
-          ? POLL_INTERVAL_MS
-          : 0,
-      revalidateOnFocus: false,
-    },
-  );
-  const status = poll.data?.status ?? 'pending';
-
-  // The detail page behind the modal lists links and installs; refresh it the
-  // moment the bind lands so closing the modal shows the new connection.
-  useEffect(() => {
-    if (status !== 'linked') return;
-    void mutate(messengerKeys.listMyLinks());
-    void mutate(messengerKeys.listMyInstallations());
-  }, [mutate, status]);
+  const {
+    failedReason,
+    retry: restart,
+    start,
+    startError,
+    status,
+  } = useOneClickBind(platform, i18n.language);
 
   const retry = (
-    <Button icon={<Icon icon={RefreshCwIcon} />} onClick={() => setAttempt((n) => n + 1)}>
+    <Button icon={<Icon icon={RefreshCwIcon} />} onClick={restart}>
       {t('messenger.bind.retry')}
     </Button>
   );
 
-  if (start.error) {
+  if (startError) {
     return (
       <>
         <PlatformAvatar platform={platform} size={64} />
         <Text style={{ textAlign: 'center' }} type="danger">
-          {getMessengerErrorMessage(start.error, t, 'messenger.error.platformNotConfigured')}
+          {getMessengerErrorMessage(startError, t, 'messenger.error.platformNotConfigured')}
         </Text>
         {retry}
       </>
     );
   }
 
-  if (!start.data) return <Spin />;
+  if (!start) return <Spin />;
 
   if (status === 'linked') {
     return (
@@ -136,12 +102,12 @@ const OneClickBind = memo<OneClickBindProps>(({ name, platform }) => {
     );
   }
 
-  if (poll.data?.status === 'failed') {
+  if (status === 'failed' && failedReason) {
     return (
       <>
         <PlatformAvatar platform={platform} size={64} />
         <Text style={{ textAlign: 'center' }} type="warning">
-          {t(FAILED_REASON_KEYS[poll.data.reason], { platform: name })}
+          {t(FAILED_REASON_KEYS[failedReason], { platform: name })}
         </Text>
         {retry}
       </>
@@ -158,7 +124,7 @@ const OneClickBind = memo<OneClickBindProps>(({ name, platform }) => {
     );
   }
 
-  const { kind, payload } = start.data;
+  const { kind, payload } = start;
   const waiting = (
     <Flexbox horizontal align="center" gap={8}>
       <Spin size="small" />
