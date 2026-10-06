@@ -1915,6 +1915,40 @@ describe('Generation Actions', () => {
         ]);
       });
 
+      /** @example Stop while the placeholder is created keeps the reply the user was viewing. */
+      it('restores the selection when Stop lands while the placeholder is created', async () => {
+        // ROOT CAUSE:
+        // The removed placeholder can still be in the store when the restore
+        // runs, so counting rows reported the reply as created.
+        const abortController = new AbortController();
+        const operation = { abortController, status: 'running' };
+        await setupHeteroChatStore({ operations: { 'regen-op-id': operation } });
+        const store = createStoreWithReplies();
+        createMessageSpy.mockImplementationOnce(async () => {
+          store.setState({
+            dbMessages: [
+              ...messages,
+              { ...messages[1], id: 'hetero-assistant-msg' } as UIChatMessage,
+            ],
+          });
+          operation.status = 'cancelled';
+          abortController.abort();
+          return { id: 'hetero-assistant-msg', messages: [] };
+        });
+        vi.spyOn(messageService, 'removeMessage').mockResolvedValue({
+          messages: [],
+          success: true,
+        } as any);
+
+        await store.getState().regenerateUserMessage('u1');
+
+        expect(branchSwitches()).toEqual([
+          ['u1', 2],
+          ['u1', 1],
+        ]);
+        expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
+      });
+
       it('keeps the new selection once the reply exists', async () => {
         await setupHeteroChatStore();
         const store = createStoreWithReplies();

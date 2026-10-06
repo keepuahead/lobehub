@@ -259,6 +259,8 @@ export const runHeterogeneousFromExistingMessage = async (
     heterogeneousProvider: HeterogeneousProviderConfig;
     /** Image attachments from the original user message — forwarded to the CLI for vision support */
     imageList?: ChatImageItem[];
+    /** Called once the placeholder is kept and the native run is about to start. */
+    onExecutionStart?: () => void;
     parentMessageId: string;
     parentOperationId: string;
     prompt: string;
@@ -286,6 +288,7 @@ export const runHeterogeneousFromExistingMessage = async (
     freshSession,
     heterogeneousProvider,
     imageList,
+    onExecutionStart,
     parentMessageId,
     parentOperationId,
     prompt,
@@ -371,6 +374,7 @@ export const runHeterogeneousFromExistingMessage = async (
     type: 'execHeterogeneousAgent',
   });
   chatStore.associateMessageWithOperation(assistantMsg.id, heteroOpId);
+  onExecutionStart?.();
 
   const outcome = await executeHeterogeneousAgent(() => useChatStore.getState(), {
     assistantMessageId: assistantMsg.id,
@@ -461,9 +465,15 @@ const createBranchRestore = (
         ? displayed
         : replies.length - 1;
 
-  return async () => {
+  /**
+   * @param replyStarted - Whether the new reply's run started, when the caller
+   *   knows. A placeholder removed after Stop can still be in the store, so a
+   *   row count alone would report it as created.
+   */
+  return async (replyStarted?: boolean) => {
     if (replies.length === 0) return;
-    const created = readDbMessages().filter((m) => m.parentId === messageId).length > childCount;
+    const created =
+      replyStarted ?? readDbMessages().filter((m) => m.parentId === messageId).length > childCount;
     if (created) return;
     try {
       await chatStore.switchMessageBranch(messageId, index, { operationId });
@@ -508,7 +518,8 @@ const regenerateUserMessageFromSource = async (
     context: { ...context, messageId },
     type: 'regenerate',
   });
-  let restoreBranch: (() => Promise<void>) | undefined;
+  let restoreBranch: ((replyStarted?: boolean) => Promise<void>) | undefined;
+  let replyStarted: boolean | undefined;
 
   try {
     const initialContext = mergeAgentRuntimeInitialContexts(
@@ -621,6 +632,7 @@ const regenerateUserMessageFromSource = async (
     // session; resuming the latest transcript would include replaced/later turns.
     // Claude Code retains its existing session-resume behavior.
     if (runtimeType === 'hetero' && heterogeneousProvider) {
+      replyStarted = false;
       await runHeterogeneousFromExistingMessage(chatStore, {
         context,
         heterogeneousProvider,
@@ -638,6 +650,9 @@ const regenerateUserMessageFromSource = async (
                 ),
               }
             : undefined,
+        onExecutionStart: () => {
+          replyStarted = true;
+        },
         parentMessageId: messageId,
         parentOperationId: operationId,
         prompt: item.content,
@@ -658,7 +673,7 @@ const regenerateUserMessageFromSource = async (
 
     settleGenerationEntry(chatStore, operationId, () => hooks.onRegenerateComplete?.(messageId));
   } catch (error) {
-    await restoreBranch?.();
+    await restoreBranch?.(replyStarted);
     if (useChatStore.getState().operations[operationId]?.abortController?.signal.aborted) return;
     chatStore.failOperation(operationId, {
       message: error instanceof Error ? error.message : String(error),
