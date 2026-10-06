@@ -13,6 +13,7 @@ import { langfuseEnv } from '@/envs/langfuse';
 import { toolsEnv } from '@/envs/tools';
 import { parseSSOProviders } from '@/libs/better-auth/utils/server';
 import { parseSystemAgent } from '@/server/globalConfig/parseSystemAgent';
+import { isLlmRelayDeploymentReady } from '@/server/modules/AgentRuntime/llmRelay/deployment';
 import { type GlobalServerConfig } from '@/types/serverConfig';
 import { cleanObject } from '@/utils/object';
 
@@ -151,6 +152,9 @@ export const getServerGlobalConfig = async () => {
     // Expose Agent Gateway URL to client (used by hetero agents; also required for queue mode)
     ...(appEnv.AGENT_GATEWAY_URL ? { agentGatewayUrl: appEnv.AGENT_GATEWAY_URL } : undefined),
     agentGatewayProtocol: resolveAgentGatewayProtocol(),
+    // Whether the server can relay an LLM call to a tab (gateway + Redis): only
+    // then does the browser drop its own provider fallback for the one-shot relay.
+    llmRelayAvailable: isLlmRelayDeploymentReady(),
 
     image: cleanObject({
       defaultImageNum: imageEnv.AI_IMAGE_DEFAULT_IMAGE_NUM,
