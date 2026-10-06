@@ -255,6 +255,19 @@ class AgentEvalService {
   async deleteRun(id: string) {
     return lambdaClient.agentEval.deleteRun.mutate({ id });
   }
+
+  // ============ Replay comparison ============
+  async getReplayComparison(runId: string) {
+    return lambdaClient.agentEval.getReplayComparison.query({ runId });
+  }
+
+  async listReplayComparisonsByTestCase(testCaseId: string) {
+    return lambdaClient.agentEval.listReplayComparisonsByTestCase.query({ testCaseId });
+  }
+
+  async retryReplayComparisonErrors(runId: string) {
+    return lambdaClient.agentEval.retryReplayComparisonErrors.mutate({ runId });
+  }
 }
 
 export const agentEvalService = new AgentEvalService();

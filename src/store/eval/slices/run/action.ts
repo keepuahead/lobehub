@@ -133,6 +133,33 @@ export class RunActionImpl {
     await this.#get().refreshRunDetail(runId);
   };
 
+  /** Re-dispatch the errored cells of a cross-model comparison and refetch its grid. */
+  retryReplayComparisonErrors = async (runId: string): Promise<{ cellCount: number }> => {
+    const result = await agentEvalService.retryReplayComparisonErrors(runId);
+    await mutate(evalKeys.replayComparison(runId));
+    return result;
+  };
+
+  /**
+   * The model × case grid of one replay run. Polls while cells are still being
+   * replayed or judged, so the page settles on its own without a manual refresh.
+   */
+  useFetchReplayComparison = (runId?: string) =>
+    useClientDataSWR(
+      runId ? evalKeys.replayComparison(runId) : null,
+      () => agentEvalService.getReplayComparison(runId!),
+      {
+        refreshInterval: (data) =>
+          data && ['pending', 'running'].includes(data.run.status as string) ? 3000 : 0,
+      },
+    );
+
+  /** Every comparison one test case took part in, newest first. */
+  useFetchTestCaseComparisons = (testCaseId?: string) =>
+    useClientDataSWR(testCaseId ? evalKeys.testCaseComparisons(testCaseId) : null, () =>
+      agentEvalService.listReplayComparisonsByTestCase(testCaseId!),
+    );
+
   retryRunErrors = async (id: string): Promise<void> => {
     await agentEvalService.retryRunErrors(id);
     await this.#get().refreshRunDetail(id);
