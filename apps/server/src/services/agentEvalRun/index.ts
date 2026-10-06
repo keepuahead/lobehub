@@ -1,7 +1,7 @@
 import { LOADING_FLAT } from '@lobechat/const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { idGenerator } from '@lobechat/database';
-import { evaluate } from '@lobechat/eval-rubric';
+import { evaluate, type MatchContext } from '@lobechat/eval-rubric';
 import type {
   EvalBenchmarkRubric,
   EvalCaseEnvironment,
@@ -44,6 +44,9 @@ import {
 } from '@/server/workflows/agentEvalRun';
 
 import { evaluateAndFinalizeRun } from './aggregate';
+import { createEvalJudgeContext, resolveEvalJudgeModel } from './judgeContext';
+
+const LLM_JUDGED_RUBRICS = new Set<string>(['answer-relevance', 'llm-rubric']);
 
 /** Round cost to at most 6 decimal places to avoid floating-point noise */
 const roundCost = (v: number): number => Math.round(v * 1e6) / 1e6;
@@ -1951,7 +1954,7 @@ export class AgentEvalRunService {
     // Run evaluation
     const result = await evaluate(
       { actual: lastAssistantMsg.content, rubrics: effectiveRubrics, testCase: testCase.content },
-      { passThreshold },
+      { matchContext: await this.createJudgeContext(run, effectiveRubrics), passThreshold },
     );
 
     return {
@@ -2316,6 +2319,30 @@ export class AgentEvalRunService {
 
   evaluateAndFinalizeRun = evaluateAndFinalizeRun;
 
+  /**
+   * LLM judge for rubrics that need one. Without it `llm-rubric` and
+   * `answer-relevance` cases score 0 with "LLM judge not available". Judge
+   * model: run config > user's system-agent topic model > product default.
+   */
+  private async createJudgeContext(
+    run: { config?: EvalRunConfig | null },
+    rubrics: EvalBenchmarkRubric[],
+  ): Promise<MatchContext | undefined> {
+    if (!rubrics.some((rubric) => LLM_JUDGED_RUBRICS.has(rubric.type))) return undefined;
+
+    const judge = await resolveEvalJudgeModel(this.db, this.userId, {
+      model: run.config?.judgeModel,
+      provider: run.config?.judgeProvider,
+    });
+    return createEvalJudgeContext({
+      db: this.db,
+      judge,
+      trigger: 'eval-run',
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
+  }
+
   private async evaluateCase(
     runId: string,
     runTopic: {
@@ -2393,7 +2420,7 @@ export class AgentEvalRunService {
     // Run evaluation
     const result = await evaluate(
       { actual: lastAssistantMsg.content, rubrics: effectiveRubrics, testCase: testCase.content },
-      { passThreshold },
+      { matchContext: await this.createJudgeContext(run, effectiveRubrics), passThreshold },
     );
 
     const evalResult: EvalRunTopicResult = {
