@@ -6,7 +6,7 @@ import type {
   AgentHumanRequestSurface,
   AgentHumanRequestType,
 } from '@lobechat/types';
-import { index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import { createInsertSchema } from 'drizzle-zod';
 
 import { idGenerator } from '../utils/idGenerator';
@@ -79,6 +79,15 @@ export const agentHumanRequests = pgTable(
     expiresAt: timestamptz('expires_at').notNull(),
     decidedAt: timestamptz('decided_at'),
     decidedVia: text('decided_via').$type<AgentHumanRequestSurface>(),
+
+    /**
+     * Delivery of the outcome to the agent. A decided row whose `notified_at`
+     * is still `null` has an outcome the agent has not been told yet; it is
+     * redelivered until it lands or `notify_attempts` reaches the cap.
+     */
+    notifiedAt: timestamptz('notified_at'),
+    notifyAttempts: integer('notify_attempts').notNull().default(0),
+    notifyAttemptedAt: timestamptz('notify_attempted_at'),
 
     ...timestamps,
   },

@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS "agent_human_requests" (
 	"expires_at" timestamp with time zone NOT NULL,
 	"decided_at" timestamp with time zone,
 	"decided_via" text,
+	"notified_at" timestamp with time zone,
+	"notify_attempts" integer DEFAULT 0 NOT NULL,
+	"notify_attempted_at" timestamp with time zone,
 	"accessed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL

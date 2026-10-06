@@ -9,7 +9,12 @@ import { agentHumanRequests, agents, users, workspaces } from '@/database/schema
 import type { LobeChatDatabase } from '@/database/type';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 
-import { AgentHumanRequestService, APPROVAL_TTL_MS, unavailableSender } from '../index';
+import {
+  AgentHumanRequestService,
+  APPROVAL_TTL_MS,
+  NOTIFY_REDELIVER_AFTER_MS,
+  unavailableSender,
+} from '../index';
 import { buildOutcomePrompt } from '../outcomePrompt';
 
 /**
@@ -31,12 +36,22 @@ const CODE = '482913';
 let sent: { accountId: string; message: AgentAccountOutboundMessage }[] = [];
 let notified: AgentHumanRequestItem[] = [];
 let sendImpl: (message: AgentAccountOutboundMessage) => Promise<{ providerMessageId: string }>;
+/** How many upcoming wakes fail (the agent run could not be started). */
+let failWakes = 0;
 let now = Date.now();
 
 const service = async (owner = userId, workspaceId?: string) =>
   new AgentHumanRequestService(serverDB, owner, {
     workspaceId,
-    notifier: { notify: async (item) => void notified.push(item) },
+    notifier: {
+      notify: async (item) => {
+        if (failWakes > 0) {
+          failWakes -= 1;
+          throw new Error('could not start the agent run');
+        }
+        notified.push(item);
+      },
+    },
     now: () => now,
     sealer: await KeyVaultsGateKeeper.initWithEnvKey(),
     sender: async (accountId, message) => {
@@ -84,6 +99,7 @@ beforeAll(() => {
 beforeEach(async () => {
   sent = [];
   notified = [];
+  failWakes = 0;
   now = Date.now();
   sendImpl = async () => ({ providerMessageId: `pm-${sent.length}` });
 
@@ -248,6 +264,70 @@ describe('approval cards', () => {
     await expect(other.decide(item.id, { action: 'approve' })).rejects.toThrow(/not found/i);
     expect(await other.list({})).toEqual([]);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('outcome delivery to the agent', () => {
+  it('redelivers an outcome whose wake failed, once, on a later owner read', async () => {
+    const svc = await service();
+    const item = await svc.requestApproval(origin, action);
+
+    failWakes = 1;
+    const decided = await svc.decide(item.id, { action: 'approve' });
+
+    // The action result stands; only the wake is owed.
+    expect(decided.status).toBe('completed');
+    expect(notified).toHaveLength(0);
+    let row = await rowOf(item.id);
+    expect(row).toMatchObject({ notifiedAt: null, notifyAttempts: 1 });
+
+    // A read right away leaves a possibly in-flight wake alone.
+    await svc.list({});
+    expect(notified).toHaveLength(0);
+
+    // Once the attempt is stale, the next read delivers it.
+    now += NOTIFY_REDELIVER_AFTER_MS + 1;
+    await svc.list({});
+    expect(notified.map((n) => [n.id, n.status])).toEqual([[item.id, 'completed']]);
+    row = await rowOf(item.id);
+    expect(row.notifiedAt).not.toBeNull();
+    expect(row.notifyAttempts).toBe(2);
+
+    // A delivered outcome is never sent again.
+    now += NOTIFY_REDELIVER_AFTER_MS + 1;
+    await svc.get(item.id);
+    expect(notified).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('stops waking after the attempt cap', async () => {
+    const svc = await service();
+    const item = await svc.requestApproval(origin, action);
+
+    failWakes = 100;
+    await svc.decide(item.id, { action: 'decline' });
+    for (let i = 0; i < 8; i++) {
+      now += NOTIFY_REDELIVER_AFTER_MS + 1;
+      await svc.list({});
+    }
+
+    expect((await rowOf(item.id)).notifyAttempts).toBe(5);
+    expect(notified).toHaveLength(0);
+  });
+
+  it('delivers a retried outcome even after the failure was delivered', async () => {
+    const svc = await service();
+    const item = await svc.requestApproval(origin, action);
+
+    sendImpl = async () => {
+      throw new Error('provider unavailable');
+    };
+    await svc.decide(item.id, { action: 'approve' });
+    sendImpl = async () => ({ providerMessageId: 'pm-retry' });
+    await svc.decide(item.id, { action: 'retry' });
+
+    expect(notified.map((n) => n.status)).toEqual(['failed', 'completed']);
+    expect((await rowOf(item.id)).notifiedAt).not.toBeNull();
   });
 });
 

@@ -35,6 +35,16 @@ const log = debug('lobe-server:agent-human-request');
 /** An approval waits a day: the owner may answer from their phone hours later. */
 export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * A wake that has not confirmed delivery within this window is treated as
+ * lost and redelivered on the owner's next read. Long enough that a wake still
+ * in flight (starting a run) is not doubled.
+ */
+export const NOTIFY_REDELIVER_AFTER_MS = 60 * 1000;
+
+/** A new outcome on the same row starts a fresh delivery. */
+const RESET_DELIVERY = { notifiedAt: null, notifyAttemptedAt: null, notifyAttempts: 0 };
+
 const MAX_TEXT_CHARS = 20_000;
 const MAX_REASON_CHARS = 500;
 
@@ -215,12 +225,14 @@ export class AgentHumanRequestService {
     type?: AgentHumanRequestType;
   }): Promise<AgentHumanRequestItem[]> => {
     await this.model.expireDue(new Date(this.now()));
+    await this.redeliverOutcomes();
     const rows = await this.model.list(params);
     return rows.map(toAgentHumanRequestItem);
   };
 
   get = async (id: string): Promise<AgentHumanRequestItem> => {
     await this.model.expireDue(new Date(this.now()));
+    await this.redeliverOutcomes();
     return toAgentHumanRequestItem(await this.requireRow(id));
   };
 
@@ -276,7 +288,10 @@ export class AgentHumanRequestService {
   };
 
   private retry = async (row: AgentHumanRequestRow) => {
-    const claimed = await this.model.claim(row.id, ['failed'], { status: 'executing' });
+    const claimed = await this.model.claim(row.id, ['failed'], {
+      ...RESET_DELIVERY,
+      status: 'executing',
+    });
     if (!claimed) throw conflict('Only a failed request can be retried.');
 
     return this.execute(claimed, { edited: !!claimed.originalAction });
@@ -288,6 +303,7 @@ export class AgentHumanRequestService {
     const from: AgentHumanRequestStatus[] =
       row.type === 'approval' ? ['pending', 'failed'] : ['pending'];
     const claimed = await this.model.claim(row.id, from, {
+      ...RESET_DELIVERY,
       decidedAt: new Date(this.now()),
       decidedVia: via,
       // A skipped secret request must never be openable afterwards.
@@ -410,13 +426,45 @@ export class AgentHumanRequestService {
 
   // ------------------------------------------------------------------ helpers
 
-  private notify = async (item: AgentHumanRequestItem) => {
+  /**
+   * Tell the agent about one outcome, durably. The attempt is claimed on the
+   * row first, so concurrent deliveries of the same outcome collapse into one,
+   * and only a wake that returned is marked delivered. A failed wake leaves
+   * the row undelivered for {@link redeliverOutcomes}; it never turns the
+   * already-correct action result into an error.
+   */
+  private notify = async (item: AgentHumanRequestItem, staleMs = 0) => {
     if (!this.options.notifier) return;
+
+    const now = new Date(this.now());
+    const claimed = await this.model.claimNotification(item.id, now, staleMs);
+    if (!claimed) return;
+
     try {
-      await this.options.notifier.notify(item);
+      await this.options.notifier.notify(toAgentHumanRequestItem(claimed));
+      await this.model.markNotified(item.id, new Date(this.now()));
     } catch (error) {
-      // The action already ran; a missed wake must not turn it into an error.
-      console.error('[agentHumanRequest] notify failed for %s:', item.id, error);
+      console.error(
+        '[agentHumanRequest] waking the agent failed for %s (attempt %d), will retry:',
+        item.id,
+        claimed.notifyAttempts,
+        error,
+      );
+    }
+  };
+
+  /**
+   * Retry outcomes a previous wake failed to deliver. Lazy, like expiry: it
+   * runs on the owner's reads (clients poll the card list), so a lost wake is
+   * recovered without a scheduler and without touching the action result.
+   */
+  private redeliverOutcomes = async () => {
+    if (!this.options.notifier) return;
+
+    const ids = await this.model.listUndelivered(new Date(this.now()), NOTIFY_REDELIVER_AFTER_MS);
+    for (const id of ids) {
+      const row = await this.model.findById(id);
+      if (row) await this.notify(toAgentHumanRequestItem(row), NOTIFY_REDELIVER_AFTER_MS);
     }
   };
 
