@@ -68,6 +68,7 @@ import debug from 'debug';
 import { isAbsolute, relative, resolve } from 'pathe';
 
 import { gatewayEnv } from '@/envs/gateway';
+import { readThrough } from '@/server/utils/readThroughCache';
 
 const log = debug('lobe-server:device-gateway');
 
@@ -241,21 +242,44 @@ export class DeviceGateway {
     );
   }
 
+  /**
+   * Ask the device for its system info (paths, shell, supported tools).
+   *
+   * `maxAgeMs` lets a caller accept an answer this device gave within that
+   * window instead of a fresh round trip over its WebSocket. The send path
+   * asks every turn and the answer changes only when the client upgrades or
+   * the user moves the daemon, so a few minutes of staleness there is a
+   * round trip saved per send; callers that need the live answer (an
+   * explicit device inspection) leave it unset. Only successful answers are
+   * remembered — an offline device is asked again next time.
+   */
   async queryDeviceSystemInfo(
     userId: string,
     deviceId: string,
     workspaceId?: string,
+    options?: { maxAgeMs?: number },
   ): Promise<DeviceSystemInfo | undefined> {
     const client = this.getClient();
     if (!client) return undefined;
 
-    try {
-      const result = await client.getDeviceSystemInfo(userId, deviceId, workspaceId);
-      return result.success ? result.systemInfo : undefined;
-    } catch {
-      log('queryDeviceSystemInfo: failed for userId=%s, deviceId=%s', userId, deviceId);
-      return undefined;
-    }
+    const query = async () => {
+      try {
+        const result = await client.getDeviceSystemInfo(userId, deviceId, workspaceId);
+        return result.success ? result.systemInfo : undefined;
+      } catch {
+        log('queryDeviceSystemInfo: failed for userId=%s, deviceId=%s', userId, deviceId);
+        return undefined;
+      }
+    };
+
+    const maxAgeMs = options?.maxAgeMs;
+    if (!maxAgeMs || maxAgeMs <= 0) return query();
+
+    return readThrough(
+      `device_system_info:v1:${userId}:${workspaceId ?? 'personal'}:${deviceId}`,
+      query,
+      { ttlMs: maxAgeMs },
+    );
   }
 
   /**
