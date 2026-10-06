@@ -246,6 +246,7 @@ export default class ShellCommandCtr extends ControllerModule {
       topicId: params.topicId,
       agentId: params.agentId,
       label: params.description || 'Shell',
+      messageId: params.messageId,
     });
     params = {
       ...params,
@@ -256,6 +257,7 @@ export default class ShellCommandCtr extends ControllerModule {
             topicId: params.topicId,
             agentId: params.agentId,
             label: params.description || 'Shell',
+            messageId: params.messageId,
           },
           params.env?.AGENT_BROWSER_SESSION,
         ),

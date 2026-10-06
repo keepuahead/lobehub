@@ -1,3 +1,4 @@
+import { AGENT_CHAT_TOPIC_URL } from '@lobechat/const';
 import { useSyncExternalStore } from 'react';
 
 import { isDesktop } from '@/const/version';
@@ -7,7 +8,10 @@ export type ProcessSnapshot = Awaited<
   ReturnType<typeof electronDevtoolsService.getManagedProcesses>
 >;
 export type ProcessRow = ProcessSnapshot['processes'][number];
-export interface Activity extends Pick<ProcessRow, 'rootId' | 'topicId' | 'agentId' | 'label'> {
+export interface Activity extends Pick<
+  ProcessRow,
+  'rootId' | 'topicId' | 'agentId' | 'label' | 'messageId'
+> {
   cpuPercent: number | null;
   memoryMB: number;
   processes: ProcessRow[];
@@ -23,6 +27,7 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
         rootId: row.rootId,
         topicId: row.topicId,
         agentId: row.agentId,
+        messageId: row.messageId,
         label: row.label || row.name,
         memoryMB: 0,
         cpuPercent: null,
@@ -31,6 +36,7 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
       };
       groups.set(row.rootId, group);
     }
+    group.messageId ??= row.messageId;
     group.memoryMB += row.memoryMB;
     if (row.cpuPercent !== null) group.cpuPercent = (group.cpuPercent ?? 0) + row.cpuPercent;
     group.processes.push(row);
@@ -46,6 +52,18 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
           : 'normal';
   }
   return [...groups.values()];
+};
+
+/** The conversation an activity belongs to, scrolled to the message that started it. */
+export const activityLocation = ({
+  agentId,
+  messageId,
+  topicId,
+}: Pick<Activity, 'agentId' | 'messageId' | 'topicId'>) => {
+  if (!agentId || !topicId) return;
+  const path = AGENT_CHAT_TOPIC_URL(agentId, topicId);
+  const hash = messageId ? encodeURIComponent(messageId) : undefined;
+  return { hash, href: hash ? `${path}#${hash}` : path, path };
 };
 
 export const formatMemory = (mb: number) =>

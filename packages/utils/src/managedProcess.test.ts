@@ -173,4 +173,32 @@ describe.skipIf(process.platform === 'win32')('managed process shutdown', () => 
     expect(alive(child.pid!)).toBe(false);
     expect(() => lazy.spawnManaged(process.execPath, ['-e', ''])).toThrow('shutting down');
   });
+
+  it('keeps the launching message on every process the owner env spawns', async () => {
+    // An earlier test shut the host-wide registry down; start from a fresh one.
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('lobehub.managedProcesses')];
+    vi.resetModules();
+    const managed = await import('./managedProcess');
+    managed.enableManagedProcesses();
+    const env = managed.managedProcessEnvironment({
+      agentId: 'agt_1',
+      label: 'dev server',
+      messageId: 'msg_tool_1',
+      topicId: 'tpc_1',
+    });
+    expect(env.LOBEHUB_PROCESS_MESSAGE).toBe('msg_tool_1');
+    const child = managed.spawnManaged(
+      process.execPath,
+      ['-e', "console.log('ready'); setInterval(() => {}, 1000)"],
+      { detached: true, env: { ...process.env, ...env }, stdio: 'pipe' },
+    );
+    cleanup.push(() => managed.shutdownManagedProcesses());
+    await once(child.stdout!, 'data');
+    const { processes } = await managed.getManagedProcesses();
+    expect(processes.find((row) => row.pid === child.pid)).toMatchObject({
+      agentId: 'agt_1',
+      messageId: 'msg_tool_1',
+      topicId: 'tpc_1',
+    });
+  });
 });

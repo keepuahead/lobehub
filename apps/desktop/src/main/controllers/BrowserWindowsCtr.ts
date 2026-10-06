@@ -63,6 +63,14 @@ export default class BrowserWindowsCtr extends ControllerModule {
     }
   }
 
+  /** Bring the main window forward and route it to an in-app path (used by secondary windows). */
+  @IpcMethod()
+  openInMainWindow({ path }: { path: string }) {
+    const mainWindow = this.app.browserManager.getMainWindow();
+    mainWindow.show();
+    mainWindow.broadcast('navigate', { path });
+  }
+
   @IpcMethod()
   closeWindow() {
     this.withSenderIdentifier((identifier) => {

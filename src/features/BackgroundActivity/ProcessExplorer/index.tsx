@@ -1,6 +1,7 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { Flexbox, Icon } from '@lobehub/ui';
 import {
+  ActionIcon,
   Input,
   showContextMenu,
   Skeleton,
@@ -17,6 +18,7 @@ import {
   GpuIcon,
   type LucideIcon,
   MessageSquareIcon,
+  MessageSquareShareIcon,
   SearchIcon,
   SquareTerminalIcon,
 } from 'lucide-react';
@@ -24,6 +26,7 @@ import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAppProcessMetrics } from '@/features/DevDock/widgets/appProcessMetrics';
+import { electronDevtoolsService } from '@/services/electron/devtools';
 
 import { ConversationTitle, topicName } from '../ActivityTable';
 import { agentName } from '../AgentName';
@@ -54,7 +57,11 @@ const rowIcon = (row: RowModel): LucideIcon | undefined => {
   }
 };
 
+const openMessage = (href: string) =>
+  electronDevtoolsService.openInMainWindow(href).catch((error) => console.error(error));
+
 function Cells({ row }: { row: RowModel }) {
+  const { t } = useTranslation('chat');
   const icon = rowIcon(row);
   const hot = row.cpuHot || row.memoryHot;
   return (
@@ -76,9 +83,20 @@ function Cells({ row }: { row: RowModel }) {
         {formatMemory(row.memory)}
       </span>
       <span className={styles.pid}>{row.pid}</span>
-      {row.stopId ? (
-        <span data-stop-cell className={styles.stop}>
-          <StopButton rootId={row.stopId} />
+      {row.stopId || row.href ? (
+        <span data-row-actions className={styles.actions}>
+          {row.href && (
+            <ActionIcon
+              icon={MessageSquareShareIcon}
+              size={'small'}
+              title={t('backgroundActivity.openMessage')}
+              onClick={(event) => {
+                event.stopPropagation();
+                void openMessage(row.href!);
+              }}
+            />
+          )}
+          {row.stopId && <StopButton rootId={row.stopId} />}
         </span>
       ) : (
         <span />
@@ -229,6 +247,12 @@ export default function ProcessExplorer() {
               event.preventDefault();
               setSelected(node.key);
               showContextMenu([
+                {
+                  disabled: !row.href,
+                  key: 'open-message',
+                  label: t('backgroundActivity.openMessage'),
+                  onClick: () => row.href && void openMessage(row.href),
+                },
                 {
                   danger: true,
                   disabled: !row.stopId,

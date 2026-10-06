@@ -1,7 +1,7 @@
 import type { AppProcessRow } from '@lobechat/electron-client-ipc';
 import type { TreeDataNode } from '@lobehub/ui/base-ui';
 
-import type { Activity, ProcessRow } from '../state';
+import { type Activity, activityLocation, type ProcessRow } from '../state';
 
 export type SortKey = 'cpu' | 'memory';
 
@@ -10,6 +10,8 @@ export interface RowModel {
   appType?: string;
   cpu: number | null;
   cpuHot?: boolean;
+  /** In-app location of the message that started the activity. */
+  href?: string;
   kind: 'app' | 'activity' | 'conversation' | 'process' | 'section';
   label: string;
   memory: number;
@@ -139,6 +141,7 @@ export const buildProcessTree = ({
           row: {
             cpu: activity.cpuPercent,
             cpuHot: hot && (activity.cpuPercent ?? 0) >= 200,
+            href: activityLocation(activity)?.href,
             kind: 'activity',
             label: activity.label ?? '',
             memory: activity.memoryMB,

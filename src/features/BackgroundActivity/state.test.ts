@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  activityLocation,
   formatMemory,
   groupActivities,
   type ProcessRow,
@@ -23,6 +24,7 @@ describe('background resources', () => {
         ppid: 0,
         name: 'shell',
         topicId: 'one',
+        agentId: 'agt_1',
         memoryMB: 100,
         cpuPercent: null,
       },
@@ -33,6 +35,8 @@ describe('background resources', () => {
         ppid: 1,
         name: 'node',
         topicId: 'one',
+        agentId: 'agt_1',
+        messageId: 'msg/tool 1',
         memoryMB: 2500,
         cpuPercent: 50,
       },
@@ -81,5 +85,16 @@ describe('background resources', () => {
   it('switches to gigabytes at 1024 MB', () => {
     expect(formatMemory(1023.4)).toBe('1023 MB');
     expect(formatMemory(1536)).toBe('1.5 GB');
+  });
+  it('links an owned activity back to the message that started it', () => {
+    const [owned, shared] = groupActivities(snapshot);
+    expect(owned.messageId).toBe('msg/tool 1');
+    expect(activityLocation(owned)).toEqual({
+      hash: 'msg%2Ftool%201',
+      href: '/agent/agt_1/one#msg%2Ftool%201',
+      path: '/agent/agt_1/one',
+    });
+    expect(activityLocation({ ...owned, messageId: undefined })?.href).toBe('/agent/agt_1/one');
+    expect(activityLocation(shared)).toBeUndefined();
   });
 });

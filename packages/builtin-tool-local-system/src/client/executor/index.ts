@@ -66,7 +66,12 @@ class LocalSystemExecutor extends BaseExecutor<typeof LocalSystemApiEnum> {
       const output = await this.runtime.executeToolCall(
         apiName,
         apiName === 'runCommand'
-          ? { ...params, topicId: ctx?.topicId ?? undefined, agentId: ctx?.agentId }
+          ? {
+              ...params,
+              topicId: ctx?.topicId ?? undefined,
+              agentId: ctx?.agentId,
+              messageId: ctx?.messageId,
+            }
           : params,
         {
           workingDirectory: ctx?.workingDirectory,

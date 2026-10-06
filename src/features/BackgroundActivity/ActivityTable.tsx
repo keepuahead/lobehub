@@ -1,21 +1,24 @@
 import { Empty, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Skeleton } from '@lobehub/ui/base-ui';
+import { ActionIcon, Button, Skeleton } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
   ChevronRightIcon,
   CpuIcon,
   MessageSquareIcon,
+  MessageSquareShareIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useQueryRoute } from '@/hooks/useQueryRoute';
 import { useChatStore } from '@/store/chat';
 
 import { AgentName } from './AgentName';
 import {
   type Activity,
+  activityLocation,
   formatCpu,
   formatMemory,
   processTree,
@@ -35,7 +38,7 @@ export const topicName = (id?: string) => {
   );
 };
 
-const GRID = '16px minmax(0, 1fr) 88px 72px 56px 28px';
+const GRID = '16px minmax(0, 1fr) 88px 72px 56px 52px';
 
 const tableStyles = createStaticStyles(({ css }) => ({
   alert: css`
@@ -51,6 +54,11 @@ const tableStyles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorError};
 
     background: ${cssVar.colorErrorBg};
+  `,
+  actions: css`
+    display: flex;
+    gap: 2px;
+    justify-content: flex-end;
   `,
   chevron: css`
     color: ${cssVar.colorTextQuaternary};
@@ -218,6 +226,8 @@ function ActivityRows({ activity, selected }: { activity: Activity; selected: bo
     setOpen(true);
     ref.current?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
+  const router = useQueryRoute();
+  const location = activityLocation(activity);
   const alert = activity.severity !== 'normal';
   const tone = activity.severity === 'critical' ? tableStyles.critical : tableStyles.warning;
   return (
@@ -254,7 +264,20 @@ function ActivityRows({ activity, selected }: { activity: Activity; selected: bo
           {formatMemory(activity.memoryMB)}
         </span>
         <span className={tableStyles.num}>{formatCpu(activity.cpuPercent)}</span>
-        <StopButton rootId={activity.rootId} />
+        <span className={tableStyles.actions}>
+          {location && (
+            <ActionIcon
+              icon={MessageSquareShareIcon}
+              size={'small'}
+              title={t('backgroundActivity.openMessage')}
+              onClick={(event) => {
+                event.stopPropagation();
+                router.push(location.path, { hash: location.hash });
+              }}
+            />
+          )}
+          <StopButton rootId={activity.rootId} />
+        </span>
       </div>
       {open &&
         processTree(activity.processes).map(({ depth, row }) => (

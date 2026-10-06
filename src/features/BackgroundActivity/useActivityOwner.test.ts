@@ -1,32 +1,14 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAgentStore } from '@/store/agent';
 import { useChatStore } from '@/store/chat';
 
-import { AlertDescription } from './Monitor';
-import type { Activity } from './state';
+import { useActivityOwner } from './useActivityOwner';
 
 vi.mock('@/services/electron/devtools', () => ({ electronDevtoolsService: {} }));
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: Record<string, string>) =>
-      values ? `${values.name} | ${values.memory} | ${values.cpu}` : key,
-  }),
-}));
 
-const activity: Activity = {
-  agentId: 'agent-1',
-  cpuPercent: 250,
-  label: 'vite',
-  memoryMB: 5000,
-  processes: [],
-  rootId: 'root-1',
-  severity: 'critical',
-  topicId: 'topic-1',
-};
-
-describe('AlertDescription', () => {
+describe('useActivityOwner', () => {
   const fetchAgent = vi.fn();
   const fetchTopic = vi.fn();
 
@@ -41,9 +23,11 @@ describe('AlertDescription', () => {
     });
   });
 
-  it('hydrates a missing owner and fills it into the already-shown toast', () => {
-    render(<AlertDescription activity={activity} />);
-    expect(screen.getByText('vite | 4.9 GB | 250%')).toBeInTheDocument();
+  it('hydrates a missing owner and updates once the agent and topic load', () => {
+    const { result } = renderHook(() =>
+      useActivityOwner({ agentId: 'agent-1', topicId: 'topic-1' }),
+    );
+    expect(result.current).toEqual({ agent: undefined, topic: undefined });
     expect(fetchAgent).toHaveBeenLastCalledWith(true, 'agent-1');
     expect(fetchTopic).toHaveBeenLastCalledWith('topic-1');
 
@@ -52,6 +36,14 @@ describe('AlertDescription', () => {
       useChatStore.setState({ topicDetailMap: { 'topic-1': { title: 'Fix auth' } as any } });
     });
 
-    expect(screen.getByText('vite · Coder / Fix auth | 4.9 GB | 250%')).toBeInTheDocument();
+    expect(result.current).toEqual({ agent: 'Coder', topic: 'Fix auth' });
+    expect(fetchAgent).toHaveBeenLastCalledWith(true, '');
+  });
+
+  it('fetches nothing for an unowned activity', () => {
+    const { result } = renderHook(() => useActivityOwner({}));
+    expect(result.current).toEqual({ agent: undefined, topic: undefined });
+    expect(fetchAgent).toHaveBeenLastCalledWith(true, '');
+    expect(fetchTopic).toHaveBeenLastCalledWith(undefined);
   });
 });

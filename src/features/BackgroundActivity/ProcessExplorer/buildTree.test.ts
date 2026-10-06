@@ -23,6 +23,7 @@ const activity = (
   agentId?: string,
 ): Activity => ({
   agentId,
+  messageId: agentId ? `msg-${rootId}` : undefined,
   cpuPercent: cpu,
   label: rootId,
   memoryMB: 10,
@@ -104,6 +105,8 @@ describe('buildProcessTree', () => {
       topicId: 't1',
     });
     expect(rows.get('conversation:shared')).toMatchObject({ agentId: undefined, label: 'Shared' });
+    expect(rows.get('activity:busy')?.href).toBe('/agent/a1/t1#msg-busy');
+    expect(rows.get('activity:unowned')?.href).toBeUndefined();
 
     const [background] = build('coder').treeData;
     expect(background.children!.map((node) => node.key)).toEqual(['conversation:t1']);

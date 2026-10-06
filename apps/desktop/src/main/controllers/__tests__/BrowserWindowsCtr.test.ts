@@ -132,6 +132,14 @@ describe('BrowserWindowsCtr', () => {
     });
   });
 
+  describe('openInMainWindow', () => {
+    it('shows the main window and routes it to the given path, hash included', () => {
+      browserWindowsCtr.openInMainWindow({ path: '/agent/agt_1/tpc_1#msg_1' });
+      expect(mockShow).toHaveBeenCalled();
+      expect(mockBroadcast).toHaveBeenCalledWith('navigate', { path: '/agent/agt_1/tpc_1#msg_1' });
+    });
+  });
+
   describe('closeWindow', () => {
     it('should close the window with the given sender identifier', () => {
       const sender = {} as any;

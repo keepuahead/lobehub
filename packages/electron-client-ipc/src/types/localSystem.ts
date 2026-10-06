@@ -436,6 +436,8 @@ export interface RunCommandParams {
   description?: string;
   /** Merged into the child process environment (after `process.env`). */
   env?: Record<string, string>;
+  /** The tool message that issued the command; lets the process monitor link back to it. */
+  messageId?: string;
   run_in_background?: boolean;
   /**
    * Run this command inside the device sandbox (writes confined to `cwd` + the

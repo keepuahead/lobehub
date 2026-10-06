@@ -15,6 +15,8 @@ const exec = promisify(execFile);
 export interface ProcessOwner {
   agentId?: string;
   label?: string;
+  /** The message (tool call) that started the process, so the UI can jump back to it. */
+  messageId?: string;
   topicId?: string;
 }
 
@@ -162,6 +164,7 @@ export class ManagedProcessRegistry {
       LOBEHUB_PROCESS_TOPIC: owner.topicId ?? '',
       LOBEHUB_PROCESS_AGENT: owner.agentId ?? '',
       LOBEHUB_PROCESS_LABEL: owner.label ?? '',
+      LOBEHUB_PROCESS_MESSAGE: owner.messageId ?? '',
       AGENT_BROWSER_SOCKET_DIR: this.browserBase,
       AGENT_BROWSER_NAMESPACE: namespace,
       AGENT_BROWSER_SESSION: browserSession,
@@ -501,6 +504,7 @@ export const spawnManaged: typeof spawn = ((...args: Parameters<typeof spawn>) =
     topicId: options?.env?.LOBEHUB_PROCESS_TOPIC || undefined,
     agentId: options?.env?.LOBEHUB_PROCESS_AGENT || undefined,
     label: options?.env?.LOBEHUB_PROCESS_LABEL || path.basename(args[0]),
+    messageId: options?.env?.LOBEHUB_PROCESS_MESSAGE || undefined,
   });
   return child;
 }) as typeof spawn;
