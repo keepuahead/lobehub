@@ -128,9 +128,11 @@ export interface InitModelRuntimeForRequestOptions {
  * `agent_llm_relay` rollout on) is relayed to the requesting tab; everything
  * else runs on the server exactly as before.
  *
+ * A deployment that cannot relay (no Agent Gateway or no Redis) keeps the
+ * legacy server runtime: its browser sends no relay headers either.
+ *
  * Throws `ClientLlmExecutorUnavailable` up front when such a provider has no
- * tab to run on (`no_executor`, e.g. a bot or a workflow) or the deployment
- * cannot relay (`relay_unsupported`: no gateway or no Redis).
+ * tab to run on (`no_executor`, e.g. a bot or a workflow).
  */
 export const initModelRuntimeForRequest = async (
   db: LobeChatDatabase,
@@ -141,16 +143,17 @@ export const initModelRuntimeForRequest = async (
   const relay = await resolveProviderRelay({ db, provider, userId, workspaceId });
   if (!relay) return initModelRuntimeFromDB(db, userId, provider, workspaceId);
 
+  const redis = getAgentRuntimeRedisClient();
+  const streamManager = createStreamEventManager();
+  if (!redis || !streamManager.sendLlmExecute || !streamManager.openLlmRelayChannel) {
+    log('deployment cannot relay %s, calling it from the server', provider);
+    return initModelRuntimeFromDB(db, userId, provider, workspaceId);
+  }
+
   const scope = getLlmRelayRequestScope();
   if (!scope || scope.ended || scope.userId !== userId) {
     log('no client request to relay %s to', provider);
     throw noClientRequestError(provider);
-  }
-
-  const redis = getAgentRuntimeRedisClient();
-  const streamManager = createStreamEventManager();
-  if (!redis || !streamManager.sendLlmExecute || !streamManager.openLlmRelayChannel) {
-    throw createClientLlmExecutorUnavailableError(provider, 'relay_unsupported');
   }
 
   return new OneShotRelayRuntime({
