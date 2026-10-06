@@ -177,21 +177,28 @@ describe('one-shot relay', () => {
     expect(streamManager.sendLlmExecute).not.toHaveBeenCalled();
   });
 
-  it('reports relay_unsupported on a deployment without a gateway or Redis', async () => {
+  // A deployment that cannot relay (no Agent Gateway, no Redis) keeps the
+  // legacy path: the browser sends no relay headers there, and the server
+  // calls the provider itself, as before the relay — tab or no tab.
+  it('keeps the server runtime on a deployment without a gateway or Redis', async () => {
     streamManager = { publishStreamEvent: vi.fn() };
     await expect(
       runWithLlmRelayRequest(REQUEST, USER_ID, () =>
         initModelRuntimeForRequest({} as any, USER_ID, 'ollama'),
       ),
-    ).rejects.toMatchObject({ error: { reason: 'relay_unsupported' } });
+    ).resolves.toEqual({ server: true });
+    // No tab attached (bot, workflow): still the server runtime, not no_executor.
+    await expect(initModelRuntimeForRequest({} as any, USER_ID, 'ollama')).resolves.toEqual({
+      server: true,
+    });
 
     streamManager = createGatewayStreamManager();
     redis = null;
-    await expect(
-      runWithLlmRelayRequest(REQUEST, USER_ID, () =>
-        initModelRuntimeForRequest({} as any, USER_ID, 'ollama'),
-      ),
-    ).rejects.toMatchObject({ error: { reason: 'relay_unsupported' } });
+    await expect(initModelRuntimeForRequest({} as any, USER_ID, 'ollama')).resolves.toEqual({
+      server: true,
+    });
+    expect(initModelRuntimeFromDB).toHaveBeenCalledTimes(3);
+    expect(streamManager.sendLlmExecute).not.toHaveBeenCalled();
   });
 
   it('fails as relay_unsupported when the gateway does not open the channel', async () => {
