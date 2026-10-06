@@ -15,6 +15,10 @@ import { authEnv, LOBE_CHAT_OIDC_AUTH_HEADER } from '@/envs/auth';
 import { extractTraceContext } from '@/libs/observability/traceparent';
 import { assertOIDCUserActive, isOIDCUserInactiveError } from '@/libs/oidc-provider/access-control';
 import { validateOIDCJWT } from '@/libs/oidc-provider/jwt';
+import {
+  type LlmRelayRequest,
+  readLlmRelayRequest,
+} from '@/server/modules/AgentRuntime/llmRelay/requestScope';
 import { isApiKeyExpired, validateApiKeyFormat } from '@/utils/apiKey';
 import { getRequestClientIP } from '@/utils/requestClientIP';
 
@@ -95,6 +99,12 @@ export interface AuthContext {
   clientIp?: string | null;
   clientMetadata?: ClientMetadata;
   jwtPayload?: ClientSecretPayload | null;
+  /**
+   * The browser tab this request came from, when it subscribed a one-shot
+   * relay channel for the request's LLM calls (provider only reachable from
+   * the user's device). See `runWithLlmRelayRequest`.
+   */
+  llmRelay?: LlmRelayRequest;
   marketAccessToken?: string;
   oidcAuth?: OIDCAuth | null;
   oidcClientId?: string;
@@ -127,6 +137,7 @@ export const createContextInner = async (params?: {
   authFailure?: string;
   clientMetadata?: ClientMetadata;
   clientIp?: string | null;
+  llmRelay?: LlmRelayRequest;
   marketAccessToken?: string;
   oidcAuth?: OIDCAuth | null;
   oidcClientId?: string;
@@ -148,6 +159,7 @@ export const createContextInner = async (params?: {
     apiKeyScopes: params?.apiKeyScopes,
     clientMetadata: params?.clientMetadata || { type: 'unknown' },
     clientIp: params?.clientIp,
+    llmRelay: params?.llmRelay,
     marketAccessToken: params?.marketAccessToken,
     oidcAuth: params?.oidcAuth,
     oidcClientId: params?.oidcClientId,
@@ -200,6 +212,7 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
   const commonContext = {
     clientMetadata,
     clientIp,
+    llmRelay: readLlmRelayRequest(request.headers),
     marketAccessToken,
     userAgent,
     workspaceId,
