@@ -196,12 +196,17 @@ export function ConversationTitle({ agentId, topicId }: { agentId?: string; topi
   );
 }
 
-export function TopicTitle({ id }: { id: string }) {
-  const { t } = useTranslation('chat');
+/** Topic title for a background activity; fetches the topic when it isn't cached yet. */
+export const useTopicTitle = (id?: string) => {
   const title = useChatStore(() => topicName(id));
   const useFetchTopicDetail = useChatStore((s) => s.useFetchTopicDetail);
   useFetchTopicDetail(title ? undefined : id);
-  return title || t('backgroundActivity.topic');
+  return title;
+};
+
+export function TopicTitle({ id }: { id: string }) {
+  const { t } = useTranslation('chat');
+  return useTopicTitle(id) || t('backgroundActivity.topic');
 }
 
 function ActivityRows({ activity, selected }: { activity: Activity; selected: boolean }) {

@@ -20,18 +20,30 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
+/** Agent title/avatar for a background activity; fetches the config when it isn't cached yet. */
+export const useAgentMeta = (id?: string) => {
+  const loaded = useAgentStore((s) => !id || !!s.agentMap[id]);
+  const title = useAgentStore((s) =>
+    id ? agentSelectors.getAgentMetaById(id)(s).title : undefined,
+  );
+  const avatar = useAgentStore((s) =>
+    id ? agentSelectors.getAgentMetaById(id)(s).avatar : undefined,
+  );
+  const background = useAgentStore((s) =>
+    id ? agentSelectors.getAgentMetaById(id)(s).backgroundColor : undefined,
+  );
+  const useFetchAgentConfig = useAgentStore((s) => s.useFetchAgentConfig);
+  useFetchAgentConfig(true, loaded || !id ? '' : id);
+  return { avatar, background, title };
+};
+
 export const agentName = (id?: string) =>
   id ? agentSelectors.getAgentMetaById(id)(useAgentStore.getState()).title : undefined;
 
-/** Avatar + title of the agent that owns a background activity, fetched on demand. */
+/** Avatar + title of the agent that owns a background activity. */
 export function AgentName({ id }: { id: string }) {
   const { t } = useTranslation('chat');
-  const loaded = useAgentStore((s) => !!s.agentMap[id]);
-  const title = useAgentStore((s) => agentSelectors.getAgentMetaById(id)(s).title);
-  const avatar = useAgentStore((s) => agentSelectors.getAgentMetaById(id)(s).avatar);
-  const background = useAgentStore((s) => agentSelectors.getAgentMetaById(id)(s).backgroundColor);
-  const useFetchAgentConfig = useAgentStore((s) => s.useFetchAgentConfig);
-  useFetchAgentConfig(true, loaded ? '' : id);
+  const { avatar, background, title } = useAgentMeta(id);
   const name = title || t('backgroundActivity.agent');
   return (
     <>
