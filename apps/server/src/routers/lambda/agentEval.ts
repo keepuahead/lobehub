@@ -15,6 +15,7 @@ import {
 } from '@/database/models/agentEval';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { AgentEvalReplayService } from '@/server/services/agentEvalReplay';
 import { AgentEvalRunService } from '@/server/services/agentEvalRun';
 import { FileService } from '@/server/services/file';
 import { FileUploadService } from '@/server/services/fileUpload';
@@ -130,6 +131,11 @@ const evalTestCaseContentSchema = z.object({
   messages: evalTestCaseMessagesSchema.optional(),
 });
 
+const replayTargetSchema = z.object({
+  model: z.string().trim().min(1),
+  provider: z.string().trim().min(1),
+});
+
 const log = debug('lobe-lambda-router:agent-eval');
 
 const agentEvalProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
@@ -141,6 +147,7 @@ const agentEvalProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts
       benchmarkModel: new AgentEvalBenchmarkModel(ctx.serverDB, ctx.userId, wsId),
       datasetModel: new AgentEvalDatasetModel(ctx.serverDB, ctx.userId, wsId),
       experimentModel: new AgentEvalExperimentModel(ctx.serverDB, ctx.userId, wsId),
+      replayService: new AgentEvalReplayService(ctx.serverDB, ctx.userId, wsId),
       runModel: new AgentEvalRunModel(ctx.serverDB, ctx.userId, wsId),
       runService: new AgentEvalRunService(ctx.serverDB, ctx.userId, wsId),
       runTopicModel: new AgentEvalRunTopicModel(ctx.serverDB, ctx.userId, wsId),
@@ -771,6 +778,65 @@ export const agentEvalRouter = router({
     }),
 
   // ============================================
+  // Frozen-call replay (cross-model comparison)
+  // ============================================
+
+  /**
+   * Freeze the LLM call behind an assistant message into a test case: copies
+   * the exact request out of the operation trace and records where it came
+   * from. `criteria` must be self-contained — the judge only ever sees it plus
+   * the case input, the replayed output and `expected`.
+   */
+  freezeTestCaseFromMessage: agentEvalProcedureWrite
+    .input(
+      z.object({
+        capturedOutputKind: z.enum(['negative', 'positive']).optional(),
+        criteria: z.string().trim().min(1),
+        datasetId: z.string(),
+        expected: z.string().optional(),
+        messageId: z.string(),
+        stepIndex: z.number().int().min(0).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => ctx.replayService.freezeFromMessage(input)),
+
+  /**
+   * Re-issue every frozen case of a dataset (or the given cases) against 1–8
+   * models and judge each output. Returns at once; cells fill in via workflow.
+   */
+  startReplayComparison: agentEvalProcedureWrite
+    .input(
+      z.object({
+        datasetId: z.string(),
+        judge: replayTargetSchema.optional(),
+        name: z.string().optional(),
+        passThreshold: z.number().min(0).max(1).optional(),
+        replayOptions: z
+          .object({
+            maxTokens: z.number().int().positive().optional(),
+            temperature: z.number().min(0).max(2).optional(),
+            withTools: z.boolean().optional(),
+          })
+          .optional(),
+        targets: z.array(replayTargetSchema).min(1).max(8),
+        testCaseIds: z.array(z.string()).min(1).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => ctx.replayService.startComparison(input)),
+
+  retryReplayComparisonErrors: agentEvalProcedureWrite
+    .input(z.object({ runId: z.string() }))
+    .mutation(async ({ ctx, input }) => ctx.replayService.retryErroredCells(input.runId)),
+
+  getReplayComparison: agentEvalProcedure
+    .input(z.object({ runId: z.string() }))
+    .query(async ({ ctx, input }) => ctx.replayService.getComparison(input.runId)),
+
+  listReplayComparisonsByTestCase: agentEvalProcedure
+    .input(z.object({ testCaseId: z.string() }))
+    .query(async ({ ctx, input }) => ctx.replayService.listComparisonsByTestCase(input.testCaseId)),
+
+  // ============================================
   // Run Operations
   // ============================================
   createRun: agentEvalProcedureWrite
@@ -916,6 +982,13 @@ export const agentEvalRouter = router({
       const run = await ctx.runModel.findById(runId);
       if (!run) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Run not found' });
+      }
+
+      if (run.config?.executionMode === 'replay') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Replay comparisons start via startReplayComparison',
+        });
       }
 
       // Check run status

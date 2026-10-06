@@ -99,9 +99,10 @@ export interface EvalRunConfig {
   /**
    * Immutable snapshot of how the run executes: 'internal' (QStash workflow,
    * topics pre-created) or 'external' (worker-driven, on-demand). Written at
-   * creation; never inferred from status.
+   * creation; never inferred from status. 'replay' re-issues each case's
+   * frozen LLM call against `replayTargets` instead of re-running the agent.
    */
-  executionMode?: 'external' | 'internal';
+  executionMode?: 'external' | 'internal' | 'replay';
   judgeModel?: string;
   judgeProvider?: string;
   /**
@@ -120,6 +121,10 @@ export interface EvalRunConfig {
     system?: string;
     user: string;
   };
+  /** Request overrides applied to every replayed call (replay runs only). */
+  replayOptions?: EvalReplayOptions;
+  /** Models every frozen call is re-issued against (replay runs only). */
+  replayTargets?: EvalReplayTarget[];
   timeout?: number;
 }
 
@@ -132,12 +137,57 @@ export type EvalRunInputConfig = Pick<
   'caseSelection' | 'k' | 'maxConcurrency' | 'maxSteps' | 'timeout'
 >;
 
+/** One model a replay run re-issues the frozen calls against. */
+export interface EvalReplayTarget {
+  model: string;
+  provider: string;
+}
+
+export interface EvalReplayOptions {
+  maxTokens?: number;
+  temperature?: number;
+  /** Send the recorded tool definitions with the replayed call. @default true */
+  withTools?: boolean;
+}
+
+export type EvalReplayResultStatus = 'completed' | 'error' | 'pending' | 'running';
+
+export interface EvalReplayToolCall {
+  arguments?: string;
+  name: string;
+}
+
+export interface EvalReplayUsage {
+  completionTokens?: number;
+  promptTokens?: number;
+  totalTokens?: number;
+}
+
+export interface EvalReplayError {
+  message: string;
+  /** Which half of the cell failed: the replayed model call or the judge. */
+  stage: 'judge' | 'replay';
+}
+
+/** Per-target roll-up written to `EvalRunMetrics.byTarget` when a replay run finishes. */
+export interface EvalReplayTargetMetrics {
+  averageScore: number;
+  errorCases: number;
+  model: string;
+  passedCases: number;
+  passRate: number;
+  provider: string;
+  totalCases: number;
+}
+
 /**
  * Evaluation run metrics/statistics
  */
 export interface EvalRunMetrics {
   [key: string]: unknown;
   averageScore: number;
+  /** Replay runs only: one roll-up per `provider/model` target. */
+  byTarget?: EvalReplayTargetMetrics[];
   completedCases?: number;
   /** Sum of per-case average costs (for per-case display: cost / totalCases) */
   cost?: number;

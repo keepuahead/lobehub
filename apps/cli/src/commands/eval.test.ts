@@ -28,6 +28,8 @@ const { mockTrpcClient, mockResolveLocalDeviceId } = vi.hoisted(() => ({
       getExperiment: { query: vi.fn() },
       getRunDetails: { query: vi.fn() },
       getRunProgress: { query: vi.fn() },
+      freezeTestCaseFromMessage: { mutate: vi.fn() },
+      getReplayComparison: { query: vi.fn() },
       getRunResults: { query: vi.fn() },
       getTestCase: { query: vi.fn() },
       listBenchmarks: { query: vi.fn() },
@@ -35,7 +37,9 @@ const { mockTrpcClient, mockResolveLocalDeviceId } = vi.hoisted(() => ({
       listExperiments: { query: vi.fn() },
       listRuns: { query: vi.fn() },
       listTestCases: { query: vi.fn() },
+      retryReplayComparisonErrors: { mutate: vi.fn() },
       retryRunErrors: { mutate: vi.fn() },
+      startReplayComparison: { mutate: vi.fn() },
       startRun: { mutate: vi.fn() },
       updateBenchmark: { mutate: vi.fn() },
       updateDataset: { mutate: vi.fn() },
@@ -105,6 +109,175 @@ describe('eval command', () => {
     registerEvalCommand(program);
     return program;
   };
+
+  // ============================================
+  // Frozen-call replay tests
+  // ============================================
+  describe('testcase freeze / compare', () => {
+    it('freezes a message with criteria read from a file', async () => {
+      const criteriaFile = path.join(os.tmpdir(), `criteria-${Date.now()}.md`);
+      await writeFile(criteriaFile, 'The user is Arvin.');
+      mockTrpcClient.agentEval.freezeTestCaseFromMessage.mutate.mockResolvedValue({
+        created: true,
+        testCase: { id: 'case_1' },
+      });
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'testcase',
+        'freeze',
+        '--dataset-id',
+        'ds_1',
+        '--message-id',
+        'msg_1',
+        '--criteria-file',
+        criteriaFile,
+        '--step',
+        '1',
+        '--json',
+      ]);
+      await rm(criteriaFile);
+
+      expect(mockTrpcClient.agentEval.freezeTestCaseFromMessage.mutate).toHaveBeenCalledWith({
+        capturedOutputKind: 'negative',
+        criteria: 'The user is Arvin.',
+        datasetId: 'ds_1',
+        expected: undefined,
+        messageId: 'msg_1',
+        stepIndex: 1,
+      });
+    });
+
+    it('replaces a case’s judge criteria', async () => {
+      mockTrpcClient.agentEval.updateTestCase.mutate.mockResolvedValue({ id: 'case_1' });
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'testcase',
+        'update',
+        '--id',
+        'case_1',
+        '--criteria',
+        'The user is Arvin.',
+        '--json',
+      ]);
+
+      expect(mockTrpcClient.agentEval.updateTestCase.mutate).toHaveBeenCalledWith({
+        evalConfig: { criteria: 'The user is Arvin.' },
+        evalMode: 'llm-rubric',
+        id: 'case_1',
+      });
+    });
+
+    it('refuses to freeze without criteria', async () => {
+      const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'testcase',
+        'freeze',
+        '--dataset-id',
+        'ds_1',
+        '--message-id',
+        'msg_1',
+      ]);
+
+      expect(mockTrpcClient.agentEval.freezeTestCaseFromMessage.mutate).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      errorSpy.mockRestore();
+    });
+
+    it('starts a comparison with parsed targets and judge', async () => {
+      mockTrpcClient.agentEval.startReplayComparison.mutate.mockResolvedValue({
+        cellCount: 4,
+        runId: 'run_1',
+      });
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'compare',
+        'start',
+        '--dataset-id',
+        'ds_1',
+        '-m',
+        'deepseek/deepseek-v4-flash, openai/gpt-6-luna',
+        '--judge-model',
+        'anthropic/claude-haiku-4-5',
+        '--case',
+        'case_1,case_2',
+        '--no-tools',
+        '--json',
+      ]);
+
+      expect(mockTrpcClient.agentEval.startReplayComparison.mutate).toHaveBeenCalledWith({
+        datasetId: 'ds_1',
+        judge: { model: 'claude-haiku-4-5', provider: 'anthropic' },
+        name: undefined,
+        replayOptions: { maxTokens: undefined, temperature: undefined, withTools: false },
+        targets: [
+          { model: 'deepseek-v4-flash', provider: 'deepseek' },
+          { model: 'gpt-6-luna', provider: 'openai' },
+        ],
+        testCaseIds: ['case_1', 'case_2'],
+      });
+    });
+
+    it('prints the model × case grid', async () => {
+      mockTrpcClient.agentEval.getReplayComparison.query.mockResolvedValue({
+        cases: [{ content: { input: '你不知道我是谁吗' }, id: 'case_1' }],
+        cells: [
+          {
+            durationMs: 1200,
+            judgeReason: 'calls the user 宋清扬',
+            model: 'deepseek-v4-flash',
+            passed: false,
+            provider: 'deepseek',
+            score: 0.1,
+            status: 'completed',
+            testCaseId: 'case_1',
+          },
+          {
+            error: { message: 'not valid JSON', stage: 'replay' },
+            model: 'gpt-6-luna',
+            provider: 'openai',
+            status: 'error',
+            testCaseId: 'case_1',
+          },
+        ],
+        judge: { model: 'claude-haiku-4-5', provider: 'anthropic' },
+        run: { id: 'run_1', name: 'Compare', status: 'completed' },
+        targets: [
+          { model: 'deepseek-v4-flash', provider: 'deepseek' },
+          { model: 'gpt-6-luna', provider: 'openai' },
+        ],
+      });
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'compare',
+        'show',
+        '--run-id',
+        'run_1',
+      ]);
+
+      const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(output).toContain('deepseek/deepseek-v4-flash');
+      expect(output).toContain('0.10');
+      expect(output).toContain('calls the user 宋清扬');
+      expect(output).toContain('not valid JSON');
+      expect(output).not.toContain('undefined');
+    });
+  });
 
   // ============================================
   // Benchmark tests
@@ -403,6 +576,30 @@ describe('eval command', () => {
         metadata: { taskCount: 89 },
         name: 'Dataset 1',
       });
+    });
+
+    it('should create a standalone dataset without a benchmark', async () => {
+      mockTrpcClient.agentEval.createDataset.mutate.mockResolvedValue({ id: 'd2' });
+
+      await createProgram().parseAsync([
+        'node',
+        'test',
+        'eval',
+        'dataset',
+        'create',
+        '--identifier',
+        'captured',
+        '-n',
+        'Captured',
+        '--json',
+      ]);
+
+      expect(mockTrpcClient.agentEval.createDataset.mutate).toHaveBeenCalledWith({
+        identifier: 'captured',
+        name: 'Captured',
+      });
+      const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+      expect(output.data.url).toContain('/eval/datasets/d2');
     });
   });
 
