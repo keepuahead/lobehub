@@ -15,6 +15,7 @@ const {
   mockInterruptOperation,
   mockGetHeterogeneousResumeSessionId,
   mockMessageCreate,
+  mockMessageFindById,
   mockMessageQuery,
   mockMessageUpdate,
   mockResolveAttachmentsByFileIds,
@@ -33,6 +34,7 @@ const {
   mockGetHeterogeneousResumeSessionId: vi.fn().mockResolvedValue(undefined),
   mockIngestAttachment: vi.fn(),
   mockMessageCreate: vi.fn(),
+  mockMessageFindById: vi.fn(),
   mockMessageQuery: vi.fn(),
   mockMessageUpdate: vi.fn().mockResolvedValue({}),
   mockPublishAgentRuntimeEnd: vi.fn().mockResolvedValue('end-event-id'),
@@ -93,6 +95,7 @@ vi.mock('@/database/models/message', () => ({
   MessageModel: vi.fn().mockImplementation(function () {
     return {
       create: mockMessageCreate,
+      findById: mockMessageFindById,
       getLatestNonToolMessageId: vi.fn().mockResolvedValue(undefined),
       getLatestSpineMessageId: vi.fn().mockResolvedValue(undefined),
       query: mockMessageQuery,
@@ -269,6 +272,7 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     topicMock.tryReserveTaskCallback.mockResolvedValue(true);
     topicMock.updateMetadata.mockResolvedValue(undefined);
     mockMessageCreate.mockResolvedValue({ id: 'msg-1' });
+    mockMessageFindById.mockResolvedValue(undefined);
     mockMessageQuery.mockResolvedValue([]);
     mockResolveAttachmentsByFileIds.mockResolvedValue({ ...emptyResolvedAttachments });
     mockSpawnHeteroSandbox.mockResolvedValue(undefined);
@@ -940,6 +944,260 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
       }),
     );
     expect(mockSpawnHeteroSandbox).not.toHaveBeenCalled();
+  });
+
+  /** @example Regenerating A starts fresh with selected ancestors, even after B/C ran. */
+  it('honors an explicit device history boundary without reading the latest transcript', async () => {
+    // ROOT CAUSE:
+    // Device dispatch always resumed the topic's latest native transcript and
+    // loaded recent rows for recovery, so regenerating A could still see B/C.
+    // Explicit fresh-session intent must suppress both sources of later history.
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-after-C');
+    mockMessageFindById.mockResolvedValue({
+      content: 'Prompt A',
+      id: 'user-A',
+      role: 'user',
+      topicId: 'topic-1',
+    });
+    mockMessageQuery.mockResolvedValue([
+      { content: 'LATER-B', id: 'user-B', role: 'user' },
+      { content: 'LATER-C', id: 'user-C', role: 'user' },
+    ]);
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { systemContext: 'Agent instructions', type: 'codex' },
+      },
+      model: 'codex',
+      provider: 'codex',
+    });
+
+    await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      heterogeneousFreshSession: {
+        historyBoundaryMessageId: 'user-A',
+        systemContext: 'Selected EARLY-CODE history',
+      },
+      parentMessageId: 'user-A',
+      prompt: 'Prompt A',
+      resume: true,
+    });
+
+    /** @example Neither native resume nor latest-row recovery may reintroduce B/C. */
+    expect(mockGetHeterogeneousResumeSessionId).not.toHaveBeenCalled();
+    expect(mockMessageQuery).not.toHaveBeenCalled();
+    expect(mockBuildRemoteDeviceHeteroContext).toHaveBeenCalledWith({
+      agentSystemContext: 'Agent instructions\n\nSelected EARLY-CODE history',
+      conversationHistory: undefined,
+    });
+    expect(mockDispatchAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshSession: { historyBoundaryMessageId: 'user-A' },
+        resumeFallbackSystemContext: undefined,
+        resumeSessionId: undefined,
+      }),
+    );
+  });
+
+  /** @example An already-spawned sandbox remains owned by its existing lifecycle after request abort. */
+  it('does not erase a sandbox that starts before the request aborts', async () => {
+    // ROOT CAUSE:
+    // A device-only dispatch flag classified an already-spawned sandbox as never started.
+    // Its late request abort erased output while the sandbox kept running.
+    const controller = new AbortController();
+    const completed = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    mockSpawnHeteroSandbox.mockImplementationOnce(async () => {
+      controller.abort();
+    });
+    try {
+      const result = await service.execAgent({
+        agentId: 'agent-1',
+        prompt: 'A',
+        signal: controller.signal,
+      });
+      /** @example The sandbox completion owner and original output remain intact. */
+      expect(mockSpawnHeteroSandbox).toHaveBeenCalled();
+      expect(result).toMatchObject({ autoStarted: true, success: true });
+      expect(completed).not.toHaveBeenCalled();
+      expect(mockMessageUpdate).not.toHaveBeenCalledWith(expect.any(String), { content: '' });
+    } finally {
+      completed.mockRestore();
+    }
+  });
+
+  /** @example An explicit rejection proves no native process needs cancellation. */
+  it('settles Stop after a definitive device rejection without waiting for a nonexistent child', async () => {
+    // ROOT CAUSE:
+    // An attempted dispatch was treated as accepted even when the device rejected it.
+    // interruptTask could not confirm a nonexistent child, leaving cancel_pending forever.
+    const controller = new AbortController();
+    const interrupted = vi
+      .spyOn(service, 'interruptTask')
+      .mockResolvedValue({ deviceCancellationConfirmed: false, success: true });
+    const completed = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+    });
+    mockDispatchAgentRun.mockImplementationOnce(async () => {
+      controller.abort();
+      return { error: 'DEVICE_OFFLINE', notStarted: true, success: false };
+    });
+    try {
+      const result = await service.execAgent({
+        agentId: 'agent-1',
+        prompt: 'A',
+        signal: controller.signal,
+      });
+      /** @example A rejected run is interrupted locally without a spurious physical cancel. */
+      expect(result).toMatchObject({ autoStarted: false, status: 'interrupted', success: false });
+      expect(interrupted).not.toHaveBeenCalled();
+      expect(completed).toHaveBeenCalled();
+    } finally {
+      interrupted.mockRestore();
+      completed.mockRestore();
+    }
+  });
+
+  /** @example A timeout can hide an accepted run and must retain physical cancellation ownership. */
+  it('keeps cancellation pending after an ambiguous device timeout', async () => {
+    const controller = new AbortController();
+    const interrupted = vi
+      .spyOn(service, 'interruptTask')
+      .mockResolvedValue({ deviceCancellationConfirmed: false, success: true });
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+    });
+    mockDispatchAgentRun.mockImplementationOnce(async () => {
+      controller.abort();
+      return { error: 'TIMEOUT', success: false };
+    });
+    try {
+      const result = await service.execAgent({
+        agentId: 'agent-1',
+        prompt: 'A',
+        signal: controller.signal,
+      });
+      /** @example Unknown dispatch ownership cannot be settled as never-started. */
+      expect(interrupted).toHaveBeenCalled();
+      expect(result).toMatchObject({ autoStarted: true, status: 'cancel_pending', success: false });
+    } finally {
+      interrupted.mockRestore();
+    }
+  });
+
+  /** @example Stop during assistant persistence cannot dispatch a later device child. */
+  it('honors Stop after the assistant placeholder await', async () => {
+    const controller = new AbortController();
+    mockMessageCreate.mockImplementation(async (message) => {
+      if (message.role === 'assistant') controller.abort();
+      return { id: message.role === 'assistant' ? 'new-placeholder' : 'user-A' };
+    });
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+    });
+
+    /** @example The placeholder is settled, but neither operation persistence nor device dispatch starts. */
+    await expect(
+      service.execAgent({ agentId: 'agent-1', prompt: 'A', signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    expect(recordStartSpy).not.toHaveBeenCalled();
+    expect(mockMessageUpdate).toHaveBeenCalledWith(
+      'new-placeholder',
+      expect.objectContaining({ content: '' }),
+    );
+  });
+
+  /** @example Stop after the durable operation write must settle that owned operation. */
+  it('honors Stop after operation persistence and before device dispatch', async () => {
+    const controller = new AbortController();
+    const completed = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+    });
+    try {
+      const result = await service.execAgent({
+        agentId: 'agent-1',
+        prompt: 'A',
+        signal: controller.signal,
+        onOperationCreated: async () => {
+          controller.abort();
+        },
+      });
+      /** @example No CLI starts after Stop; the durable row receives interrupted status. */
+      expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ autoStarted: false, status: 'interrupted', success: false });
+      expect(completed).toHaveBeenCalledWith(
+        expect.objectContaining({ operationId: result.operationId }),
+        'interrupted',
+        { skipErrorMessageWrite: true },
+      );
+    } finally {
+      completed.mockRestore();
+    }
+  });
+
+  /** @example A late device acknowledgement still belongs to the stopped request. */
+  it('cancels the real device operation when Stop arrives during its acknowledgement', async () => {
+    const controller = new AbortController();
+    const interrupted = vi.spyOn(service, 'interruptTask').mockResolvedValue({
+      deviceCancellationConfirmed: true,
+      success: true,
+    });
+    const completed = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+    });
+    mockDispatchAgentRun.mockImplementation(async () => {
+      controller.abort();
+      return { success: true };
+    });
+    try {
+      const result = await service.execAgent({
+        agentId: 'agent-1',
+        prompt: 'A',
+        signal: controller.signal,
+      });
+      /** @example Cancellation uses the acknowledged operation ID, not the topic's next run. */
+      expect(interrupted).toHaveBeenCalledWith({
+        operationId: result.operationId,
+        topicId: 'topic-1',
+      });
+      expect(result).toMatchObject({ autoStarted: false, status: 'interrupted', success: false });
+    } finally {
+      interrupted.mockRestore();
+      completed.mockRestore();
+    }
   });
 
   it('resumes a native device session with device-specific context', async () => {

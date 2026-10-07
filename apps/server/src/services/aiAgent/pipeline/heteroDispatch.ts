@@ -77,6 +77,11 @@ export interface HeteroDispatchDeps {
   getMarketService: (options?: {
     sandboxStorage: NonNullable<SandboxSessionConfig['claim']>;
   }) => Promise<MarketService>;
+  /** Stop an acknowledged device operation through its persisted dispatch route. */
+  interruptTask: (params: { operationId: string; topicId: string }) => Promise<{
+    deviceCancellationConfirmed?: boolean;
+    success: boolean;
+  }>;
   messageModel: MessageModel;
   resolveDeviceWorkspaceId: (deviceId: string | undefined) => Promise<string | undefined>;
   topicModel: TopicModel;
@@ -274,9 +279,12 @@ const hasHeteroRunStarted = async (
   }
 };
 
+/** Authorized execution inputs for the heterogeneous dispatch stage. */
 export interface HeteroDispatchInput {
   canManageAgent: boolean;
   effectiveRequestedDeviceId?: string;
+  /** Selected replay replaces topic-wide native/recovery history when present. */
+  heterogeneousFreshSession?: InternalExecAgentParams['heterogeneousFreshSession'];
   heterogeneousProvider?: LobeAgentAgencyConfig['heterogeneousProvider'];
   heteroType: HeterogeneousAgentType;
   hooks?: AgentHook[];
@@ -293,6 +301,8 @@ export interface HeteroDispatchInput {
   runAttachments: { imageList?: Array<{ alt: string; id: string; url: string }> };
   /** Ids of the rows THIS turn just persisted (excluded from recovery history). */
   selfMessageIds: Set<string>;
+  /** Cancellation of the initiating request, including dispatch acknowledgement waits. */
+  signal?: AbortSignal;
   topicStartOwnerOperationId?: string;
 }
 
@@ -392,13 +402,92 @@ export const dispatchHeteroAgent = async (
     throw new Error('Failed to persist heterogeneous agent operation');
   }
 
+  // Once dispatch is issued, keep ownership until its acknowledgement lands.
+  // Aborting that HTTP request could abandon a real process with no caller to stop it.
+  let dispatchOwner: 'preparing' | 'device' | 'other' = 'preparing';
+
+  /**
+   * Settles Stop before dispatch, or cancels the acknowledged native process.
+   *
+   * Use when:
+   * - An awaited preparation or device acknowledgement has completed.
+   *
+   * Expects:
+   * - The operation row exists; dispatched runs already have a persisted device route.
+   *
+   * Returns:
+   * - A cancellation result, preserving the running marker if device exit is unconfirmed.
+   *
+   * Call stack:
+   * dispatchHeteroAgent
+   *   -> cancelIfRequested
+   *     -> HeteroDispatchDeps.interruptTask
+   *     -> {@link CompletionLifecycle.completeOperation}
+   */
+  const cancelIfRequested = async (): Promise<ExecAgentResult | undefined> => {
+    // Other execution transports retain their existing completion/cancellation owner.
+    if (!input.signal?.aborted || dispatchOwner === 'other') return;
+
+    const confirmed =
+      dispatchOwner === 'preparing' ||
+      (await deps.interruptTask({ operationId, topicId })).deviceCancellationConfirmed === true;
+    if (confirmed) {
+      if (dispatchOwner === 'preparing') {
+        // Only our never-executed placeholder is blanked. Existing replies and
+        // output produced by a dispatched process are never deleted here.
+        await deps.messageModel.update(assistantMessageId, { content: '' });
+        await new CompletionLifecycle(deps.db, deps.userId, deps.workspaceId).completeOperation(
+          {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            operationId,
+            serializedHooks: hookDispatcher.getSerializedHooks(operationId),
+            topicId,
+            userId: deps.userId,
+          },
+          'interrupted',
+          { skipErrorMessageWrite: true },
+        );
+        await deps.topicModel.settleRunningOperation(topicId, operationId, 'active');
+      }
+      await createStreamEventManager()
+        .publishAgentRuntimeEnd({
+          finalState: {},
+          operationId,
+          reason: 'interrupted',
+          stepIndex: 0,
+        })
+        .catch((error) => log('cancelIfRequested: stream close failed: %O', error));
+    }
+    return {
+      agentId: resolvedAgentId,
+      assistantMessageId,
+      autoStarted: !confirmed,
+      createdAt: new Date().toISOString(),
+      error: confirmed ? 'Execution interrupted' : 'Device cancellation is not confirmed',
+      message: confirmed ? 'Execution interrupted' : 'Device cancellation pending',
+      operationId,
+      status: confirmed ? 'interrupted' : 'cancel_pending',
+      success: false,
+      timestamp: new Date().toISOString(),
+      topicId,
+      userMessageId: userMessageId ?? parentMessageId ?? '',
+    };
+  };
+
   await input.onOperationCreated?.(operationId);
+  const cancelledAfterPersistence = await cancelIfRequested();
+  if (cancelledAfterPersistence) return cancelledAfterPersistence;
 
   // Read resume session id for next-turn continuity.
   const heteroService = new HeterogeneousAgentService(deps.db, deps.userId, {
     workspaceId: deps.workspaceId,
   });
-  const resumeSessionId = await heteroService.getHeterogeneousResumeSessionId(topicId);
+  // A historical regeneration must never fall back to the topic's latest
+  // native transcript, including when its selected replay is empty.
+  const resumeSessionId = input.heterogeneousFreshSession
+    ? undefined
+    : await heteroService.getHeterogeneousResumeSessionId(topicId);
   // Sign an operation-scoped JWT so the CLI can authenticate against
   // heteroIngest / heteroFinish without full user credentials.
   let operationJwt: string;
@@ -451,7 +540,7 @@ export const dispatchHeteroAgent = async (
   // a serialized duplicate. Amp threads are server-backed, so they rely on
   // native continuation exclusively and never need this local-file fallback.
   let conversationHistory: ConversationHistoryEntry[] | undefined;
-  if (heteroType !== 'amp') {
+  if (heteroType !== 'amp' && !input.heterogeneousFreshSession) {
     try {
       // `allowShareVisitor`: this is the RUN's own topic, already resolved
       // and authorized upstream. An agent-share visitor run executes under
@@ -503,7 +592,12 @@ export const dispatchHeteroAgent = async (
   // `/goal` reaches a hetero agent as instructions, not a tool: it creates and
   // plans the goal through `lh` in this same run.
   const agentSystemContext = withConversationGoalPrompt(
-    agentConfig.agencyConfig?.heterogeneousProvider?.systemContext,
+    [
+      agentConfig.agencyConfig?.heterogeneousProvider?.systemContext,
+      input.heterogeneousFreshSession?.systemContext,
+    ]
+      .filter(Boolean)
+      .join('\n\n') || undefined,
     prompt,
   );
   const systemContext = buildCloudHeteroContext({
@@ -544,6 +638,9 @@ export const dispatchHeteroAgent = async (
     : undefined;
 
   const heteroParams = {
+    freshSession: input.heterogeneousFreshSession
+      ? { historyBoundaryMessageId: input.heterogeneousFreshSession.historyBoundaryMessageId }
+      : undefined,
     agentType: heteroType,
     assistantMessageId,
     githubToken,
@@ -849,6 +946,10 @@ export const dispatchHeteroAgent = async (
       remoteDeviceId,
       remoteDeviceWorkspaceId,
     );
+    const cancelledBeforeRemoteDispatch = await cancelIfRequested();
+    if (cancelledBeforeRemoteDispatch) return cancelledBeforeRemoteDispatch;
+    // This platform task uses its own notify/cancellation lifecycle after dispatch.
+    if (!authorizationError) dispatchOwner = 'other';
     const result = authorizationError
       ? {
           content: 'The workspace device is no longer registered or visible for this run.',
@@ -1061,8 +1162,16 @@ export const dispatchHeteroAgent = async (
         dispatchDeviceId,
         dispatchWorkspaceId,
       );
+      const cancelledBeforeDispatch = await cancelIfRequested();
+      if (cancelledBeforeDispatch) return cancelledBeforeDispatch;
+      dispatchOwner = authorizationError ? 'preparing' : 'device';
       const result = authorizationError
-        ? { error: 'DEVICE_NOT_FOUND', errorData: authorizationError, success: false }
+        ? {
+            error: 'DEVICE_NOT_FOUND',
+            errorData: authorizationError,
+            notStarted: true,
+            success: false,
+          }
         : await deviceGateway.dispatchAgentRun({
             ...heteroParams,
             agentId: resolvedAgentId,
@@ -1079,6 +1188,9 @@ export const dispatchHeteroAgent = async (
             // device still has to write back under `deps.workspaceId`.
             ingestWorkspaceId: deps.workspaceId,
           });
+      if (result.notStarted) dispatchOwner = 'preparing';
+      const cancelledAfterDispatch = await cancelIfRequested();
+      if (cancelledAfterDispatch) return cancelledAfterDispatch;
       if (!result.success) {
         log('execAgent: hetero device dispatch failed: %s', result.error);
         const terminalReported = await finalizeHeteroDispatchError(deps, {
@@ -1183,6 +1295,10 @@ export const dispatchHeteroAgent = async (
       // ownership-gated on heteroIngest/heteroFinish) with a run-length TTL
       // so it outlives a multi-hour run.
       const sandboxJwt = await signUserJWT(deps.userId, '4h');
+      const cancelledBeforeSandboxDispatch = await cancelIfRequested();
+      if (cancelledBeforeSandboxDispatch) return cancelledBeforeSandboxDispatch;
+      // The sandbox completion owner takes over as soon as its spawn is issued.
+      dispatchOwner = 'other';
       spawnHeteroSandbox({
         ...heteroParams,
         agentType: heteroType as 'claude-code' | 'codex',
@@ -1235,6 +1351,9 @@ export const dispatchHeteroAgent = async (
       // non-critical
     }
   }
+
+  const cancelledBeforeReturn = await cancelIfRequested();
+  if (cancelledBeforeReturn) return cancelledBeforeReturn;
 
   return {
     agentId: resolvedAgentId,
