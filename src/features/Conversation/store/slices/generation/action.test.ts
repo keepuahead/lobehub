@@ -2098,6 +2098,91 @@ describe('Generation Actions', () => {
       },
     );
 
+    /** @example A confirmed Stop before the first device output restores the original reply. */
+    it.skipIf(providerType !== 'codex')(
+      'restores an empty device reply after confirmed Stop without overriding output or navigation',
+      async () => {
+        // ROOT CAUSE:
+        // Device ACK completed the regenerate wrapper before native output existed.
+        // Stop then killed the process but left its empty placeholder selected.
+        // Retain a confirmed-stop callback and restore only that empty, selected branch.
+        const { mockRefreshMessages } = await setupHeteroChatStore();
+        vi.mocked(agentDispatcher.selectRuntimeType).mockReturnValue('gateway');
+        const original: UIChatMessage = {
+          id: 'original-A',
+          role: 'assistant',
+          content: 'Original answer',
+          parentId: 'user-A',
+          createdAt: 2,
+          updatedAt: 2,
+        };
+        const user: UIChatMessage = {
+          id: 'user-A',
+          role: 'user',
+          content: 'A',
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        const store = createStore({
+          context: { agentId: 'session-1', topicId: 'topic-1', threadId: null },
+        });
+        store.setState({ dbMessages: [user, original], displayMessages: [user, original] });
+        await store.getState().regenerateUserMessage('user-A');
+        const { onStopConfirmed } = mockExecuteGatewayAgent.mock.calls[0][0];
+        /** @example Device ACK must not discard the recovery callback. */
+        expect(onStopConfirmed).toBeTypeOf('function');
+        const placeholder: UIChatMessage = {
+          ...original,
+          id: 'empty-reply',
+          content: '...',
+          createdAt: 3,
+          updatedAt: 3,
+        };
+        const selectedUser = { ...user, metadata: { activeBranchIndex: 1 } };
+        store.setState({ dbMessages: [selectedUser, original, placeholder] });
+        await onStopConfirmed('empty-reply');
+        /** @example The persisted stopped placeholder is refreshed before choosing the original reply. */
+        expect(mockRefreshMessages).toHaveBeenCalledWith(store.getState().context);
+        expect(mockSwitchMessageBranch).toHaveBeenLastCalledWith('user-A', 0, {
+          operationId: 'regen-op-id',
+        });
+        expect(mockDeleteMessage).not.toHaveBeenCalled();
+
+        mockSwitchMessageBranch.mockClear();
+        store.setState({
+          dbMessages: [selectedUser, original, { ...placeholder, content: 'Partial answer' }],
+        });
+        await onStopConfirmed('empty-reply');
+        /** @example A partial answer remains selected and recoverable. */
+        expect(mockSwitchMessageBranch).not.toHaveBeenCalled();
+
+        store.setState({
+          dbMessages: [
+            selectedUser,
+            original,
+            placeholder,
+            {
+              ...placeholder,
+              id: 'tool-result',
+              role: 'tool',
+              parentId: 'empty-reply',
+              content: 'pwd output',
+            },
+          ],
+        });
+        await onStopConfirmed('empty-reply');
+        /** @example Tool-only output also counts as a real reply. */
+        expect(mockSwitchMessageBranch).not.toHaveBeenCalled();
+
+        store.setState({
+          dbMessages: [{ ...user, metadata: { activeBranchIndex: 0 } }, original, placeholder],
+        });
+        await onStopConfirmed('empty-reply');
+        /** @example A user-selected branch is never overwritten by a delayed Stop acknowledgement. */
+        expect(mockSwitchMessageBranch).not.toHaveBeenCalled();
+      },
+    );
+
     /** @example Device error recovery is a fresh bounded retry, preserving the failed assistant branch. */
     it.skipIf(providerType !== 'codex')(
       'retries a device status error without deleting the original group',
