@@ -44,6 +44,7 @@ import { HeterogeneousAgentService } from '@/server/services/heterogeneousAgent'
 import type { ConversationHistoryEntry } from '@/server/services/heterogeneousAgent/cloudHeteroContext';
 import { buildCloudHeteroContext } from '@/server/services/heterogeneousAgent/cloudHeteroContext';
 import { buildRemoteDeviceHeteroContext } from '@/server/services/heterogeneousAgent/remoteDeviceHeteroContext';
+import { spawnHeteroSandbox } from '@/server/services/heterogeneousAgent/sandboxRunner';
 import type { MarketService } from '@/server/services/market';
 import {
   resolveSandboxSessionConfig,
@@ -1222,12 +1223,9 @@ export const dispatchHeteroAgent = async (
 
         // Cloud sandbox path — only for sandbox-provisioned local CLI agents.
         // Remote agents (openclaw / hermes) always require a bound device.
-        // Lazy-loaded on purpose: `sandboxRunner` pulls the sandbox-service graph
-        // (which eagerly touches server-only ModelRuntime env at module init), so
-        // importing it statically would couple that whole subsystem into every
-        // `aiAgent` import. Only this cloud-CLI branch needs it.
-        const { spawnHeteroSandbox } =
-          await import('@/server/services/heterogeneousAgent/sandboxRunner');
+        // The previous lazy-load comment described sandbox-service module initialization.
+        // Keep the dependency static so build and circular-dependency checks can validate it;
+        // sandbox creation still happens only in this cloud-CLI branch.
         // The entitlement rides on the trust token; without it the execution
         // plane routes to the ephemeral sandbox whatever the request says.
         const marketService = await deps.getMarketService(
