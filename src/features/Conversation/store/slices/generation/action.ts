@@ -639,6 +639,31 @@ const regenerateUserMessageFromSource = async (
           settleGenerationEntry(chatStore, operationId, () =>
             hooks.onRegenerateComplete?.(messageId),
           ),
+        onStopConfirmed:
+          heterogeneousProvider?.type === 'codex'
+            ? async (assistantMessageId) => {
+                // ACK hands execution to the device before any native output.
+                // Refresh after confirmed shutdown so an empty placeholder does
+                // not hide the original reply. Keep partial/tool output and any
+                // branch the user selected while cancellation was in flight.
+                await chatStore.refreshMessages(context);
+                const messages = readDbMessages();
+                const selected = messages.find((m) => m.id === messageId)?.metadata
+                  ?.activeBranchIndex;
+                if (selected !== nextBranchIndex) return;
+                const reply = messages.find((m) => m.id === assistantMessageId);
+                if (!reply || reply.parentId !== messageId) return;
+                if (
+                  (reply.content && reply.content !== LOADING_FLAT) ||
+                  reply.reasoning?.content ||
+                  reply.tools?.length ||
+                  reply.error ||
+                  messages.some((m) => m.parentId === assistantMessageId)
+                )
+                  return;
+                await restoreBranch?.(false);
+              }
+            : undefined,
         parentMessageId: messageId,
         parentOperationId: operationId,
       });

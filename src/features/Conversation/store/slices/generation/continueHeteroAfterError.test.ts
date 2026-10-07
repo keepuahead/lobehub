@@ -115,7 +115,9 @@ vi.mock('@/store/user', () => ({
 }));
 
 const mockChatDeleteMessage = vi.fn(async () => {});
-const mockExecuteGatewayAgent = vi.fn(async () => {});
+// The gateway now reports startup ownership so a rejected regenerate can
+// restore its original branch. Model its successful result in this routing test.
+const mockExecuteGatewayAgent = vi.fn(async () => ({ autoStarted: true }));
 const noop = vi.fn();
 vi.mock('@/store/chat', () => ({
   useChatStore: {
