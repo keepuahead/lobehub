@@ -295,6 +295,8 @@ export class GatewayHttpClient {
     jwt: string;
     operationId: string;
     prompt: string;
+    /** Explicit history boundary; a device must ignore native resume when present. */
+    freshSession?: { historyBoundaryMessageId: string };
     resumeFallbackSystemContext?: string;
     resumeSessionId?: string;
     systemContext?: string;
@@ -309,13 +311,25 @@ export class GatewayHttpClient {
      * `lh hetero exec` can write back under the topic's scope.
      */
     ingestWorkspaceId?: string;
-  }): Promise<{ success: boolean; error?: string; errorData?: DeviceUnavailableErrorData }> {
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    errorData?: DeviceUnavailableErrorData;
+    /** True only when the gateway or device proves no process started. */ notStarted?: boolean;
+  }> {
     const res = await this.post('/api/device/agent/run', params);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       const failure = describeGatewayResponseFailure(res.status, text, 'agent run', params);
+      // Rejected spawns and explicit pre-delivery availability errors prove no
+      // child exists. A timeout or other transport failure can hide a live run.
+      const notStarted =
+        res.status === 422 ||
+        ([404, 503].includes(res.status) &&
+          ['DEVICE_OFFLINE', 'DEVICE_NOT_FOUND'].includes(failure.error));
       return {
         error: failure.error,
+        ...(notStarted ? { notStarted: true } : {}),
         ...(failure.data ? { errorData: failure.data } : {}),
         success: false,
       };
@@ -324,6 +338,10 @@ export class GatewayHttpClient {
     if (data && (data.success === false || data.status === 'rejected')) {
       return {
         error: data.error ?? data.reason ?? 'DEVICE_REJECTED',
+        ...(data.status === 'rejected' ||
+        ['DEVICE_OFFLINE', 'DEVICE_NOT_FOUND', 'DEVICE_REJECTED'].includes(data.error)
+          ? { notStarted: true }
+          : {}),
         success: false,
       };
     }

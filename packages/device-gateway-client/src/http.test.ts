@@ -579,7 +579,7 @@ describe('GatewayHttpClient', () => {
         userId: 'user-1',
       });
 
-      expect(result).toEqual({ error: 'spawn failed', success: false });
+      expect(result).toEqual({ error: 'spawn failed', notStarted: true, success: false });
     });
 
     it('should surface success false returned with HTTP 200', async () => {
@@ -598,7 +598,7 @@ describe('GatewayHttpClient', () => {
         userId: 'user-1',
       });
 
-      expect(result).toEqual({ error: 'DEVICE_OFFLINE', success: false });
+      expect(result).toEqual({ error: 'DEVICE_OFFLINE', notStarted: true, success: false });
     });
 
     it('should surface non-ok agent-run responses', async () => {
@@ -618,7 +618,37 @@ describe('GatewayHttpClient', () => {
         userId: 'user-1',
       });
 
-      expect(result).toEqual({ error: 'DEVICE_OFFLINE', success: false });
+      expect(result).toEqual({ error: 'DEVICE_OFFLINE', notStarted: true, success: false });
+    });
+
+    /** @example Only a definite rejection, not an acknowledgement timeout, proves no child started. */
+    it('distinguishes rejected agent runs from ambiguous acknowledgement timeouts', async () => {
+      const params = {
+        agentType: 'codex',
+        assistantMessageId: 'asst-1',
+        jwt: 'jwt',
+        operationId: 'op-1',
+        prompt: 'A',
+        topicId: 'topic-1',
+        userId: 'user-1',
+      };
+      mockFetch({
+        ok: false,
+        status: 422,
+        text: vi.fn().mockResolvedValue('{"error":"working directory missing","success":false}'),
+      });
+      /** @example The device explicitly rejected the spawn. */
+      expect(await client.dispatchAgentRun(params)).toMatchObject({
+        notStarted: true,
+        success: false,
+      });
+      mockFetch({
+        ok: false,
+        status: 504,
+        text: vi.fn().mockResolvedValue('{"error":"TIMEOUT","success":false}'),
+      });
+      /** @example A lost acknowledgement must not be interpreted as proof of no execution. */
+      expect((await client.dispatchAgentRun(params)).notStarted).not.toBe(true);
     });
 
     /** @example A pre-acceptance 404 keeps enough context for an outer agent to retry. */

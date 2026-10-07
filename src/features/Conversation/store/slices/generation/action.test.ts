@@ -32,7 +32,18 @@ const mockAssociateMessageWithOperation = vi.fn();
 const mockFailOperation = vi.fn();
 const mockExecuteClientAgent = vi.fn();
 const mockIsGatewayModeEnabled = vi.fn(() => false);
-const mockExecuteGatewayAgent = vi.fn();
+const mockExecuteGatewayAgent = vi.fn().mockResolvedValue({
+  agentId: 'test-agent',
+  assistantMessageId: 'gateway-assistant',
+  autoStarted: true,
+  createdAt: '2026-10-07T00:00:00.000Z',
+  operationId: 'gateway-operation',
+  status: 'created',
+  success: true,
+  timestamp: '2026-10-07T00:00:00.000Z',
+  topicId: 'test-topic',
+  userMessageId: 'user-1',
+});
 const mockUpdateTopicMetadata = vi.fn();
 const mockUpdateTopicStatus = vi.fn();
 const mockSourceTopic = {
@@ -1968,6 +1979,173 @@ describe('Generation Actions', () => {
         expect(branchSwitches()).toEqual([['u1', 2]]);
       });
     });
+
+    /** @example Device regeneration of A retains its image and selected ancestors, excluding later B/C. */
+    it.skipIf(providerType !== 'codex')(
+      'sends selected history and current attachments to the device gateway',
+      async () => {
+        // ROOT CAUSE:
+        // The gateway branch forwarded only the prompt and parent id. The server
+        // consequently resumed the latest native transcript and lost A's image.
+        // Carry the selected boundary and bounded context into a fresh device session.
+        await setupHeteroChatStore();
+        vi.mocked(agentDispatcher.selectRuntimeType).mockReturnValue('gateway');
+        const messages: UIChatMessage[] = [
+          { id: 'u0', role: 'user', content: 'EARLY-CODE', createdAt: 1, updatedAt: 1 },
+          {
+            id: 'a0',
+            role: 'assistant',
+            content: 'Earlier answer',
+            parentId: 'u0',
+            createdAt: 2,
+            updatedAt: 2,
+          },
+          {
+            id: 'uA',
+            role: 'user',
+            content: 'Recall the earlier code and image',
+            parentId: 'a0',
+            createdAt: 3,
+            updatedAt: 3,
+            imageList: [
+              { id: 'image-A', url: 'https://example.com/triangle.png', alt: 'Blue triangle' },
+            ],
+          },
+          {
+            id: 'aA',
+            role: 'assistant',
+            content: 'REPLACED-A',
+            parentId: 'uA',
+            createdAt: 4,
+            updatedAt: 4,
+          },
+          {
+            id: 'uB',
+            role: 'user',
+            content: 'LATER-B',
+            parentId: 'aA',
+            createdAt: 5,
+            updatedAt: 5,
+          },
+          {
+            id: 'uC',
+            role: 'user',
+            content: 'LATER-C',
+            parentId: 'uB',
+            createdAt: 6,
+            updatedAt: 6,
+          },
+        ];
+        const store = createStore({
+          context: { agentId: 'session-1', topicId: 'topic-1', threadId: null },
+        });
+        store.setState({ dbMessages: messages, displayMessages: messages });
+        await store.getState().regenerateUserMessage('uA');
+        /** @example The original image and exact selected parent cross the transport boundary. */
+        expect(mockExecuteGatewayAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            fileIds: ['image-A'],
+            heterogeneousFreshSession: {
+              historyBoundaryMessageId: 'uA',
+              systemContext: expect.stringContaining('EARLY-CODE'),
+            },
+            parentMessageId: 'uA',
+          }),
+        );
+        const request = mockExecuteGatewayAgent.mock.calls[0][0];
+        /** @example Neither the replaced response nor later user turns enters the replay. */
+        expect(request.heterogeneousFreshSession.systemContext).not.toMatch(
+          /REPLACED-A|LATER-B|LATER-C/,
+        );
+      },
+    );
+
+    /** @example A rejected regenerate keeps the original reply selected even after creating a placeholder. */
+    it.skipIf(providerType !== 'codex')(
+      'restores the original device reply after dispatch rejection',
+      async () => {
+        await setupHeteroChatStore();
+        vi.mocked(agentDispatcher.selectRuntimeType).mockReturnValue('gateway');
+        const messages: UIChatMessage[] = [
+          { id: 'user-A', role: 'user', content: 'A', createdAt: 1, updatedAt: 1 },
+          {
+            id: 'original-A',
+            role: 'assistant',
+            content: 'Original answer',
+            parentId: 'user-A',
+            createdAt: 2,
+            updatedAt: 2,
+          },
+        ];
+        const store = createStore({
+          context: { agentId: 'session-1', topicId: 'topic-1', threadId: null },
+        });
+        store.setState({ dbMessages: messages, displayMessages: messages });
+        mockExecuteGatewayAgent.mockImplementationOnce(async () => {
+          store.setState({
+            dbMessages: [...messages, { ...messages[1], id: 'failed-placeholder' }],
+          });
+          return { success: false, autoStarted: false };
+        });
+        await store.getState().regenerateUserMessage('user-A');
+        /** @example Placeholder creation does not mean that a replacement answer started. */
+        expect(mockSwitchMessageBranch.mock.calls.map(([id, index]) => [id, index])).toEqual([
+          ['user-A', 1],
+          ['user-A', 0],
+        ]);
+        expect(store.getState().dbMessages).toContain(messages[1]);
+        expect(mockDeleteMessage).not.toHaveBeenCalled();
+      },
+    );
+
+    /** @example Device error recovery is a fresh bounded retry, preserving the failed assistant branch. */
+    it.skipIf(providerType !== 'codex')(
+      'retries a device status error without deleting the original group',
+      async () => {
+        await setupHeteroChatStore();
+        vi.mocked(agentDispatcher.selectRuntimeType).mockReturnValue('gateway');
+        const messages: UIChatMessage[] = [
+          { id: 'user-A', role: 'user', content: 'A', createdAt: 1, updatedAt: 1 },
+          {
+            id: 'group-A',
+            role: 'assistantGroup',
+            content: '',
+            parentId: 'user-A',
+            createdAt: 2,
+            updatedAt: 2,
+            children: [
+              {
+                id: 'failed-step',
+                role: 'assistant',
+                content: '',
+                createdAt: 3,
+                updatedAt: 3,
+                error: {
+                  type: 'ProviderBizError',
+                  body: { agentType: 'codex', code: 'overloaded' },
+                },
+              },
+            ],
+          },
+        ];
+        const store = createStore({
+          context: { agentId: 'session-1', topicId: 'topic-1', threadId: null },
+        });
+        store.setState({ dbMessages: messages, displayMessages: messages });
+        await store.getState().continueHeteroAfterError('group-A');
+        /** @example Recovery uses the captured parent and an explicit fresh-session boundary. */
+        expect(mockExecuteGatewayAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            parentMessageId: 'user-A',
+            heterogeneousFreshSession: expect.objectContaining({
+              historyBoundaryMessageId: 'user-A',
+            }),
+          }),
+        );
+        expect(mockDeleteMessage).not.toHaveBeenCalled();
+        expect(store.getState().dbMessages).toContain(messages[1]);
+      },
+    );
 
     /** @example U0/A0/U1/A1/U2 must regenerate U1 without seeing U2 or A1. */
     it.skipIf(providerType !== 'codex')(

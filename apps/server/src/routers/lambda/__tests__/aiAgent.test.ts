@@ -14,6 +14,7 @@ import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import type * as ModelBankModule from 'model-bank';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import type * as InternalJwtModule from '@/libs/trpc/utils/internalJwt';
 import { AiAgentService } from '@/server/services/aiAgent';
@@ -127,6 +128,26 @@ vi.mock('model-bank', async (importOriginal) => {
  * 2. Ensure topic creation logic is correct
  * 3. Verify interactions with the database
  */
+/** @example Current attachment text is not subject to the separate historical replay budget. */
+it('accepts a fresh-session context containing a large current attachment', async () => {
+  // ROOT CAUSE:
+  // A 40K transport cap rejected valid current file text plus bounded ancestor history.
+  // The context builder already limits ancestors; current attachments retain existing limits.
+  const context = 'current attachment '.repeat(3000);
+  const schema = aiAgentRouter._def.procedures.execAgent._def.inputs[0];
+  if (!(schema instanceof z.ZodType)) throw new Error('Expected the router input Zod schema');
+  /** @example A current attachment larger than 40K reaches the normal execution validation. */
+  await expect(
+    schema.parseAsync({
+      agentId: 'agent-1',
+      prompt: 'Read this file',
+      resume: true,
+      parentMessageId: 'user-A',
+      heterogeneousFreshSession: { historyBoundaryMessageId: 'user-A', systemContext: context },
+    }),
+  ).resolves.toMatchObject({ heterogeneousFreshSession: { systemContext: context } });
+});
+
 describe('AI Agent Router Integration Tests', () => {
   let serverDB: LobeChatDatabase;
   let userId: string;

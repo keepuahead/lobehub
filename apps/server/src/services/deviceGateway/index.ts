@@ -1884,6 +1884,8 @@ export class DeviceGateway {
     jwt: string;
     operationId: string;
     prompt: string;
+    /** Explicit history boundary; a device must ignore native resume when present. */
+    freshSession?: { historyBoundaryMessageId: string };
     resumeFallbackSystemContext?: string;
     resumeSessionId?: string;
     systemContext?: string;
@@ -1892,9 +1894,14 @@ export class DeviceGateway {
     workspaceId?: string;
     /** Topic/run workspace forwarded to the device for hetero ingest. */
     ingestWorkspaceId?: string;
-  }): Promise<{ error?: string; errorData?: DeviceUnavailableErrorData; success: boolean }> {
+  }): Promise<{
+    error?: string;
+    errorData?: DeviceUnavailableErrorData;
+    /** True only for a definitive pre-execution rejection. */ notStarted?: boolean;
+    success: boolean;
+  }> {
     const client = this.getClient();
-    if (!client) return { error: 'GATEWAY_NOT_CONFIGURED', success: false };
+    if (!client) return { error: 'GATEWAY_NOT_CONFIGURED', notStarted: true, success: false };
 
     try {
       return await client.dispatchAgentRun(params);

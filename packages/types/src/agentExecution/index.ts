@@ -291,6 +291,14 @@ export interface ResumeClientLlmWaitResult {
   topicId?: string;
 }
 
+/** A Codex regeneration boundary whose selected ancestors replace native transcript history. */
+export interface HeterogeneousFreshSession {
+  /** Existing user message in the authorized topic; must equal the run's parent message. */
+  historyBoundaryMessageId: string;
+  /** Bounded selected ancestors plus current attachment/selection context; excludes replaced/later replies. */
+  systemContext?: string;
+}
+
 export interface ExecAgentParams {
   /** The agent ID to run (either agentId or slug is required) */
   agentId?: string;
@@ -325,6 +333,8 @@ export interface ExecAgentParams {
    * use the internal `files` param instead.
    */
   fileIds?: string[];
+  /** Start Codex in a fresh native session at this selected history boundary. */
+  heterogeneousFreshSession?: HeterogeneousFreshSession;
   /** Opt into runtime state snapshots on step_complete events. Defaults to false. */
   includeFinalState?: boolean;
   /** Additional system instructions appended after the agent's own system role */
