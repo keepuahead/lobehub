@@ -2,16 +2,20 @@
 
 import { type EvalReplayTargetMetrics } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import ModelLabel from '@/features/Eval/components/ModelLabel';
 
 import { styles } from './style';
 
 const percent = (v: number) => `${Math.round(v * 100)}%`;
 
-/** One card per model: how often it passed, its mean score and how many cells failed to run. */
+/**
+ * One tile per model, best first: how often it passed, its mean score and how
+ * many cells failed to run.
+ */
 const TargetSummary = memo<{ summaries: EvalReplayTargetMetrics[] }>(({ summaries }) => {
   const { t } = useTranslation('eval');
 
@@ -29,16 +33,9 @@ const TargetSummary = memo<{ summaries: EvalReplayTargetMetrics[] }>(({ summarie
           data-testid="comparison-target-summary"
           gap={8}
           key={`${s.provider}/${s.model}`}
-          padding={14}
+          padding={16}
         >
-          <Flexbox gap={2}>
-            <Text ellipsis weight={600}>
-              {s.model}
-            </Text>
-            <span className={styles.mono} style={{ color: cssVar.colorTextTertiary }}>
-              {s.provider}
-            </span>
-          </Flexbox>
+          <ModelLabel model={s.model} provider={s.provider} />
           <Flexbox horizontal align="baseline" gap={8}>
             <span
               className={styles.stat}
@@ -48,18 +45,16 @@ const TargetSummary = memo<{ summaries: EvalReplayTargetMetrics[] }>(({ summarie
             >
               {percent(s.passRate)}
             </span>
-            <Text fontSize={12} type="secondary">
+            <span className={styles.configLabel}>
               {t('comparison.summary.passed', { passed: s.passedCases, total: s.totalCases })}
-            </Text>
+            </span>
           </Flexbox>
-          <Flexbox horizontal gap={12}>
-            <Text fontSize={12} type="secondary">
-              {t('comparison.summary.avgScore', { score: s.averageScore.toFixed(2) })}
-            </Text>
+          <Flexbox horizontal className={styles.configLabel} gap={12}>
+            <span>{t('comparison.summary.avgScore', { score: s.averageScore.toFixed(2) })}</span>
             {s.errorCases > 0 && (
-              <Text fontSize={12} style={{ color: cssVar.colorWarning }}>
+              <span style={{ color: cssVar.colorWarning }}>
                 {t('comparison.summary.errors', { count: s.errorCases })}
-              </Text>
+              </span>
             )}
           </Flexbox>
         </Flexbox>

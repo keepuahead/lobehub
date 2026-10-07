@@ -1,26 +1,19 @@
 import type { AgentEvalRunListItem } from '@lobechat/types';
-import { type DropdownItem, DropdownMenu, Flexbox, Icon } from '@lobehub/ui';
-import { confirmModal, toast } from '@lobehub/ui/base-ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { DropdownMenu } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Ellipsis,
-  Pencil,
-  Play,
-  Square,
-  Trash2,
-  XCircle,
-} from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Ellipsis, XCircle } from 'lucide-react';
 import { Fragment, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import ModelLabel from '@/features/Eval/components/ModelLabel';
 import SegmentBar from '@/features/Eval/SegmentBar';
 import StatusBadge from '@/features/Eval/StatusBadge';
 import { formatDuration } from '@/features/Eval/utils';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
-import { useEvalStore } from '@/store/eval';
+
+import { getRunModel } from './runModel';
+import { useRunMenu } from './useRunMenu';
 
 const styles = createStaticStyles(({ css }) => ({
   arrowIcon: css`
@@ -116,9 +109,6 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: ${cssVar.fontSizeSM};
     color: ${cssVar.colorTextSecondary};
   `,
-  monoText: css`
-    font-family: ${cssVar.fontFamilyCode};
-  `,
   name: css`
     overflow: hidden;
 
@@ -181,9 +171,8 @@ interface RunCardProps {
 const RunCard = memo<RunCardProps>(({ benchmarkId, run, onRefresh, onEdit }) => {
   const { t } = useTranslation('eval');
 
-  const deleteRun = useEvalStore((s) => s.deleteRun);
-  const startRun = useEvalStore((s) => s.startRun);
-  const abortRun = useEvalStore((s) => s.abortRun);
+  const menuItems = useRunMenu(run, { onEdit, onRefresh });
+  const model = getRunModel(run);
 
   const metrics = run.metrics;
   const totalCases = metrics?.totalCases ?? 0;
@@ -194,8 +183,6 @@ const RunCard = memo<RunCardProps>(({ benchmarkId, run, onRefresh, onEdit }) => 
   const progress = totalCases > 0 ? (completedCases / totalCases) * 100 : 0;
   const passRate = metrics?.passRate != null ? metrics.passRate * 100 : 0;
   const hasStats = (run.status === 'completed' || run.status === 'running') && completedCases > 0;
-  const canStart = run.status === 'idle' || run.status === 'failed' || run.status === 'aborted';
-  const isActive = run.status === 'running' || run.status === 'pending';
   const showProgress = totalCases > 0 && run.status !== 'completed';
 
   const formatDate = (date?: Date | string) => {
@@ -204,107 +191,10 @@ const RunCard = memo<RunCardProps>(({ benchmarkId, run, onRefresh, onEdit }) => 
     return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
   };
 
-  const handleStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    confirmModal({
-      content: t('run.actions.start.confirm'),
-      okText: t('run.actions.start'),
-      onOk: async () => {
-        try {
-          await startRun(run.id, run.status !== 'idle');
-          await onRefresh?.();
-        } catch (error: any) {
-          toast.error(error?.message || 'Failed to start run');
-        }
-      },
-      title: t('run.actions.start'),
-    });
-  };
-
-  const handleAbort = (e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    confirmModal({
-      content: t('run.actions.abort.confirm'),
-      okText: t('run.actions.abort'),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        await abortRun(run.id);
-        await onRefresh?.();
-      },
-      title: t('run.actions.abort'),
-    });
-  };
-
-  const handleDelete = (e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    confirmModal({
-      content: t('run.actions.delete.confirm'),
-      okButtonProps: { danger: true },
-      okText: t('run.actions.delete'),
-      onOk: async () => {
-        await deleteRun(run.id);
-        await onRefresh?.();
-      },
-      title: t('run.actions.delete'),
-    });
-  };
-
-  const handleEdit = (e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    onEdit?.(run);
-  };
-
-  const menuItems: DropdownItem[] = [
-    ...(canStart
-      ? [
-          {
-            icon: <Play size={14} />,
-            key: 'start',
-            label: t('run.actions.start'),
-            onClick: ({ domEvent }: any) => handleStart(domEvent),
-          },
-          { type: 'divider' as const },
-        ]
-      : []),
-    {
-      icon: <Pencil size={14} />,
-      key: 'edit',
-      label: t('run.actions.edit'),
-      onClick: ({ domEvent }: any) => handleEdit(domEvent),
-    },
-    ...(isActive
-      ? [
-          {
-            danger: true,
-            icon: <Square size={14} />,
-            key: 'abort',
-            label: t('run.actions.abort'),
-            onClick: ({ domEvent }: any) => handleAbort(domEvent),
-          },
-        ]
-      : []),
-    { type: 'divider' as const },
-    {
-      danger: true,
-      icon: <Trash2 size={14} />,
-      key: 'delete',
-      label: t('run.actions.delete'),
-      onClick: ({ domEvent }: any) => handleDelete(domEvent),
-    },
-  ];
-
   const metaParts = [
     run.createdAt && { text: formatDate(run.createdAt) },
     run.datasetName && { text: run.datasetName },
     run.targetAgent?.title && { text: run.targetAgent.title },
-    run.targetAgent?.model && {
-      className: styles.monoText,
-      text: run.targetAgent.model,
-    },
     metrics?.duration != null && {
       className: styles.metaHighlight,
       text: formatDuration(metrics.duration),
@@ -325,6 +215,7 @@ const RunCard = memo<RunCardProps>(({ benchmarkId, run, onRefresh, onEdit }) => 
               <span className={styles.name}>{run.name}</span>
               <StatusBadge status={run.status} />
             </Flexbox>
+            {model && <ModelLabel model={model.model} provider={model.provider} size={16} />}
             {metaParts.length > 0 && (
               <Flexbox horizontal align="center" className={styles.meta} gap={4} wrap="wrap">
                 {metaParts.map((item, i) => (

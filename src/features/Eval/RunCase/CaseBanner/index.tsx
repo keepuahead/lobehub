@@ -2,177 +2,178 @@
 
 import type { EvalRunTopicResult } from '@lobechat/types';
 import { formatCost, formatShortenNumber } from '@lobechat/utils';
-import { Flexbox } from '@lobehub/ui';
-import { ActionIcon, Text } from '@lobehub/ui/base-ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { ActionIcon, Alert } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import {
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  DollarSign,
-  Footprints,
-  Hash,
-} from 'lucide-react';
-import { memo } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { useCaseErrorReason } from '@/features/Eval/Run/useCaseErrorReason';
+import { getCaseVerdict } from '@/features/Eval/Run/verdict';
+import VerdictTag from '@/features/Eval/Run/VerdictTag';
+import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
+
 const styles = createStaticStyles(({ css }) => ({
-  backLink: css`
-    cursor: pointer;
+  banner: css`
+    flex: none;
+    padding-block: 16px;
+    padding-inline: 24px;
+    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  crumb: css`
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
 
-    align-self: flex-start;
-
-    border-radius: ${cssVar.borderRadiusSM};
-
+    font-size: ${cssVar.fontSizeSM};
     color: ${cssVar.colorTextTertiary};
-
-    transition: color 0.15s ease;
+    text-decoration: none;
 
     &:hover {
       color: ${cssVar.colorText};
     }
-
-    &:focus-visible {
-      outline: 2px solid ${cssVar.colorPrimary};
-      outline-offset: 2px;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      transition: none;
-    }
   `,
-  header: css`
-    padding-block: 16px;
-    padding-inline: 16px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-  `,
-  metricCard: css`
-    gap: 8px;
-
-    padding-block: 8px;
-    padding-inline: 8px 16px;
-    border-radius: ${cssVar.borderRadiusSM};
-
+  errorText: css`
+    font-family: ${cssVar.fontFamilyCode};
     font-size: ${cssVar.fontSizeSM};
-
-    background: ${cssVar.colorBgContainer};
-  `,
-  metricIcon: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 28px;
-    height: 28px;
-    border-radius: ${cssVar.borderRadiusSM};
-
     color: ${cssVar.colorTextTertiary};
-
-    background: ${cssVar.colorFillTertiary};
+    word-break: break-word;
   `,
-  metricLabel: css`
+  input: css`
+    overflow: hidden;
+
+    max-width: 720px;
+    margin: 0;
+
+    font-size: ${cssVar.fontSize};
+    color: ${cssVar.colorTextSecondary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  metric: css`
     font-size: ${cssVar.fontSizeSM};
-    line-height: 1;
     color: ${cssVar.colorTextTertiary};
   `,
   metricValue: css`
     font-family: ${cssVar.fontFamilyCode};
-    font-size: ${cssVar.fontSize};
-    font-weight: 500;
-    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    color: ${cssVar.colorText};
+  `,
+  title: css`
+    margin: 0;
+    font-size: ${cssVar.fontSizeHeading4};
+    font-weight: ${cssVar.fontWeightStrong};
     color: ${cssVar.colorText};
   `,
 }));
 
-interface CaseHeaderProps {
+interface CaseBannerProps {
   caseNumber: number;
   evalResult?: EvalRunTopicResult | null;
-  onBack: () => void;
+  input?: string;
   onNext?: () => void;
   onPrev?: () => void;
+  provider?: string | null;
+  runHref: string;
   runName: string;
+  status?: string | null;
 }
 
-const CaseHeader = memo<CaseHeaderProps>(
-  ({ caseNumber, runName, evalResult, onBack, onPrev, onNext }) => {
-    const { t } = useTranslation('eval');
+/** Where this case sits (run › case), how it ended, what it cost — and why, when it errored. */
+const CaseBanner = ({
+  caseNumber,
+  evalResult,
+  input,
+  onNext,
+  onPrev,
+  provider,
+  runHref,
+  runName,
+  status,
+}: CaseBannerProps) => {
+  const { t } = useTranslation('eval');
+  const verdict = getCaseVerdict(status);
+  const errorReason = useCaseErrorReason(evalResult, provider);
 
-    const metrics = [
-      {
-        icon: Clock,
-        label: t('caseDetail.duration'),
-        value: evalResult?.duration != null ? `${(evalResult.duration / 1000).toFixed(1)}s` : null,
-      },
-      {
-        icon: Footprints,
-        label: t('caseDetail.steps'),
-        value: evalResult?.steps != null ? String(evalResult.steps) : null,
-      },
-      {
-        icon: DollarSign,
-        label: t('caseDetail.cost'),
-        value: evalResult?.cost != null ? `$${formatCost(evalResult.cost)}` : null,
-      },
-      {
-        icon: Hash,
-        label: t('caseDetail.tokens'),
-        value: evalResult?.tokens != null ? formatShortenNumber(evalResult.tokens) : null,
-      },
-    ].filter((m) => m.value !== null);
+  const metrics = [
+    {
+      label: t('caseDetail.duration'),
+      value: evalResult?.duration != null ? `${(evalResult.duration / 1000).toFixed(1)}s` : null,
+    },
+    {
+      label: t('caseDetail.steps'),
+      value: evalResult?.steps != null ? String(evalResult.steps) : null,
+    },
+    {
+      label: t('caseDetail.tokens'),
+      value: evalResult?.tokens != null ? formatShortenNumber(evalResult.tokens) : null,
+    },
+    {
+      label: t('caseDetail.cost'),
+      value: evalResult?.cost != null ? `$${formatCost(evalResult.cost)}` : null,
+    },
+  ].filter((m) => m.value !== null);
 
-    return (
-      <Flexbox className={styles.header} gap={16}>
-        {/* Identity row: breadcrumb back + case number + prev/next nav */}
-        <Flexbox horizontal align="center" gap={8} justify="space-between">
-          <Flexbox gap={4}>
-            <Flexbox
-              horizontal
-              align="center"
-              className={styles.backLink}
-              gap={4}
-              role="button"
-              tabIndex={0}
-              onClick={onBack}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onBack();
-                }
-              }}
-            >
-              <ArrowLeft size={12} />
-              <Text fontSize={12}>{runName}</Text>
-            </Flexbox>
-            <Text as="h4" style={{ fontSize: 20, margin: 0 }} weight={600}>
-              #{caseNumber}
-            </Text>
+  return (
+    <Flexbox className={styles.banner} gap={12}>
+      <Flexbox horizontal align="center" gap={16} justify="space-between">
+        <Flexbox gap={6} style={{ minWidth: 0 }}>
+          <WorkspaceLink className={styles.crumb} to={runHref}>
+            <Icon icon={ChevronLeft} size={14} />
+            {runName}
+          </WorkspaceLink>
+          <Flexbox horizontal align="center" gap={12}>
+            <h1 className={styles.title}>{t('run.case.title', { number: caseNumber })}</h1>
+            <VerdictTag verdict={verdict} />
           </Flexbox>
-
-          <Flexbox horizontal align="center" gap={8}>
-            <ActionIcon disabled={!onPrev} icon={ChevronLeft} size="small" onClick={onPrev} />
-            <ActionIcon disabled={!onNext} icon={ChevronRight} size="small" onClick={onNext} />
-          </Flexbox>
+          {input && (
+            <p className={styles.input} title={input}>
+              {input}
+            </p>
+          )}
         </Flexbox>
-
-        {metrics.length > 0 && (
-          <Flexbox horizontal align="center" gap={8} wrap="wrap">
-            {metrics.map((m) => (
-              <Flexbox horizontal align="center" className={styles.metricCard} key={m.label}>
-                <div className={styles.metricIcon}>
-                  <m.icon size={14} />
-                </div>
-                <Flexbox gap={0}>
-                  <span className={styles.metricLabel}>{m.label}</span>
-                  <span className={styles.metricValue}>{m.value}</span>
-                </Flexbox>
-              </Flexbox>
-            ))}
-          </Flexbox>
-        )}
+        <Flexbox horizontal align="center" gap={4} style={{ flex: 'none' }}>
+          <ActionIcon
+            disabled={!onPrev}
+            icon={ChevronLeft}
+            title={t('run.case.prev')}
+            onClick={onPrev}
+          />
+          <ActionIcon
+            disabled={!onNext}
+            icon={ChevronRight}
+            title={t('run.case.next')}
+            onClick={onNext}
+          />
+        </Flexbox>
       </Flexbox>
-    );
-  },
-);
 
-export default CaseHeader;
+      {metrics.length > 0 && (
+        <Flexbox horizontal align="center" gap={20} wrap="wrap">
+          {metrics.map((m) => (
+            <span className={styles.metric} key={m.label}>
+              {m.label} <span className={styles.metricValue}>{m.value}</span>
+            </span>
+          ))}
+        </Flexbox>
+      )}
+
+      {errorReason && (
+        <Alert
+          showIcon
+          title={t('run.case.errorTitle')}
+          type={verdict === 'error' ? 'warning' : 'error'}
+          variant="outlined"
+          description={
+            <Flexbox gap={4}>
+              <span>{errorReason.message}</span>
+              {errorReason.code && <span className={styles.errorText}>{errorReason.code}</span>}
+            </Flexbox>
+          }
+        />
+      )}
+    </Flexbox>
+  );
+};
+
+export default CaseBanner;

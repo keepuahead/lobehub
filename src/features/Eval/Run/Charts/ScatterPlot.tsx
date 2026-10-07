@@ -126,17 +126,18 @@ const ScatterPlot = memo<ScatterPlotProps>(({ results, benchmarkId, runId }) => 
       {scatterData.map((d, i) => {
         const xPct = (d.tokens / (maxTokens || 1)) * 92 + 4;
         const yPct = (d.duration / (maxDuration || 1)) * 88 + 6;
+        const isError = d.status === 'error' || d.status === 'timeout';
         const fill =
           d.status === 'passed'
             ? theme.colorSuccess
-            : d.status === 'error'
+            : isError
               ? theme.colorWarning
               : theme.colorError;
-        const tagColor = d.status === 'passed' ? 'green' : d.status === 'error' ? 'orange' : 'red';
+        const tagColor = d.status === 'passed' ? 'success' : isError ? 'warning' : 'error';
         const statusLabel =
           d.status === 'passed'
             ? t('run.chart.pass')
-            : d.status === 'error'
+            : isError
               ? t('run.chart.error')
               : t('run.chart.fail');
         const inputPreview = d.input.length > 60 ? d.input.slice(0, 60) + '...' : d.input;

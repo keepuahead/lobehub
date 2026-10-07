@@ -1,17 +1,36 @@
 'use client';
 
-import { Center } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Center, Flexbox } from '@lobehub/ui';
+import { Skeleton, SkeletonText, Text } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
 import AsyncBoundary from '@/components/AsyncBoundary';
-import { RouteLoading } from '@/components/Skeleton/RouteSegment';
+import EvalPage from '@/features/Eval/components/EvalPage';
 import { useEvalStore } from '@/store/eval';
 import { isTrpcErrorCode } from '@/utils/trpcError';
 
 import TestCaseDetail from '.';
+
+/** Shaped like the page: header, then the model results block, then the definition. */
+const CaseSkeleton = () => (
+  <EvalPage
+    header={
+      <Flexbox gap={12}>
+        <SkeletonText rows={1} width={200} />
+        <Skeleton height={28} radius={6} width="60%" />
+        <SkeletonText rows={1} width={320} />
+      </Flexbox>
+    }
+  >
+    <Flexbox gap={12}>
+      <Skeleton height={56} radius={8} width="100%" />
+      <Skeleton height={280} radius={8} width="100%" />
+    </Flexbox>
+    <SkeletonText rows={4} />
+  </EvalPage>
+);
 
 const Page = memo(() => {
   const { t } = useTranslation('eval');
@@ -35,7 +54,7 @@ const Page = memo(() => {
       errorVariant={'page'}
       isEmpty={isMissing || !testCase}
       isLoading={isLoading}
-      loading={<RouteLoading />}
+      loading={<CaseSkeleton />}
       empty={
         <Center flex={1}>
           <Text type="secondary">{t('testCaseDetail.notFound')}</Text>

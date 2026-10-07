@@ -1,56 +1,29 @@
-import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button } from '@lobehub/ui/base-ui';
 import { Database, Plus } from 'lucide-react';
-import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-const styles = createStaticStyles(({ css }) => ({
-  emptyCard: css`
-    align-items: center;
-    justify-content: center;
-
-    padding-block: 64px;
-    padding-inline: 24px;
-    border-radius: ${cssVar.borderRadiusLG};
-  `,
-  iconBox: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 56px;
-    height: 56px;
-    margin-block-end: 16px;
-    border-radius: ${cssVar.borderRadiusLG};
-
-    background: ${cssVar.colorPrimaryBg};
-  `,
-}));
+import EvalEmpty from '@/features/Eval/components/EvalEmpty';
 
 interface EmptyStateProps {
   onAddDataset: () => void;
 }
 
-const EmptyState = memo<EmptyStateProps>(({ onAddDataset }) => {
+/** No dataset yet: creating one leads straight into importing its cases. */
+const EmptyState = ({ onAddDataset }: EmptyStateProps) => {
   const { t } = useTranslation('eval');
 
   return (
-    <Block className={styles.emptyCard} variant={'outlined'}>
-      <div className={styles.iconBox}>
-        <Icon icon={Database} size={24} style={{ color: cssVar.colorPrimary }} />
-      </div>
-      <Flexbox align="center" gap={4}>
-        <Text weight={600}>{t('dataset.empty.title')}</Text>
-        <Text color={cssVar.colorTextTertiary} fontSize={12}>
-          {t('dataset.empty.description')}
-        </Text>
-      </Flexbox>
-      <Button icon={Plus} style={{ marginTop: 16 }} type="primary" onClick={onAddDataset}>
-        {t('dataset.actions.addDataset')}
-      </Button>
-    </Block>
+    <EvalEmpty
+      description={t('benchmark.datasets.empty.description')}
+      icon={Database}
+      title={t('dataset.empty.title')}
+      action={
+        <Button icon={Plus} type="primary" onClick={onAddDataset}>
+          {t('dataset.actions.addDataset')}
+        </Button>
+      }
+    />
   );
-});
+};
 
 export default EmptyState;

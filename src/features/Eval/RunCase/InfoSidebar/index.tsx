@@ -8,6 +8,7 @@ import { createStaticStyles, cssVar } from 'antd-style';
 import { memo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import VerdictTag from '@/features/Eval/Run/VerdictTag';
 import SegmentBar from '@/features/Eval/SegmentBar';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -17,9 +18,20 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   // Reading block for free-text values (input / expected).
   copyBlock: css`
+    overflow: auto;
+
+    max-height: 240px;
+    padding-block: 8px;
+    padding-inline: 12px;
+    border-radius: ${cssVar.borderRadius};
+
     font-size: ${cssVar.fontSize};
-    line-height: 1.5;
+    line-height: 1.6;
     color: ${cssVar.colorText};
+    word-break: break-word;
+    white-space: pre-wrap;
+
+    background: ${cssVar.colorFillQuaternary};
   `,
   infoItem: css`
     display: flex;
@@ -36,25 +48,32 @@ const styles = createStaticStyles(({ css }) => ({
   infoValue: css`
     font-family: ${cssVar.fontFamilyCode};
     font-size: ${cssVar.fontSize};
+    font-variant-numeric: tabular-nums;
     color: ${cssVar.colorText};
   `,
   // The headline score for the panel — large mono number on a tonal surface.
   scoreCard: css`
     padding: 12px;
-    border-radius: ${cssVar.borderRadius};
-    background: ${cssVar.colorFillQuaternary};
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusLG};
   `,
   scoreValue: css`
     font-family: ${cssVar.fontFamilyCode};
     font-size: ${cssVar.fontSizeHeading3};
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     line-height: 1;
     color: ${cssVar.colorText};
   `,
   // Divider between titled sections — tonal hairline, not a heavy rule.
   section: css`
-    padding-block-end: 16px;
+    padding-block-end: 20px;
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  title: css`
+    font-size: ${cssVar.fontSizeSM};
+    font-weight: 600;
+    color: ${cssVar.colorText};
   `,
   rubricName: css`
     font-size: ${cssVar.fontSize};
@@ -110,11 +129,9 @@ const DETERMINISTIC_MODES = new Set([
 ]);
 
 // Section label — one consistent treatment for every field heading in the panel.
-const SectionTitle = memo<{ children: ReactNode }>(({ children }) => (
-  <Text fontSize={12} type={'secondary'} weight={500}>
-    {children}
-  </Text>
-));
+const SectionTitle = ({ children }: { children: ReactNode }) => (
+  <span className={styles.title}>{children}</span>
+);
 
 const getEvalModeFromRubricId = (rubricId: string): string => {
   return rubricId.replace(/^eval-mode-/, '');
@@ -143,20 +160,10 @@ const InfoSidebar = memo<InfoSidebarProps>(({ testCase, evalResult, passed, scor
   return (
     <Flexbox
       className={styles.container}
-      gap={16}
-      padding={16}
-      style={{ height: '100%', overflowY: 'auto', width: 320 }}
+      gap={20}
+      padding={20}
+      style={{ flex: 'none', height: '100%', overflowY: 'auto', width: 340 }}
     >
-      {/* Failure reason — error states surface at the top of the panel */}
-      {evalResult?.error && (
-        <Flexbox className={styles.section} gap={8}>
-          <SectionTitle>{t('caseDetail.failureReason')}</SectionTitle>
-          <Text className={styles.copyBlock} type="danger">
-            {evalResult.error}
-          </Text>
-        </Flexbox>
-      )}
-
       {/* Test Case */}
       <Flexbox className={styles.section} gap={12}>
         <SectionTitle>{t('caseDetail.section.testCase')}</SectionTitle>
@@ -166,7 +173,7 @@ const InfoSidebar = memo<InfoSidebarProps>(({ testCase, evalResult, passed, scor
             <Text fontSize={12} type="secondary">
               {t('caseDetail.input')}
             </Text>
-            <Text className={styles.copyBlock}>{testCase.content.input}</Text>
+            <div className={styles.copyBlock}>{testCase.content.input}</div>
           </Flexbox>
         )}
 
@@ -175,7 +182,7 @@ const InfoSidebar = memo<InfoSidebarProps>(({ testCase, evalResult, passed, scor
             <Text fontSize={12} type="secondary">
               {t('caseDetail.expected')}
             </Text>
-            <Text className={styles.copyBlock}>{testCase.content.expected}</Text>
+            <div className={styles.copyBlock}>{testCase.content.expected}</div>
           </Flexbox>
         )}
 
@@ -202,9 +209,7 @@ const InfoSidebar = memo<InfoSidebarProps>(({ testCase, evalResult, passed, scor
               <span className={styles.infoValue}>
                 {t(`evalMode.${getEvalModeFromRubricId(rubricScores[0].rubricId)}` as any)}
               </span>
-              <Tag color={passed ? 'success' : 'error'}>
-                {passed ? t('table.filter.passed') : t('table.filter.failed')}
-              </Tag>
+              <VerdictTag verdict={passed ? 'passed' : 'failed'} />
             </div>
           )}
 
@@ -215,9 +220,7 @@ const InfoSidebar = memo<InfoSidebarProps>(({ testCase, evalResult, passed, scor
                 <Flexbox className={styles.scoreCard} gap={8}>
                   <Flexbox horizontal align="flex-end" gap={8} justify="space-between">
                     <span className={styles.scoreValue}>{score.toFixed(2)}</span>
-                    <Text fontSize={12} type="secondary">
-                      {t('caseDetail.score')}
-                    </Text>
+                    <VerdictTag verdict={passed ? 'passed' : 'failed'} />
                   </Flexbox>
                   <SegmentBar
                     segments={[

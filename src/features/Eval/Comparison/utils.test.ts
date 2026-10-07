@@ -4,9 +4,12 @@ import {
   cellVerdict,
   type ComparisonCell,
   formatToolCalls,
+  gridProgress,
   indexCells,
+  rankTargets,
   resolveTargets,
   summarizeTargets,
+  tallyDiagnoses,
 } from './utils';
 
 const cell = (overrides: Partial<ComparisonCell>): ComparisonCell => ({
@@ -86,5 +89,46 @@ describe('formatToolCalls', () => {
   it('renders a tool-call-only answer instead of an empty output', () => {
     expect(formatToolCalls([{ arguments: '{"q":"x"}', name: 'search' }])).toBe('search({"q":"x"})');
     expect(formatToolCalls([])).toBeUndefined();
+  });
+});
+
+describe('tallyDiagnoses', () => {
+  it('counts cases per diagnosis', () => {
+    expect(tallyDiagnoses(['harness', 'model', 'model', 'inconclusive'])).toEqual({
+      harness: 1,
+      inconclusive: 1,
+      model: 2,
+      pass: 0,
+    });
+  });
+});
+
+describe('gridProgress', () => {
+  it('counts settled cells against the full grid', () => {
+    expect(
+      gridProgress(
+        [cell({ passed: true }), cell({ status: 'error' }), cell({ status: 'running' })],
+        6,
+      ),
+    ).toEqual({ errored: 1, settled: 2, total: 6 });
+  });
+});
+
+describe('rankTargets', () => {
+  it('orders by pass rate, then score, then fewer errors', () => {
+    const m = (model: string, passRate: number, averageScore: number, errorCases = 0) => ({
+      averageScore,
+      errorCases,
+      model,
+      passRate,
+      passedCases: 0,
+      provider: 'p',
+      totalCases: 2,
+    });
+    expect(
+      rankTargets([m('a', 0.5, 0.6), m('b', 1, 0.2), m('c', 0.5, 0.9), m('d', 0.5, 0.6, 1)]).map(
+        (s) => s.model,
+      ),
+    ).toEqual(['b', 'c', 'a', 'd']);
   });
 });

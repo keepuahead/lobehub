@@ -1,71 +1,61 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Button, Select, Text } from '@lobehub/ui/base-ui';
+import { Select } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Plus } from 'lucide-react';
-import { memo, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AsyncBoundary from '@/components/AsyncBoundary';
 import { runSelectors, useEvalStore } from '@/store/eval';
 
 import { createRunCreateModal } from '../RunCreateModal';
 import { createRunEditModal } from '../RunEditModal';
 import EmptyState from './EmptyState';
-import RunCard from './RunCard';
+import { groupRuns } from './groupRuns';
+import RunGroup from './RunGroup';
+import RunsSkeleton from './RunsSkeleton';
 
 const styles = createStaticStyles(({ css }) => ({
-  // Results-led run cards sit on a responsive grid; they collapse to a single
-  // column on narrow viewports.
-  grid: css`
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-    gap: 12px;
-
-    @media (width <= 640px) {
-      grid-template-columns: 1fr;
-    }
+  count: css`
+    font-size: ${cssVar.fontSizeSM};
+    font-variant-numeric: tabular-nums;
+    color: ${cssVar.colorTextTertiary};
   `,
   filterEmpty: css`
-    align-items: center;
-    justify-content: center;
-
-    padding-block: 48px;
-    padding-inline: 24px;
+    padding-block: 32px;
     border: 1px dashed ${cssVar.colorBorderSecondary};
     border-radius: ${cssVar.borderRadiusLG};
 
-    background: ${cssVar.colorFillQuaternary};
+    font-size: ${cssVar.fontSizeSM};
+    color: ${cssVar.colorTextTertiary};
+    text-align: center;
   `,
 }));
+
+type StatusFilter = 'aborted' | 'active' | 'all' | 'completed' | 'failed' | 'idle';
 
 interface RunsTabProps {
   benchmarkId: string;
 }
 
-const RunsTab = memo<RunsTabProps>(({ benchmarkId }) => {
+const RunsTab = ({ benchmarkId }: RunsTabProps) => {
   const { t } = useTranslation('eval');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const useFetchRuns = useEvalStore((s) => s.useFetchRuns);
   const runList = useEvalStore(runSelectors.runList);
   const refreshRuns = useEvalStore((s) => s.refreshRuns);
-  useFetchRuns(benchmarkId);
+  const { data, error, isLoading, mutate } = useFetchRuns(benchmarkId);
 
-  const sortedRuns = useMemo(
-    () =>
-      [...runList].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
-    [runList],
-  );
-
-  const filteredRuns = useMemo(() => {
-    if (statusFilter === 'all') return sortedRuns;
-    if (statusFilter === 'active') {
-      return sortedRuns.filter((r) => r.status === 'running' || r.status === 'pending');
-    }
-    return sortedRuns.filter((r) => r.status === statusFilter);
-  }, [sortedRuns, statusFilter]);
+  const groups = useMemo(() => {
+    const filtered =
+      statusFilter === 'all'
+        ? runList
+        : statusFilter === 'active'
+          ? runList.filter((r) => r.status === 'running' || r.status === 'pending')
+          : runList.filter((r) => r.status === statusFilter);
+    return groupRuns(filtered);
+  }, [runList, statusFilter]);
 
   const statusOptions = [
     { label: t('table.filter.all'), value: 'all' },
@@ -77,53 +67,44 @@ const RunsTab = memo<RunsTabProps>(({ benchmarkId }) => {
   ];
 
   return (
-    <Flexbox gap={16}>
-      {sortedRuns.length > 0 && (
-        <Flexbox horizontal align="center" justify="space-between">
-          <Flexbox horizontal align="center" gap={8}>
-            <Text color={cssVar.colorTextTertiary}>
-              {t('benchmark.detail.runCount', { count: filteredRuns.length })}
-            </Text>
-            <Select
-              options={statusOptions}
-              size="small"
-              style={{ width: 128 }}
-              value={statusFilter}
-              onChange={setStatusFilter}
-            />
-          </Flexbox>
-          <Button
-            icon={Plus}
+    <AsyncBoundary
+      data={data}
+      empty={<EmptyState onCreate={() => createRunCreateModal({ benchmarkId })} />}
+      error={error}
+      isEmpty={!error && runList.length === 0}
+      isLoading={isLoading && runList.length === 0}
+      loading={<RunsSkeleton />}
+      onRetry={() => void mutate()}
+    >
+      <Flexbox gap={16}>
+        <Flexbox horizontal align="center" gap={12} justify="space-between">
+          <span className={styles.count}>
+            {t('benchmark.runs.summary', { groups: groups.length, runs: runList.length })}
+          </span>
+          <Select
+            options={statusOptions}
             size="small"
-            type="primary"
-            onClick={() => createRunCreateModal({ benchmarkId })}
-          >
-            {t('run.actions.create')}
-          </Button>
+            style={{ width: 128 }}
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value as StatusFilter)}
+          />
         </Flexbox>
-      )}
-
-      {sortedRuns.length === 0 ? (
-        <EmptyState onCreate={() => createRunCreateModal({ benchmarkId })} />
-      ) : filteredRuns.length === 0 ? (
-        <Flexbox className={styles.filterEmpty}>
-          <Text color={cssVar.colorTextTertiary}>{t('run.filter.empty')}</Text>
-        </Flexbox>
-      ) : (
-        <div className={styles.grid}>
-          {filteredRuns.map((run) => (
-            <RunCard
+        {groups.length === 0 ? (
+          <div className={styles.filterEmpty}>{t('run.filter.empty')}</div>
+        ) : (
+          groups.map((group) => (
+            <RunGroup
               benchmarkId={benchmarkId}
-              key={run.id}
-              run={run}
-              onEdit={(editingRun) => createRunEditModal({ run: editingRun })}
-              onRefresh={refreshRuns}
+              group={group}
+              key={group.key}
+              onEdit={(run) => createRunEditModal({ run })}
+              onRefresh={() => refreshRuns(benchmarkId)}
             />
-          ))}
-        </div>
-      )}
-    </Flexbox>
+          ))
+        )}
+      </Flexbox>
+    </AsyncBoundary>
   );
-});
+};
 
 export default RunsTab;

@@ -11,9 +11,12 @@ import StatusDonut from './StatusDonut';
 
 const styles = createStaticStyles(({ css }) => ({
   chartCard: css`
+    min-width: 0;
+    height: 300px;
     padding: 16px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: ${cssVar.borderRadiusLG};
+
     background: ${cssVar.colorBgContainer};
   `,
   chartTitle: css`
@@ -21,6 +24,15 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: ${cssVar.fontSizeSM};
     font-weight: 500;
     color: ${cssVar.colorTextSecondary};
+  `,
+  grid: css`
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+    gap: 12px;
+
+    @media (width <= 960px) {
+      grid-template-columns: minmax(0, 1fr);
+    }
   `,
   legendDot: css`
     width: 8px;
@@ -70,7 +82,7 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
       const status: string | undefined = r.status;
 
       if (status === 'passed') passed++;
-      else if (status === 'error') errors++;
+      else if (status === 'error' || status === 'timeout') errors++;
       else if (status === 'failed') failed++;
 
       durations.push({ duration, status });
@@ -87,7 +99,7 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
     for (const d of durations) {
       const idx = d.duration < 60 ? 0 : d.duration < 180 ? 1 : d.duration < 300 ? 2 : 3;
       if (d.status === 'passed') buckets[idx].passed++;
-      else if (d.status === 'error') buckets[idx].error++;
+      else if (d.status === 'error' || d.status === 'timeout') buckets[idx].error++;
       else buckets[idx].failed++;
     }
 
@@ -116,9 +128,9 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
   if (!results || results.length === 0) return null;
 
   return (
-    <Flexbox horizontal gap={16} style={{ height: 320 }}>
+    <div className={styles.grid}>
       {/* Chart 1: Status Donut */}
-      <Flexbox className={styles.chartCard} flex={1}>
+      <Flexbox className={styles.chartCard}>
         <div className={styles.chartTitle}>{t('run.chart.passFailError')}</div>
         <Flexbox align="center" flex={1} justify="center">
           <StatusDonut
@@ -130,7 +142,7 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
       </Flexbox>
 
       {/* Chart 2: Scatter Plot */}
-      <Flexbox className={styles.chartCard} flex={2}>
+      <Flexbox className={styles.chartCard}>
         <Flexbox horizontal justify={'space-between'} style={{ marginBlockEnd: 12 }}>
           <span className={styles.chartTitle} style={{ marginBlockEnd: 0 }}>
             {t('run.chart.latencyTokenDistribution')}
@@ -141,7 +153,7 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
               <span className={styles.legendText}>{t('run.chart.pass')}</span>
             </Flexbox>
             <Flexbox horizontal align={'center'} gap={4}>
-              <div className={styles.legendDot} style={{ background: theme.colorFill }} />
+              <div className={styles.legendDot} style={{ background: theme.colorError }} />
               <span className={styles.legendText}>{t('run.chart.fail')}</span>
             </Flexbox>
             <Flexbox horizontal align={'center'} gap={4}>
@@ -154,7 +166,7 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
       </Flexbox>
 
       {/* Chart 3: Histogram */}
-      <Flexbox className={styles.chartCard} flex={1}>
+      <Flexbox className={styles.chartCard}>
         <Flexbox horizontal align="center" className={styles.chartTitle} gap={8}>
           <span>{t('run.chart.latencyDistribution')}</span>
           <span className={styles.totalCount}>{results.length}</span>
@@ -162,14 +174,14 @@ const BenchmarkCharts = memo<BenchmarkChartsProps>(({ results, benchmarkId, runI
         <BarChart
           stack
           categories={[passLabel, failLabel, errorLabel]}
-          colors={[theme.colorSuccess, theme.colorFill, theme.colorWarning]}
+          colors={[theme.colorSuccess, theme.colorError, theme.colorWarning]}
           data={histogramChartData}
           index="range"
           showLegend={false}
           showYAxis={false}
         />
       </Flexbox>
-    </Flexbox>
+    </div>
   );
 });
 

@@ -3,43 +3,23 @@
 import { Flexbox } from '@lobehub/ui';
 import { AccordionRoot } from '@lobehub/ui/base-ui';
 import { LayoutDashboardIcon } from 'lucide-react';
-import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import NavItem from '@/features/NavPanel/components/NavItem';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useActiveLocation } from '@/hooks/useActiveLocation';
-import { useEvalStore } from '@/store/eval';
 
 import BenchmarkList from './BenchmarkList';
 import DatasetList from './DatasetList';
 import ExperimentList from './ExperimentList';
+import { getActiveEvalHref } from './getActiveEvalHref';
 
-const useActiveKey = () => {
+const Body = () => {
   const { pathname } = useActiveLocation();
-  if (pathname === '/eval') return 'dashboard';
-
-  const benchMatch = pathname.match(/\/eval\/bench\/([^/]+)/);
-  if (benchMatch) return `bench-${benchMatch[1]}`;
-
-  const experimentMatch = pathname.match(/\/eval\/experiments\/([^/]+)/);
-  if (experimentMatch) return `experiment-${experimentMatch[1]}`;
-
-  const datasetMatch = pathname.match(/\/eval\/datasets\/([^/]+)/);
-  if (datasetMatch) return `dataset-${datasetMatch[1]}`;
-
-  return 'dashboard';
-};
-
-const Body = memo(() => {
-  const activeKey = useActiveKey();
+  const activeHref = getActiveEvalHref(pathname);
   const navigate = useWorkspaceAwareNavigate();
   const { t } = useTranslation('eval');
-  const useFetchBenchmarks = useEvalStore((s) => s.useFetchBenchmarks);
-  const useFetchExperiments = useEvalStore((s) => s.useFetchExperiments);
-  useFetchBenchmarks();
-  useFetchExperiments();
 
   return (
     <Flexbox gap={8} paddingInline={4}>
@@ -52,7 +32,7 @@ const Body = memo(() => {
           }}
         >
           <NavItem
-            active={activeKey === 'dashboard'}
+            active={activeHref === '/eval'}
             icon={LayoutDashboardIcon}
             title={t('sidebar.dashboard')}
           />
@@ -63,12 +43,12 @@ const Body = memo(() => {
         indicatorPlacement="inline"
         style={{ gap: 8 }}
       >
-        <ExperimentList activeKey={activeKey} itemKey="experiments" />
-        <BenchmarkList activeKey={activeKey} itemKey="benchmarks" />
-        <DatasetList activeKey={activeKey} itemKey="datasets" />
+        <BenchmarkList activeHref={activeHref} itemKey="benchmarks" />
+        <DatasetList activeHref={activeHref} itemKey="datasets" />
+        <ExperimentList activeHref={activeHref} itemKey="experiments" />
       </AccordionRoot>
     </Flexbox>
   );
-});
+};
 
 export default Body;

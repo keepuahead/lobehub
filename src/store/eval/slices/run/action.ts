@@ -54,6 +54,24 @@ export class RunActionImpl {
     }
   };
 
+  /** One run per subject model for the same agent; refreshes the same list `createRun` does. */
+  createSubjectRuns = async (
+    params: Parameters<typeof agentEvalService.createSubjectRuns>[0],
+  ): Promise<{ id: string }[]> => {
+    this.#set({ isCreatingRun: true }, false, 'createSubjectRuns/start');
+    try {
+      const runs = await agentEvalService.createSubjectRuns(params);
+      if (params.experimentId) {
+        await this.#get().refreshExperimentDetail(params.experimentId);
+      } else {
+        await this.#get().refreshRuns();
+      }
+      return runs;
+    } finally {
+      this.#set({ isCreatingRun: false }, false, 'createSubjectRuns/end');
+    }
+  };
+
   deleteRun = async (id: string): Promise<void> => {
     await agentEvalService.deleteRun(id);
     this.#get().internal_dispatchRunDetail({ id, type: 'deleteRunDetail' });
@@ -156,8 +174,19 @@ export class RunActionImpl {
 
   /** Every comparison one test case took part in, newest first. */
   useFetchTestCaseComparisons = (testCaseId?: string) =>
-    useClientDataSWR(testCaseId ? evalKeys.testCaseComparisons(testCaseId) : null, () =>
-      agentEvalService.listReplayComparisonsByTestCase(testCaseId!),
+    useClientDataSWR(
+      testCaseId ? evalKeys.testCaseComparisons(testCaseId) : null,
+      () => agentEvalService.listReplayComparisonsByTestCase(testCaseId!),
+      {
+        // Cells fill in from a background workflow; keep polling until none is
+        // left pending or running, then stop.
+        refreshInterval: (data?: { cells: { status: string }[] }[]) =>
+          data?.some((entry) =>
+            entry.cells.some((cell) => cell.status === 'pending' || cell.status === 'running'),
+          )
+            ? 3000
+            : 0,
+      },
     );
 
   retryRunErrors = async (id: string): Promise<void> => {

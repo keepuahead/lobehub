@@ -1,22 +1,28 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Breadcrumb, Button, Tag, Text, TextArea, toast } from '@lobehub/ui/base-ui';
+import { Breadcrumb, Button, Tag, TextArea, toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { FileText, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import EvalPage, { EvalPageHeader } from '@/features/Eval/components/EvalPage';
+import EvalSection from '@/features/Eval/components/EvalSection';
+import { stripSpeakerTags } from '@/features/Eval/components/inputPreview';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useEvalStore } from '@/store/eval';
 
-import CaseComparisons from './CaseComparisons';
+import CaseModelResults from './CaseModelResults';
+import { readFrozenCall } from './frozenCall';
+import FrozenCallPanel from './FrozenCallPanel';
 import Transcript from './Transcript';
 import { useCaseDraft } from './useCaseDraft';
+import { useSourceTopic } from './useSourceTopic';
 
 const styles = createStaticStyles(({ css }) => ({
   breadcrumb: css`
-    font-size: ${cssVar.fontSize};
+    font-size: ${cssVar.fontSizeSM};
 
     a {
       color: ${cssVar.colorTextTertiary};
@@ -28,39 +34,51 @@ const styles = createStaticStyles(({ css }) => ({
       }
     }
   `,
-  icon: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  editor: css`
+    font-size: ${cssVar.fontSize};
 
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-
-    background: ${cssVar.colorFillTertiary};
+    textarea {
+      line-height: ${cssVar.lineHeight};
+    }
+  `,
+  hint: css`
+    font-size: ${cssVar.fontSizeSM};
+    color: ${cssVar.colorTextTertiary};
   `,
   label: css`
     font-size: ${cssVar.fontSizeSM};
     font-weight: 500;
     color: ${cssVar.colorTextSecondary};
   `,
-  editor: css`
-    font-size: ${cssVar.fontSize};
+  meta: css`
+    font-size: ${cssVar.fontSizeSM};
+    color: ${cssVar.colorTextTertiary};
 
-    textarea {
-      line-height: 1.75;
+    a {
+      color: ${cssVar.colorTextSecondary};
+
+      &:hover {
+        color: ${cssVar.colorText};
+      }
     }
   `,
   prose: css`
-    padding-block: 10px;
+    padding-block: 8px;
     padding-inline: 12px;
-    border-radius: 10px;
+    border-radius: ${cssVar.borderRadius};
 
     font-size: ${cssVar.fontSize};
-    line-height: 1.75;
+    line-height: ${cssVar.lineHeight};
+    word-break: break-word;
     white-space: pre-wrap;
 
     background: ${cssVar.colorFillQuaternary};
+  `,
+  title: css`
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   `,
 }));
 
@@ -68,27 +86,30 @@ export interface TestCaseDetailProps {
   /** Shown in the breadcrumb; falls back to a generic label when unknown. */
   datasetName?: string;
   testCase: {
-    datasetId: string;
     content?: {
       input?: string;
       messages?: Array<{ content?: unknown; role?: string }>;
     } & Record<string, unknown>;
+    datasetId: string;
     evalConfig?: Record<string, unknown> | null;
     evalMode?: string | null;
+    frozenCall?: unknown;
+    frozenStepIndex?: number | null;
     id: string;
     metadata?: Record<string, unknown> | null;
+    sourceTopicId?: string | null;
   };
 }
 
 /**
- * A test case as a definition — what it asks and how it is judged — addressable
- * without a run. The `runs/:runId/cases/:caseId` page is a different surface: it
- * renders one case's *result* inside a single run.
+ * A test case as a definition — what it asks and how it is judged — and, for
+ * a frozen case, how every model it was replayed on answered it.
  */
 const TestCaseDetail = memo<TestCaseDetailProps>(({ datasetName, testCase }) => {
   const { t } = useTranslation('eval');
   const updateTestCase = useEvalStore((s) => s.updateTestCase);
   const [saving, setSaving] = useState(false);
+  const { data: sourceTopic } = useSourceTopic(testCase.sourceTopicId);
 
   const content = testCase.content ?? {};
   const expected = typeof content.expected === 'string' ? content.expected : undefined;
@@ -96,17 +117,21 @@ const TestCaseDetail = memo<TestCaseDetailProps>(({ datasetName, testCase }) => 
     typeof testCase.evalConfig?.criteria === 'string' ? testCase.evalConfig.criteria : undefined;
   const caseId =
     typeof testCase.metadata?.caseId === 'string' ? testCase.metadata.caseId : undefined;
-  // The answer this case was captured from, and whether it was kept as the
-  // wrong answer or the right one. A counter-example has to be visible here or
-  // the case reads as if nothing ever went wrong; a positive one already *is*
-  // the expected output, so repeating it as its own block would just say the
-  // same thing twice. Captures made before the distinction existed are
-  // counter-examples.
+  const inputPreview = stripSpeakerTags(content.input ?? '');
+  // A counter-example has to be visible or the case reads as if nothing ever
+  // went wrong; a positive capture already *is* the expected output.
   const capturedOutput =
     typeof testCase.metadata?.capturedOutput === 'string'
       ? testCase.metadata.capturedOutput
       : undefined;
   const capturedIsPositive = testCase.metadata?.capturedOutputKind === 'positive';
+
+  const frozenCall = readFrozenCall(testCase.frozenCall);
+  const canCompare = !!frozenCall || typeof testCase.frozenStepIndex === 'number';
+  const originalModel =
+    frozenCall?.model && frozenCall.provider
+      ? `${frozenCall.provider}/${frozenCall.model}`
+      : undefined;
 
   const initial = useMemo(
     () => ({ criteria: criteria ?? '', expected: expected ?? '', input: content.input ?? '' }),
@@ -127,66 +152,83 @@ const TestCaseDetail = memo<TestCaseDetailProps>(({ datasetName, testCase }) => 
     }
   };
 
-  return (
-    <Flexbox
-      gap={24}
-      style={{
-        marginInline: 'auto',
-        maxWidth: 880,
-        paddingBlock: 24,
-        paddingInline: 32,
-        width: '100%',
-      }}
-    >
-      <Breadcrumb
-        className={styles.breadcrumb}
-        items={[
-          {
-            title: <WorkspaceLink to="/eval">{t('testCaseDetail.breadcrumb.eval')}</WorkspaceLink>,
-          },
-          {
-            title: (
-              <WorkspaceLink to={`/eval/datasets/${testCase.datasetId}`}>
-                {datasetName || t('testCaseDetail.breadcrumb.dataset')}
-              </WorkspaceLink>
-            ),
-          },
-          { title: caseId ?? t('testCaseDetail.title') },
-        ]}
-      />
+  const topicLabel = sourceTopic?.title || testCase.sourceTopicId;
 
-      <Flexbox horizontal align="center" gap={12} justify="space-between">
-        <Flexbox horizontal align="center" gap={12}>
-          <div className={styles.icon}>
-            <FileText size={18} style={{ color: cssVar.colorTextSecondary }} />
-          </div>
-          <Flexbox gap={6}>
-            <Text as="h4" style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
-              {caseId ?? t('testCaseDetail.title')}
-            </Text>
-            <Flexbox horizontal gap={6}>
-              {testCase.evalMode && <Tag size="small">{testCase.evalMode}</Tag>}
-            </Flexbox>
-          </Flexbox>
-        </Flexbox>
-        {editing ? (
-          <Flexbox horizontal gap={8}>
-            <Button disabled={saving} size="small" onClick={cancel}>
+  const header = (
+    <EvalPageHeader
+      description={caseId && inputPreview ? inputPreview : undefined}
+      actions={
+        editing ? (
+          <>
+            <Button disabled={saving} onClick={cancel}>
               {t('common.cancel')}
             </Button>
-            <Button loading={saving} size="small" type="primary" onClick={handleSave}>
+            <Button loading={saving} type="primary" onClick={handleSave}>
               {t('common.save')}
             </Button>
-          </Flexbox>
+          </>
         ) : (
-          <Button icon={Pencil} size="small" onClick={start}>
+          <Button icon={Pencil} onClick={start}>
             {t('common.edit')}
           </Button>
-        )}
-      </Flexbox>
+        )
+      }
+      breadcrumb={
+        <Breadcrumb
+          className={styles.breadcrumb}
+          items={[
+            {
+              title: (
+                <WorkspaceLink to="/eval">{t('testCaseDetail.breadcrumb.eval')}</WorkspaceLink>
+              ),
+            },
+            {
+              title: (
+                <WorkspaceLink to={`/eval/datasets/${testCase.datasetId}`}>
+                  {datasetName || t('testCaseDetail.breadcrumb.dataset')}
+                </WorkspaceLink>
+              ),
+            },
+            { title: t('testCaseDetail.title') },
+          ]}
+        />
+      }
+      meta={
+        <Flexbox horizontal align="center" className={styles.meta} gap={12} wrap="wrap">
+          {testCase.evalMode && <Tag size="small">{testCase.evalMode}</Tag>}
+          {canCompare && <Tag size="small">{t('caseDetail.header.frozen')}</Tag>}
+          {testCase.sourceTopicId && (
+            <span>
+              {t('caseDetail.header.source')}{' '}
+              {sourceTopic?.agentId ? (
+                <WorkspaceLink to={`/agent/${sourceTopic.agentId}/${testCase.sourceTopicId}`}>
+                  {topicLabel}
+                </WorkspaceLink>
+              ) : (
+                topicLabel
+              )}
+            </span>
+          )}
+        </Flexbox>
+      }
+      title={
+        <span className={styles.title}>
+          {caseId ?? (inputPreview || t('testCaseDetail.title'))}
+        </span>
+      }
+    />
+  );
 
-      <Flexbox gap={10}>
-        <span className={styles.label}>{t('testCaseDetail.definition')}</span>
+  return (
+    <EvalPage header={header}>
+      <CaseModelResults
+        canCompare={canCompare}
+        datasetId={testCase.datasetId}
+        originalModel={originalModel}
+        testCaseId={testCase.id}
+      />
+
+      <EvalSection title={t('testCaseDetail.definition')}>
         <Transcript
           input={content.input ?? ''}
           messages={content.messages}
@@ -201,69 +243,64 @@ const TestCaseDetail = memo<TestCaseDetailProps>(({ datasetName, testCase }) => 
             ) : undefined
           }
         />
-      </Flexbox>
-
-      {capturedOutput && !capturedIsPositive && (
-        <Flexbox gap={10}>
-          <Flexbox horizontal align="center" gap={8}>
-            <span className={styles.label}>{t('testCaseDetail.capturedOutput')}</span>
-            <Tag color="error" size="small">
-              {t('testCaseDetail.counterExample')}
-            </Tag>
+        {capturedOutput && !capturedIsPositive && (
+          <Flexbox gap={8}>
+            <Flexbox horizontal align="center" gap={8}>
+              <span className={styles.label}>{t('testCaseDetail.capturedOutput')}</span>
+              <Tag color="error" size="small">
+                {t('testCaseDetail.counterExample')}
+              </Tag>
+            </Flexbox>
+            <div className={styles.prose}>{capturedOutput}</div>
+            <span className={styles.hint}>{t('testCaseDetail.capturedOutputHint')}</span>
           </Flexbox>
-          <div className={styles.prose}>{capturedOutput}</div>
-          <Text style={{ fontSize: 12 }} type="secondary">
-            {t('testCaseDetail.capturedOutputHint')}
-          </Text>
+        )}
+      </EvalSection>
+
+      <EvalSection description={t('caseDetail.judging.desc')} title={t('caseDetail.judging.title')}>
+        <Flexbox gap={8}>
+          <span className={styles.label}>{t('testCaseDetail.criteria')}</span>
+          {editing ? (
+            <TextArea
+              autoSize={{ maxRows: 12, minRows: 3 }}
+              className={styles.editor}
+              value={draft.criteria}
+              onChange={(e) => setDraft({ criteria: e.target.value })}
+            />
+          ) : criteria ? (
+            <div className={styles.prose}>{criteria}</div>
+          ) : (
+            <span className={styles.hint}>{t('testCaseDetail.criteria.empty')}</span>
+          )}
         </Flexbox>
-      )}
+        <Flexbox gap={8}>
+          <span className={styles.label}>{t('testCaseDetail.expected')}</span>
+          {editing ? (
+            <TextArea
+              autoSize={{ maxRows: 12, minRows: 3 }}
+              className={styles.editor}
+              placeholder={t('testCaseDetail.expected.placeholder')}
+              value={draft.expected}
+              onChange={(e) => setDraft({ expected: e.target.value })}
+            />
+          ) : expected ? (
+            <>
+              <div className={styles.prose}>{expected}</div>
+              {capturedIsPositive && (
+                <span className={styles.hint}>{t('testCaseDetail.expectedFromCapture')}</span>
+              )}
+            </>
+          ) : (
+            <span className={styles.hint}>{t('testCaseDetail.expected.empty')}</span>
+          )}
+        </Flexbox>
+      </EvalSection>
 
-      <Flexbox gap={10}>
-        <span className={styles.label}>{t('testCaseDetail.criteria')}</span>
-        {editing ? (
-          <TextArea
-            autoSize={{ maxRows: 12, minRows: 3 }}
-            className={styles.editor}
-            value={draft.criteria}
-            onChange={(e) => setDraft({ criteria: e.target.value })}
-          />
-        ) : criteria ? (
-          <div className={styles.prose}>{criteria}</div>
-        ) : (
-          <Text style={{ fontSize: 12 }} type="secondary">
-            {t('testCaseDetail.criteria.empty')}
-          </Text>
-        )}
-      </Flexbox>
-
-      <Flexbox gap={10}>
-        <span className={styles.label}>{t('testCaseDetail.expected')}</span>
-        {editing ? (
-          <TextArea
-            autoSize={{ maxRows: 12, minRows: 3 }}
-            className={styles.editor}
-            placeholder={t('testCaseDetail.expected.placeholder')}
-            value={draft.expected}
-            onChange={(e) => setDraft({ expected: e.target.value })}
-          />
-        ) : expected ? (
-          <>
-            <div className={styles.prose}>{expected}</div>
-            {capturedIsPositive && (
-              <Text style={{ fontSize: 12 }} type="secondary">
-                {t('testCaseDetail.expectedFromCapture')}
-              </Text>
-            )}
-          </>
-        ) : (
-          <Text style={{ fontSize: 12 }} type="secondary">
-            {t('testCaseDetail.expected.empty')}
-          </Text>
-        )}
-      </Flexbox>
-
-      <CaseComparisons testCaseId={testCase.id} />
-    </Flexbox>
+      <FrozenCallPanel
+        frozenCall={testCase.frozenCall}
+        frozenStepIndex={testCase.frozenStepIndex}
+      />
+    </EvalPage>
   );
 });
 

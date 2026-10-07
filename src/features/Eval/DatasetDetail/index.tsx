@@ -1,194 +1,96 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Button, confirmModal, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
-import { ArrowLeft, Database, Pencil, Plus, Trash2 } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { ActionIcon, Button, confirmModal, DropdownMenu, toast } from '@lobehub/ui/base-ui';
+import { ArrowLeft, Database, Ellipsis, FileUp, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
 import AsyncBoundary from '@/components/AsyncBoundary';
-import { RouteLoading } from '@/components/Skeleton/RouteSegment';
-import TestCasePreviewPanel from '@/features/Eval/Benchmark/DatasetsTab/TestCasePreviewPanel';
-import TestCaseTable from '@/features/Eval/Benchmark/DatasetsTab/TestCaseTable';
-import { createRunCreateModal } from '@/features/Eval/Benchmark/RunCreateModal';
-import EmptyState from '@/features/Eval/Benchmark/RunsTab/EmptyState';
-import RunCard from '@/features/Eval/Benchmark/RunsTab/RunCard';
-import ComparisonList from '@/features/Eval/Comparison/ComparisonList';
+import AsyncError from '@/components/AsyncError';
+import { createCompareModal } from '@/features/Eval/CompareModal';
+import EvalPage, { EvalPageHeader } from '@/features/Eval/components/EvalPage';
 import { createDatasetEditModal } from '@/features/Eval/DatasetEditModal';
 import { createDatasetImportModal } from '@/features/Eval/DatasetImportModal';
-import SegmentBar from '@/features/Eval/SegmentBar';
 import { createTestCaseCreateModal } from '@/features/Eval/TestCaseCreateModal';
-import { createTestCaseEditModal } from '@/features/Eval/TestCaseEditModal';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { agentEvalService } from '@/services/agentEval';
 import { runSelectors, useEvalStore } from '@/store/eval';
 
-const styles = createStaticStyles(({ css }) => ({
-  backLink: css`
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
+import { type DatasetCase } from './CaseRow';
+import CasesSection from './CasesSection';
+import CompareButton from './CompareButton';
+import ComparisonsSection, { type ComparisonRun } from './ComparisonsSection';
+import DatasetSkeleton, { CaseListSkeleton } from './DatasetSkeleton';
+import EmptyCases from './EmptyCases';
+import RunsSection from './RunsSection';
+import { styles } from './style';
 
-    width: fit-content;
+/** The server caps a page at 100; one page covers nearly every captured dataset. */
+const PAGE_SIZE = 100;
 
-    font-size: ${cssVar.fontSize};
-    color: ${cssVar.colorTextTertiary};
-    text-decoration: none;
-
-    transition: color 0.15s ease;
-
-    &:hover {
-      color: ${cssVar.colorText};
-    }
-
-    &:focus-visible {
-      outline: 2px solid ${cssVar.colorPrimary};
-      outline-offset: 2px;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      transition: none;
-    }
-  `,
-  header: css`
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-
-    width: 40px;
-    height: 40px;
-    border-radius: ${cssVar.borderRadiusLG};
-
-    background: ${cssVar.colorPrimaryBg};
-  `,
-  // Summary hero — leads the dataset detail with its headline case count as a
-  // large mono figure, mirroring the benchmark/run result heroes.
-  heroBand: css`
-    padding: 20px;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  heroValue: css`
-    font-family: ${cssVar.fontFamilyCode};
-    font-size: ${cssVar.fontSizeHeading2};
-    font-weight: 600;
-    line-height: 1;
-    color: ${cssVar.colorText};
-  `,
-  summaryDot: css`
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-  `,
-  tableWrapper: css`
-    overflow: hidden;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadius};
-  `,
-}));
-
-const DatasetDetail = memo(() => {
+const DatasetDetail = () => {
   const { t } = useTranslation('eval');
   const { datasetId } = useParams<{ datasetId: string }>();
   const navigate = useWorkspaceAwareNavigate();
-
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-  const [search, setSearch] = useState('');
-  const [diffFilter, setDiffFilter] = useState<'all' | 'easy' | 'medium' | 'hard'>('all');
-  const [previewCase, setPreviewCase] = useState<any | null>(null);
+  const [page, setPage] = useState(1);
 
   const useFetchDatasetDetail = useEvalStore((s) => s.useFetchDatasetDetail);
   const useFetchTestCases = useEvalStore((s) => s.useFetchTestCases);
   const useFetchDatasetRuns = useEvalStore((s) => s.useFetchDatasetRuns);
-  const runList = useEvalStore(runSelectors.datasetRunList(datasetId!));
   const refreshTestCases = useEvalStore((s) => s.refreshTestCases);
   const refreshDatasetDetail = useEvalStore((s) => s.refreshDatasetDetail);
+  const refreshDatasetRuns = useEvalStore((s) => s.refreshDatasetRuns);
+  const runList = useEvalStore(runSelectors.datasetRunList(datasetId!));
 
   const { data: dataset, error, isLoading, mutate } = useFetchDatasetDetail(datasetId);
+  const offset = (page - 1) * PAGE_SIZE;
+  const casesSWR = useFetchTestCases({ datasetId: datasetId!, limit: PAGE_SIZE, offset });
+  const runsSWR = useFetchDatasetRuns(datasetId);
+
   // Nullable: a dataset accumulated from captured cases belongs to no benchmark.
   const benchmarkId: string | null =
-    (dataset as { benchmarkId?: string | null })?.benchmarkId ?? null;
-  useFetchDatasetRuns(datasetId);
+    (dataset as { benchmarkId?: string | null } | undefined)?.benchmarkId ?? null;
 
-  // Replay runs are cross-model comparisons, not agent runs: they have no
-  // benchmark to open under and render as their own list below.
-  const { comparisons, sortedRuns } = useMemo(() => {
+  const cases: DatasetCase[] = casesSWR.data?.data ?? [];
+  const total: number = casesSWR.data?.total ?? 0;
+  const frozenCount = cases.filter((c) => c.hasFrozenCall).length;
+  const canCompare = frozenCount > 0;
+
+  // Replay runs are cross-model comparisons; the rest are agent runs that
+  // open under their benchmark.
+  const { agentRuns, comparisons } = useMemo(() => {
     const sorted = [...runList].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
     const isReplay = (run: any) => run.config?.executionMode === 'replay';
     return {
-      comparisons: sorted.filter(isReplay),
-      sortedRuns: sorted.filter((run) => !isReplay(run)),
+      agentRuns: sorted.filter((run) => !isReplay(run)),
+      comparisons: sorted.filter(isReplay) as ComparisonRun[],
     };
   }, [runList]);
 
-  const { data: testCaseData } = useFetchTestCases({
-    datasetId: datasetId!,
-    limit: pagination.pageSize,
-    offset: (pagination.current - 1) * pagination.pageSize,
-  });
-
-  const testCases = testCaseData?.data || [];
-  const total = testCaseData?.total || 0;
-
-  const filteredCases = testCases.filter((c: any) => {
-    if (diffFilter !== 'all' && c.metadata?.difficulty !== diffFilter) return false;
-    if (search && !c.content?.input?.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
-
-  // Difficulty mix across the loaded cases — feeds the summary hero's bar.
-  const difficulty = useMemo(() => {
-    const counts = { easy: 0, hard: 0, medium: 0 };
-    for (const c of testCases as any[]) {
-      const d = c?.metadata?.difficulty as 'easy' | 'hard' | 'medium' | undefined;
-      if (d === 'easy' || d === 'medium' || d === 'hard') counts[d] += 1;
-    }
-    return {
-      counts,
-      segments: [
-        { color: cssVar.colorSuccess, value: counts.easy },
-        { color: cssVar.colorWarning, value: counts.medium },
-        { color: cssVar.colorError, value: counts.hard },
-      ],
-      tagged: counts.easy + counts.medium + counts.hard,
-    };
-  }, [testCases]);
-
   const handleRefresh = useCallback(async () => {
-    if (datasetId) {
-      await refreshTestCases(datasetId);
-      await refreshDatasetDetail(datasetId);
-    }
+    if (!datasetId) return;
+    await Promise.all([refreshTestCases(datasetId), refreshDatasetDetail(datasetId)]);
   }, [datasetId, refreshTestCases, refreshDatasetDetail]);
 
-  const handleDeleteCase = useCallback(
-    (testCase: any) => {
-      confirmModal({
-        content: t('testCase.delete.confirm'),
-        okButtonProps: { danger: true },
-        okText: t('common.delete'),
-        onOk: async () => {
-          try {
-            await agentEvalService.deleteTestCase(testCase.id);
-            toast.success(t('testCase.delete.success'));
-            await handleRefresh();
-          } catch {
-            toast.error(t('testCase.delete.error'));
-          }
-        },
-        title: t('common.delete'),
-      });
-    },
-    [handleRefresh, t],
-  );
+  const openAdd = () =>
+    createTestCaseCreateModal({ datasetId: datasetId!, onSuccess: handleRefresh });
+  const openImport = () =>
+    createDatasetImportModal({ datasetId: datasetId!, onSuccess: handleRefresh });
+  const openCompare = () =>
+    createCompareModal({
+      datasetId: datasetId!,
+      onStarted: (runId) => {
+        void refreshDatasetRuns(datasetId!);
+        navigate(`/eval/comparisons/${runId}`);
+      },
+    });
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = () => {
     confirmModal({
       content: t('dataset.delete.confirm'),
       okButtonProps: { danger: true },
@@ -202,213 +104,157 @@ const DatasetDetail = memo(() => {
           toast.error(t('dataset.delete.error'));
         }
       },
-      title: t('common.delete'),
+      title: t('dataset.delete.title'),
     });
-  }, [benchmarkId, datasetId, navigate, t]);
+  };
 
-  // Skeleton → error → (resolved-null) blank, replacing a bare `return null`
-  // that flashed blank on the happy path and stayed permanently blank on a
-  // failed fetch (ux Read §1.1). A page-level failure gets a reason + Reload.
+  const casesFallback =
+    casesSWR.isLoading && !casesSWR.data ? (
+      <CaseListSkeleton />
+    ) : casesSWR.error && !casesSWR.data ? (
+      <AsyncError error={casesSWR.error} onRetry={() => casesSWR.mutate()} />
+    ) : undefined;
+  const isEmptyDataset = !!casesSWR.data && total === 0;
+
   return (
-    <AsyncBoundary
-      data={dataset}
-      error={error}
-      errorVariant={'page'}
-      isEmpty={!dataset}
-      isLoading={isLoading}
-      loading={<RouteLoading />}
-      onRetry={() => mutate()}
-    >
-      {dataset && (
-        <Flexbox horizontal style={{ flex: 1, minHeight: 0 }}>
-          <Flexbox
-            flex={1}
-            gap={24}
-            style={{ minWidth: 0, overflow: 'auto', paddingBlock: 24, paddingInline: 32 }}
-          >
-            {/* Back link */}
-            <WorkspaceLink
-              className={styles.backLink}
-              to={benchmarkId ? `/eval/bench/${benchmarkId}` : '/eval'}
-            >
-              <ArrowLeft size={16} />
-              {benchmarkId ? t('dataset.detail.backToBenchmark') : t('dataset.detail.backToEval')}
-            </WorkspaceLink>
-
-            {/* Header */}
-            <Flexbox horizontal align="start" justify="space-between">
-              <Flexbox horizontal align="start" gap={12}>
-                <div className={styles.header}>
-                  <Database size={20} style={{ color: cssVar.colorPrimary }} />
-                </div>
-                <Flexbox gap={4}>
-                  <Text as="h4" style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
-                    {dataset.name}
-                  </Text>
-                  {dataset.description && <Text type="secondary">{dataset.description}</Text>}
-                </Flexbox>
-              </Flexbox>
-
-              <Flexbox horizontal gap={8}>
-                <Button
-                  icon={Pencil}
-                  size="small"
-                  onClick={() => createDatasetEditModal({ dataset, onSuccess: handleRefresh })}
-                >
-                  {t('common.edit')}
-                </Button>
-                <Button danger icon={Trash2} size="small" onClick={handleDelete}>
-                  {t('common.delete')}
-                </Button>
-              </Flexbox>
-            </Flexbox>
-
-            {/* Summary hero — headline case count + difficulty mix */}
-            <Flexbox
-              horizontal
-              align="center"
-              className={styles.heroBand}
-              gap={16}
-              justify="space-between"
-            >
-              <Flexbox gap={6}>
-                <span className={styles.heroValue}>{total}</span>
-                <Text color={cssVar.colorTextTertiary} fontSize={12}>
-                  {t('dataset.detail.testCases')}
-                </Text>
-              </Flexbox>
-              {difficulty.tagged > 0 && (
-                <Flexbox gap={8} style={{ maxWidth: 280, minWidth: 0, width: '100%' }}>
-                  <SegmentBar segments={difficulty.segments} />
-                  <Flexbox horizontal gap={12} justify="flex-end" style={{ flexWrap: 'wrap' }}>
-                    {(['easy', 'medium', 'hard'] as const).map((d) => (
-                      <Flexbox horizontal align="center" gap={6} key={d}>
-                        <span
-                          className={styles.summaryDot}
-                          style={{
-                            background:
-                              d === 'easy'
-                                ? cssVar.colorSuccess
-                                : d === 'medium'
-                                  ? cssVar.colorWarning
-                                  : cssVar.colorError,
-                          }}
-                        />
-                        <Text color={cssVar.colorTextTertiary} fontSize={12}>
-                          {t(`difficulty.${d}`)} {difficulty.counts[d]}
-                        </Text>
-                      </Flexbox>
-                    ))}
-                  </Flexbox>
-                </Flexbox>
-              )}
-            </Flexbox>
-
-            {/* Test Cases */}
-            <Flexbox gap={12}>
-              <Flexbox horizontal align="center" justify="space-between">
-                <Text weight={600}>{t('dataset.detail.testCases')}</Text>
-                <Text type="secondary">{t('dataset.detail.caseCount', { count: total })}</Text>
-              </Flexbox>
-
-              <div className={styles.tableWrapper}>
-                <TestCaseTable
-                  datasetEvalMode={dataset?.evalMode}
-                  diffFilter={diffFilter}
-                  pagination={pagination}
-                  search={search}
-                  selectedId={previewCase?.id}
-                  testCases={filteredCases}
-                  total={total}
-                  onDelete={handleDeleteCase}
-                  onOpen={(testCase: any) => navigate(`/eval/cases/${testCase.id}`)}
-                  onPageChange={(page, pageSize) => setPagination({ current: page, pageSize })}
-                  onPreview={setPreviewCase}
-                  onAddCase={() =>
-                    createTestCaseCreateModal({ datasetId: datasetId!, onSuccess: handleRefresh })
-                  }
-                  onDiffFilterChange={(f) => {
-                    setDiffFilter(f);
-                    setPagination((prev) => ({ ...prev, current: 1 }));
-                  }}
-                  onEdit={(testCase) =>
-                    createTestCaseEditModal({ onSuccess: handleRefresh, testCase })
-                  }
-                  onImport={() =>
-                    createDatasetImportModal({ datasetId: datasetId!, onSuccess: handleRefresh })
-                  }
-                  onSearchChange={(v) => {
-                    setSearch(v);
-                    setPagination((prev) => ({ ...prev, current: 1 }));
-                  }}
-                />
-              </div>
-            </Flexbox>
-
-            {comparisons.length > 0 && (
-              <Flexbox gap={12}>
-                <Text weight={600}>
-                  {t('comparison.list.title', { count: comparisons.length })}
-                </Text>
-                <ComparisonList items={comparisons.map((run) => ({ run }))} />
-              </Flexbox>
-            )}
-
-            {/* Related Runs. A run belongs to a benchmark by design — that is
-                what defines the shared rubrics it is scored against — so a
-                dataset that belongs to none has nothing to run against yet. */}
-            {benchmarkId ? (
-              <Flexbox gap={12}>
-                <Flexbox horizontal align="center" justify="space-between">
-                  <Text weight={600}>
-                    {t('dataset.detail.relatedRuns', { count: sortedRuns.length })}
-                  </Text>
-                  <Button
-                    icon={Plus}
-                    size="small"
-                    onClick={() =>
-                      createRunCreateModal({
-                        benchmarkId: benchmarkId!,
-                        datasetId: datasetId!,
-                        datasetName: dataset.name,
-                      })
-                    }
+    <Flexbox flex={1} style={{ minHeight: 0, overflow: 'auto' }}>
+      <AsyncBoundary
+        data={dataset}
+        error={error}
+        errorVariant={'page'}
+        isEmpty={!dataset}
+        isLoading={isLoading}
+        loading={<DatasetSkeleton />}
+        onRetry={() => mutate()}
+      >
+        {dataset && (
+          <EvalPage
+            header={
+              <EvalPageHeader
+                description={dataset.description || undefined}
+                title={dataset.name}
+                actions={
+                  <>
+                    {/* An empty dataset's own empty state carries add / import. */}
+                    {total > 0 && (
+                      <>
+                        <Button icon={FileUp} onClick={openImport}>
+                          {t('dataset.actions.import')}
+                        </Button>
+                        <Button icon={Plus} onClick={openAdd}>
+                          {t('testCase.actions.add')}
+                        </Button>
+                        <CompareButton enabled={canCompare} onClick={openCompare} />
+                      </>
+                    )}
+                    <DropdownMenu
+                      items={[
+                        {
+                          icon: <Pencil size={14} />,
+                          key: 'edit',
+                          label: t('common.edit'),
+                          onClick: () =>
+                            createDatasetEditModal({ dataset, onSuccess: handleRefresh }),
+                        },
+                        { type: 'divider' },
+                        {
+                          danger: true,
+                          icon: <Trash2 size={14} />,
+                          key: 'delete',
+                          label: t('common.delete'),
+                          onClick: handleDelete,
+                        },
+                      ]}
+                    >
+                      <ActionIcon icon={Ellipsis} title={t('dataset.actions.more')} />
+                    </DropdownMenu>
+                  </>
+                }
+                breadcrumb={
+                  <WorkspaceLink
+                    className={styles.breadcrumbLink}
+                    to={benchmarkId ? `/eval/bench/${benchmarkId}` : '/eval'}
                   >
-                    {t('dataset.detail.addRun')}
-                  </Button>
-                </Flexbox>
-                {sortedRuns.length > 0 ? (
-                  <Flexbox gap={12}>
-                    {sortedRuns.map((run) => (
-                      <RunCard benchmarkId={benchmarkId!} key={run.id} run={run} />
-                    ))}
-                  </Flexbox>
-                ) : (
-                  <EmptyState
-                    onCreate={() =>
-                      createRunCreateModal({
-                        benchmarkId: benchmarkId!,
-                        datasetId: datasetId!,
-                        datasetName: dataset.name,
-                      })
-                    }
-                  />
-                )}
-              </Flexbox>
+                    <Flexbox horizontal align="center" gap={4}>
+                      <ArrowLeft size={14} />
+                      {benchmarkId
+                        ? t('dataset.detail.backToBenchmark')
+                        : t('dataset.detail.backToEval')}
+                    </Flexbox>
+                  </WorkspaceLink>
+                }
+                icon={
+                  <div className={styles.icon}>
+                    <Database size={20} />
+                  </div>
+                }
+                meta={
+                  casesSWR.data && (
+                    <Flexbox horizontal align="center" className={styles.meta} gap={8} wrap="wrap">
+                      <span>{t('dataset.detail.caseCount', { count: total })}</span>
+                      {total > 0 && (
+                        <>
+                          <span className={styles.metaDot}>·</span>
+                          <span>
+                            {t('dataset.meta.frozen', {
+                              count: frozenCount,
+                              more: total > cases.length ? '+' : '',
+                            })}
+                          </span>
+                        </>
+                      )}
+                    </Flexbox>
+                  )
+                }
+              />
+            }
+          >
+            {isEmptyDataset ? (
+              <EmptyCases onAdd={openAdd} onImport={openImport} />
             ) : (
-              <Text color={cssVar.colorTextTertiary} fontSize={12}>
-                {t('dataset.detail.runsNeedBenchmark')}
-              </Text>
+              <CasesSection
+                cases={cases}
+                fallback={casesFallback}
+                offset={offset}
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={setPage}
+                onRefresh={handleRefresh}
+              />
             )}
-          </Flexbox>
 
-          {previewCase && (
-            <TestCasePreviewPanel testCase={previewCase} onClose={() => setPreviewCase(null)} />
-          )}
-        </Flexbox>
-      )}
-    </AsyncBoundary>
+            {runsSWR.isLoading && !runsSWR.data ? (
+              <CaseListSkeleton rows={2} />
+            ) : runsSWR.error && !runsSWR.data ? (
+              <AsyncError
+                error={runsSWR.error}
+                variant={'block'}
+                onRetry={() => runsSWR.mutate()}
+              />
+            ) : (
+              !isEmptyDataset &&
+              runsSWR.data !== undefined && (
+                <ComparisonsSection
+                  runs={comparisons}
+                  onCompare={canCompare ? openCompare : undefined}
+                />
+              )
+            )}
+
+            {benchmarkId && !isEmptyDataset && runsSWR.data !== undefined && (
+              <RunsSection
+                benchmarkId={benchmarkId}
+                datasetId={datasetId!}
+                datasetName={dataset.name}
+                runs={agentRuns}
+              />
+            )}
+          </EvalPage>
+        )}
+      </AsyncBoundary>
+    </Flexbox>
   );
-});
+};
 
 export default DatasetDetail;

@@ -6,6 +6,8 @@ import type {
   EvalReplayUsage,
 } from '@lobechat/types';
 
+import { type CaseDiagnosis } from '../components/diagnosis';
+
 /** One (case × model) result as `getReplayComparison` returns it. */
 export interface ComparisonCell {
   content?: string | null;
@@ -118,3 +120,30 @@ export const formatToolCalls = (toolCalls?: EvalReplayToolCall[] | null): string
   if (!toolCalls?.length) return undefined;
   return toolCalls.map((call) => `${call.name}(${call.arguments ?? ''})`).join('\n');
 };
+
+/** How many cases fall under each diagnosis — the run's answer at a glance. */
+export const tallyDiagnoses = (
+  diagnoses: Iterable<CaseDiagnosis>,
+): Record<CaseDiagnosis, number> => {
+  const tally: Record<CaseDiagnosis, number> = { harness: 0, inconclusive: 0, model: 0, pass: 0 };
+  for (const d of diagnoses) tally[d] += 1;
+  return tally;
+};
+
+/**
+ * How far the grid has settled. `total` is the full case × model grid when it
+ * is known, so cells the server has not created yet still count as remaining.
+ */
+export const gridProgress = (cells: ComparisonCell[], expectedTotal = 0) => {
+  const settled = cells.filter((c) => cellVerdict(c) !== 'pending').length;
+  const errored = cells.filter((c) => c.status === 'error').length;
+  const total = Math.max(cells.length, expectedTotal);
+  return { errored, settled, total };
+};
+
+/** Models best-first: pass rate, then mean score, then fewer errors. */
+export const rankTargets = (summaries: EvalReplayTargetMetrics[]): EvalReplayTargetMetrics[] =>
+  [...summaries].sort(
+    (a, b) =>
+      b.passRate - a.passRate || b.averageScore - a.averageScore || a.errorCases - b.errorCases,
+  );

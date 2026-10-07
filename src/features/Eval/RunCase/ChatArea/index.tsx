@@ -14,7 +14,7 @@ const styles = createStaticStyles(({ css }) => ({
   header: css`
     flex: none;
     padding-block: 12px;
-    padding-inline: 16px;
+    padding-inline: 24px;
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
   `,
   scroll: css`

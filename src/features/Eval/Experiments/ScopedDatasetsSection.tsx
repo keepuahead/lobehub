@@ -1,10 +1,13 @@
 'use client';
 
-import { Block, Empty, Flexbox } from '@lobehub/ui';
+import { Block, Flexbox } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import { Database } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import EvalEmpty from '@/features/Eval/components/EvalEmpty';
+import EvalSection from '@/features/Eval/components/EvalSection';
 
 import DatasetRow from './DatasetRow';
 import type { useExperimentActions } from './useExperimentActions';
@@ -14,11 +17,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     padding-block: 4px;
     padding-inline: 8px;
     border-radius: ${cssVar.borderRadiusLG};
-  `,
-  sectionTitle: css`
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
   `,
 }));
 
@@ -32,20 +30,19 @@ const ScopedDatasetsSection = memo<ScopedDatasetsSectionProps>(({ actions }) => 
   const { scopedDatasets } = actions;
 
   return (
-    <Flexbox gap={12}>
-      <h3 className={styles.sectionTitle}>{t('experiment.detail.datasetsScoped')}</h3>
-      <Block className={styles.listCard} variant={'outlined'}>
-        {scopedDatasets.length === 0 ? (
-          <Empty description={t('experiment.detail.datasetsScopedEmpty')} icon={Database} />
-        ) : (
+    <EvalSection count={scopedDatasets.length} title={t('experiment.detail.datasetsScoped')}>
+      {scopedDatasets.length === 0 ? (
+        <EvalEmpty compact icon={Database} title={t('experiment.detail.datasetsScopedEmpty')} />
+      ) : (
+        <Block className={styles.listCard} variant={'outlined'}>
           <Flexbox gap={0}>
             {scopedDatasets.map((dataset) => (
               <DatasetRow dataset={dataset} key={dataset.id} onAddRun={actions.addRun} />
             ))}
           </Flexbox>
-        )}
-      </Block>
-    </Flexbox>
+        </Block>
+      )}
+    </EvalSection>
   );
 });
 

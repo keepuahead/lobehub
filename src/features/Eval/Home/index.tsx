@@ -1,270 +1,155 @@
 'use client';
 
-import { Empty, Flexbox } from '@lobehub/ui';
-import { Button, Skeleton, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
-import { Database, FlaskConical, Plus } from 'lucide-react';
-import { memo } from 'react';
+import { Flexbox } from '@lobehub/ui';
+import { Button, Skeleton } from '@lobehub/ui/base-ui';
+import { createStaticStyles } from 'antd-style';
+import { FlaskConical, Plus } from 'lucide-react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import AsyncBoundary from '@/components/AsyncBoundary';
-import BenchmarkCard from '@/features/Eval/BenchmarkCard';
+import EvalEmpty from '@/features/Eval/components/EvalEmpty';
+import EvalPage, { EvalPageHeader } from '@/features/Eval/components/EvalPage';
+import EvalSection from '@/features/Eval/components/EvalSection';
+import { StatGrid } from '@/features/Eval/components/StatTile';
 import { createCreateBenchmarkModal } from '@/features/Eval/CreateBenchmarkModal';
-import { createExperimentModal, ExperimentSummaryCard } from '@/features/Eval/Experiments';
-import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useEvalStore } from '@/store/eval';
 
+import BenchmarkGrid, { BenchmarkGridSkeleton } from './BenchmarkGrid';
+import ExperimentsSection from './ExperimentsSection';
+import Overview from './Overview';
+import RecentRuns from './RecentRuns';
+import { useRecentRuns } from './useRecentRuns';
+
 const styles = createStaticStyles(({ css }) => ({
-  container: css`
+  scroller: css`
     overflow-y: auto;
-    padding-block: 24px;
-    padding-inline: 32px;
-  `,
-  grid: css`
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
-    gap: 20px;
-  `,
-  datasetRow: css`
-    display: flex;
-    gap: 12px;
-    align-items: center;
-
-    padding-block: 14px;
-    padding-inline: 16px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-
-    color: inherit;
-    text-decoration: none;
-
-    transition: border-color 0.15s ease;
-
-    &:hover {
-      border-color: ${cssVar.colorBorder};
-    }
-  `,
-  datasetIcon: css`
-    display: flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
-
-    background: ${cssVar.colorFillTertiary};
-  `,
-  skeletonCard: css`
-    padding: 20px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorBgContainer};
-  `,
-  title: css`
-    margin: 0;
-    line-height: 1.3;
+    width: 100%;
+    height: 100%;
   `,
 }));
 
-// Loading placeholder that reuses the benchmark-card chrome so loading → loaded
-// is a content swap, not a relayout (ux §4.1).
-const SkeletonGrid = memo(() => (
-  <div className={styles.grid}>
-    {[0, 1, 2, 3].map((i) => (
-      <Flexbox className={styles.skeletonCard} gap={16} key={i}>
-        <Flexbox horizontal gap={12}>
-          <Skeleton.Avatar shape={'square'} size={36} />
-          <Flexbox flex={1} gap={8}>
-            <Skeleton height={14} width={160} />
-            <Skeleton height={12} width={220} />
-          </Flexbox>
-        </Flexbox>
-        <Skeleton height={64} />
-      </Flexbox>
-    ))}
-  </div>
-));
+interface DatasetListItem {
+  benchmarkId?: string | null;
+  id: string;
+  testCaseCount?: number | string;
+}
 
-const EvalOverview = memo(() => {
+/** Page-shaped placeholder while the benchmark list (the page's anchor) loads. */
+const HomeSkeleton = () => (
+  <>
+    <StatGrid>
+      {[0, 1, 2, 3].map((i) => (
+        <Skeleton height={72} key={i} />
+      ))}
+    </StatGrid>
+    <Flexbox gap={12}>
+      <Skeleton height={18} width={160} />
+      <Skeleton height={168} />
+    </Flexbox>
+    <Flexbox gap={12}>
+      <Skeleton height={18} width={120} />
+      <BenchmarkGridSkeleton />
+    </Flexbox>
+  </>
+);
+
+const createBenchmark = () => createCreateBenchmarkModal();
+
+const EvalHome = () => {
   const { t } = useTranslation('eval');
+
   const benchmarkList = useEvalStore((s) => s.benchmarkList);
   const useFetchBenchmarks = useEvalStore((s) => s.useFetchBenchmarks);
   const useFetchAllDatasets = useEvalStore((s) => s.useFetchAllDatasets);
-  const { data, isLoading, error, mutate } = useFetchBenchmarks();
-  const { data: allDatasets } = useFetchAllDatasets();
+  const benchmarks = useFetchBenchmarks();
+  const datasets = useFetchAllDatasets();
+  const recent = useRecentRuns();
 
-  const experimentList = useEvalStore((s) => s.experimentList);
-  const useFetchExperiments = useEvalStore((s) => s.useFetchExperiments);
-  const {
-    data: experimentData,
-    isLoading: isLoadingExperiments,
-    error: experimentError,
-    mutate: mutateExperiments,
-  } = useFetchExperiments();
+  const datasetList = datasets.data as DatasetListItem[] | undefined;
 
-  // Purpose-built onboarding empty — only reached when the fetch succeeded with
-  // zero benchmarks. A *failed* fetch is gated ahead of this by AsyncBoundary so
-  // we never invite the user to re-create benchmarks they already own (ux Read
-  // §1.1 error-as-empty trap).
-  const emptyState = (
-    <Flexbox align={'center'} flex={1} justify={'center'}>
-      <Empty description={t('benchmark.empty')} icon={FlaskConical}>
-        <Button
-          icon={Plus}
-          style={{ marginTop: 16 }}
-          type={'primary'}
-          onClick={() => createCreateBenchmarkModal()}
-        >
-          {t('overview.createBenchmark')}
-        </Button>
-      </Empty>
-    </Flexbox>
+  const benchmarkIdByDataset = useMemo(
+    () => new Map((datasetList ?? []).map((d) => [d.id, d.benchmarkId])),
+    [datasetList],
   );
 
-  // Same contract for the experiments grid (ux Read: empty is a real page with
-  // a CTA, not a blank grid).
-  const experimentsEmptyState = (
-    <Flexbox align={'center'} flex={1} justify={'center'}>
-      <Empty description={t('experiment.empty')} icon={FlaskConical}>
-        <Button
-          icon={Plus}
-          style={{ marginTop: 16 }}
-          type={'primary'}
-          onClick={() => createExperimentModal()}
-        >
-          {t('overview.createExperiment')}
-        </Button>
-      </Empty>
-    </Flexbox>
+  const testCaseCount = useMemo(
+    () => datasetList?.reduce((sum, d) => sum + (Number(d.testCaseCount) || 0), 0),
+    [datasetList],
   );
+
+  const isFirstUse = benchmarks.data !== undefined && benchmarkList.length === 0;
 
   return (
-    <Flexbox className={styles.container} gap={32} height={'100%'} width={'100%'}>
-      {/* Header */}
-      <Flexbox horizontal align={'center'} gap={16} justify={'space-between'}>
-        <Flexbox gap={4} style={{ minWidth: 0 }}>
-          <Text ellipsis as={'h1'} className={styles.title} fontSize={30} weight={600}>
-            {t('overview.title')}
-          </Text>
-          <Text type={'secondary'}>{t('overview.subtitle')}</Text>
-        </Flexbox>
-        {benchmarkList.length > 0 && (
-          <Button icon={Plus} type={'primary'} onClick={() => createCreateBenchmarkModal()}>
-            {t('overview.createBenchmark')}
-          </Button>
-        )}
-      </Flexbox>
-
-      {/* Experiments */}
-      <Flexbox gap={16}>
-        <Flexbox horizontal align={'center'} justify={'space-between'}>
-          <Text as={'h2'} style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-            {t('overview.sections.experiments.title')}
-          </Text>
-          <Button icon={Plus} size={'small'} onClick={() => createExperimentModal()}>
-            {t('overview.createExperiment')}
-          </Button>
-        </Flexbox>
+    <div className={styles.scroller}>
+      <EvalPage
+        header={
+          <EvalPageHeader
+            description={t('home.description')}
+            title={t('overview.title')}
+            actions={
+              !isFirstUse && (
+                <Button icon={Plus} type="primary" onClick={createBenchmark}>
+                  {t('overview.createBenchmark')}
+                </Button>
+              )
+            }
+          />
+        }
+      >
+        {/* The benchmark list anchors the page: a failed fetch is gated before the
+            first-use empty so owners are never invited to re-create what they have. */}
         <AsyncBoundary
-          data={experimentData}
-          empty={experimentsEmptyState}
-          error={experimentError}
-          errorVariant={'block'}
-          isEmpty={experimentList.length === 0}
-          isLoading={isLoadingExperiments}
-          loading={<SkeletonGrid />}
-          onRetry={() => mutateExperiments()}
-        >
-          <div className={styles.grid}>
-            {experimentList.map((experiment) => (
-              <ExperimentSummaryCard experiment={experiment} key={experiment.id} />
-            ))}
-          </div>
-        </AsyncBoundary>
-      </Flexbox>
-
-      {/* Benchmarks */}
-      <Flexbox gap={16}>
-        <Text as={'h2'} style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-          {t('overview.sections.benchmarks.title')}
-        </Text>
-        {/* Body: error / loading / empty / grid (error gated before empty) */}
-        <AsyncBoundary
-          data={data}
-          empty={emptyState}
-          error={error}
-          errorVariant={'block'}
+          data={benchmarks.data}
+          error={benchmarks.error}
           isEmpty={benchmarkList.length === 0}
-          isLoading={isLoading}
-          loading={<SkeletonGrid />}
-          onRetry={() => mutate()}
+          isLoading={benchmarks.isLoading}
+          loading={<HomeSkeleton />}
+          empty={
+            <EvalEmpty
+              description={t('home.empty.description')}
+              icon={FlaskConical}
+              title={t('home.empty.title')}
+              action={
+                <Button icon={Plus} type="primary" onClick={createBenchmark}>
+                  {t('overview.createBenchmark')}
+                </Button>
+              }
+            />
+          }
+          onRetry={() => benchmarks.mutate()}
         >
-          <div className={styles.grid}>
-            {benchmarkList.map((benchmark: any) => (
-              <BenchmarkCard
-                bestScore={benchmark.bestScore}
-                datasetCount={benchmark.datasetCount}
-                description={benchmark.description}
-                id={benchmark.id}
-                key={benchmark.id}
-                name={benchmark.name}
-                recentRuns={benchmark.recentRuns}
-                runCount={benchmark.runCount}
-                source={benchmark.source}
-                tags={benchmark.tags}
-                testCaseCount={benchmark.testCaseCount}
-              />
-            ))}
-          </div>
+          <Overview
+            benchmarkCount={benchmarkList.length}
+            datasetCount={datasetList?.length}
+            datasetsError={datasets.error}
+            runs={recent.runs}
+            testCaseCount={testCaseCount}
+            onRetryDatasets={() => datasets.mutate()}
+          />
+
+          <RecentRuns
+            benchmarkIdByDataset={benchmarkIdByDataset}
+            data={recent.data}
+            error={recent.error}
+            isLoading={recent.isLoading}
+            runs={recent.runs}
+            onRetry={() => recent.mutate()}
+          />
+
+          <EvalSection
+            count={benchmarkList.length}
+            description={t('overview.sections.benchmarks.subtitle')}
+            title={t('overview.sections.benchmarks.title')}
+          >
+            <BenchmarkGrid benchmarks={benchmarkList} />
+          </EvalSection>
+
+          <ExperimentsSection />
         </AsyncBoundary>
-      </Flexbox>
-
-      {/* Every dataset, benchmark-owned or not. A dataset need not belong to a
-          benchmark, and every other listing is benchmark-scoped, so this is the
-          only place all of them are visible. */}
-      <Flexbox gap={16}>
-        <Text as={'h2'} style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-          {t('overview.sections.datasets.title')}
-        </Text>
-        {allDatasets && allDatasets.length > 0 ? (
-          <div className={styles.grid}>
-            {allDatasets.map(
-              (dataset: {
-                benchmarkId?: string | null;
-                description?: string | null;
-                id: string;
-                name: string;
-              }) => (
-                <WorkspaceLink
-                  className={styles.datasetRow}
-                  key={dataset.id}
-                  to={`/eval/datasets/${dataset.id}`}
-                >
-                  <div className={styles.datasetIcon}>
-                    <Database size={16} style={{ color: cssVar.colorTextSecondary }} />
-                  </div>
-                  <Flexbox gap={2} style={{ minWidth: 0 }}>
-                    <Text ellipsis weight={500}>
-                      {dataset.name}
-                    </Text>
-                    <Text ellipsis fontSize={12} type="secondary">
-                      {dataset.description || t('overview.sections.datasets.noBenchmark')}
-                    </Text>
-                  </Flexbox>
-                </WorkspaceLink>
-              ),
-            )}
-          </div>
-        ) : (
-          <Text fontSize={12} type="secondary">
-            {t('overview.sections.datasets.empty')}
-          </Text>
-        )}
-      </Flexbox>
-    </Flexbox>
+      </EvalPage>
+    </div>
   );
-});
+};
 
-export default EvalOverview;
+export default EvalHome;

@@ -1,28 +1,20 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 import { useParams } from 'react-router';
 
 import AsyncError from '@/components/AsyncError';
-import { RouteLoading } from '@/components/Skeleton/RouteSegment';
+import EvalPage from '@/features/Eval/components/EvalPage';
 import { experimentSelectors, useEvalStore } from '@/store/eval';
 
 import BenchmarksSection from './BenchmarksSection';
 import ExperimentHeader from './ExperimentHeader';
+import ExperimentSkeleton from './ExperimentSkeleton';
 import ExperimentStats from './ExperimentStats';
 import RunsSection from './RunsSection';
 import ScopedDatasetsSection from './ScopedDatasetsSection';
 import { useExperimentActions } from './useExperimentActions';
-
-const styles = createStaticStyles(({ css }) => ({
-  container: css`
-    overflow-y: auto;
-    padding-block: 24px;
-    padding-inline: 32px;
-  `,
-}));
 
 /**
  * Experiment workspace page. Thin orchestrator: one fetch populates the single
@@ -39,17 +31,18 @@ const ExperimentDetailPage = memo(() => {
   const actions = useExperimentActions(experiment);
 
   if (!experiment) {
-    if (isLoading || !error) return <RouteLoading />;
+    if (isLoading || !error) return <ExperimentSkeleton />;
     return <AsyncError error={error} variant={'page'} onRetry={() => void mutate()} />;
   }
 
   return (
-    <Flexbox className={styles.container} gap={24} height="100%" width="100%">
-      <ExperimentHeader experiment={experiment} />
-      <ExperimentStats datasetCount={experiment.datasets.length} experiment={experiment} />
-      <BenchmarksSection actions={actions} experiment={experiment} />
-      <ScopedDatasetsSection actions={actions} />
-      <RunsSection actions={actions} experiment={experiment} />
+    <Flexbox flex={1} style={{ minHeight: 0, overflowY: 'auto' }} width="100%">
+      <EvalPage header={<ExperimentHeader experiment={experiment} />}>
+        <ExperimentStats datasetCount={experiment.datasets.length} experiment={experiment} />
+        <BenchmarksSection actions={actions} experiment={experiment} />
+        <ScopedDatasetsSection actions={actions} />
+        <RunsSection actions={actions} experiment={experiment} />
+      </EvalPage>
     </Flexbox>
   );
 });

@@ -4,43 +4,12 @@ import { type DropdownItem } from '@lobehub/ui';
 import { Block, Center, DropdownMenu, stopPropagation } from '@lobehub/ui';
 import { ActionIcon, Skeleton, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import {
-  Activity,
-  Award,
-  BarChart3,
-  ChevronsUpDownIcon,
-  Gauge,
-  LoaderPinwheel,
-  Server,
-  Target,
-  TrendingUp,
-  Trophy,
-  Volleyball,
-  Zap,
-} from 'lucide-react';
+import { ChevronsUpDownIcon } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
+import { getBenchmarkIcon as getSystemIcon } from '@/features/Eval/Benchmark/benchmarkIcon';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useEvalStore } from '@/store/eval';
-
-const SYSTEM_ICONS = [
-  LoaderPinwheel,
-  Volleyball,
-  Server,
-  Target,
-  Award,
-  Trophy,
-  Activity,
-  BarChart3,
-  TrendingUp,
-  Gauge,
-  Zap,
-];
-
-const getSystemIcon = (id: string) => {
-  const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return SYSTEM_ICONS[hash % SYSTEM_ICONS.length];
-};
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   menuIcon: css`
@@ -88,7 +57,7 @@ const BenchmarkHead = memo<{ id: string }>(({ id }) => {
       onClick: () => handleBenchmarkSwitch(b.id),
       style: b.id === id ? { backgroundColor: cssVar.controlItemBgActive } : {},
     }));
-  }, [benchmarkList, handleBenchmarkSwitch, id, styles.menuIcon]);
+  }, [benchmarkList, handleBenchmarkSwitch, id]);
 
   return (
     <Block

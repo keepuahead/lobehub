@@ -12,6 +12,7 @@ import { CheckCircle2, CircleDot, CircleSlash, Loader2, Play, XCircle } from 'lu
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isReplayRun } from '@/features/Eval/Benchmark/RunsTab/groupRuns';
 import NavItem from '@/features/NavPanel/components/NavItem';
 import SkeletonList from '@/features/NavPanel/components/SkeletonList';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
@@ -48,6 +49,9 @@ interface RunListProps {
 }
 
 const RunList = memo<RunListProps>(({ activeKey, benchmarkId, itemKey }) => {
+  // A comparison has its own page; an agent run lives under its benchmark.
+  const runHref = (run: { config?: any; id: string }) =>
+    isReplayRun(run) ? `/eval/comparisons/${run.id}` : `/eval/bench/${benchmarkId}/runs/${run.id}`;
   const { t } = useTranslation('eval');
   const navigate = useWorkspaceAwareNavigate();
   const runList = useEvalStore(runSelectors.runList);
@@ -85,10 +89,10 @@ const RunList = memo<RunListProps>(({ activeKey, benchmarkId, itemKey }) => {
             sortedRuns.map((run) => (
               <WorkspaceLink
                 key={run.id}
-                to={`/eval/bench/${benchmarkId}/runs/${run.id}`}
+                to={runHref(run)}
                 onClick={(e) => {
                   e.preventDefault();
-                  navigate(`/eval/bench/${benchmarkId}/runs/${run.id}`);
+                  navigate(runHref(run));
                 }}
               >
                 <NavItem

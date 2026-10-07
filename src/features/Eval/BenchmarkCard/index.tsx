@@ -3,50 +3,15 @@
 import { Flexbox, Icon } from '@lobehub/ui';
 import { Button, Tag, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import {
-  Activity,
-  ArrowRight,
-  Award,
-  BarChart3,
-  Database,
-  FlaskConical,
-  Gauge,
-  LoaderPinwheel,
-  Play,
-  Server,
-  Target,
-  TrendingUp,
-  Trophy,
-  Upload,
-  User,
-  Volleyball,
-  Zap,
-} from 'lucide-react';
+import { ArrowRight, Database, FlaskConical, Play, Upload, User } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getBenchmarkIcon } from '@/features/Eval/Benchmark/benchmarkIcon';
+import { getRunPassRate } from '@/features/Eval/Home/runHelpers';
 import Sparkline from '@/features/Eval/Sparkline';
 import StatusBadge from '@/features/Eval/StatusBadge';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
-
-const SYSTEM_ICONS = [
-  LoaderPinwheel,
-  Volleyball,
-  Server,
-  Target,
-  Award,
-  Trophy,
-  Activity,
-  BarChart3,
-  TrendingUp,
-  Gauge,
-  Zap,
-];
-
-const getSystemIcon = (id: string) => {
-  const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return SYSTEM_ICONS[hash % SYSTEM_ICONS.length];
-};
 
 const styles = createStaticStyles(({ css }) => ({
   card: css`
@@ -199,14 +164,15 @@ const BenchmarkCard = memo<BenchmarkCardProps>(
     const { t } = useTranslation('eval');
     const allRunCount = runCount || recentRuns?.length || 0;
     const hasDatasets = datasetCount > 0;
-    const systemIcon = useMemo(() => getSystemIcon(id), [id]);
+    const systemIcon = useMemo(() => getBenchmarkIcon(id), [id]);
     const isUser = source === 'user';
 
     // Pass-rate trend: recentRuns arrives newest-first, so reverse a copy to read
     // left→right oldest→newest. Drop runs that never produced a rate.
+    // A run whose every case errored has no rate (see getRunPassRate).
     const trend = useMemo(() => {
       const rates = (recentRuns ?? [])
-        .map((r) => r?.metrics?.passRate)
+        .map((r) => getRunPassRate(r))
         .filter((v): v is number => typeof v === 'number');
       return rates.reverse();
     }, [recentRuns]);
@@ -262,7 +228,7 @@ const BenchmarkCard = memo<BenchmarkCardProps>(
                 </Button>
               </WorkspaceLink>
             </Flexbox>
-          ) : bestRate !== undefined ? (
+          ) : bestRate !== undefined || latestRun ? (
             <Flexbox
               horizontal
               align={'center'}
@@ -270,7 +236,9 @@ const BenchmarkCard = memo<BenchmarkCardProps>(
               justify={'space-between'}
             >
               <Flexbox gap={4}>
-                <span className={styles.metricValue}>{(bestRate * 100).toFixed(0)}%</span>
+                <span className={styles.metricValue}>
+                  {bestRate === undefined ? '—' : `${(bestRate * 100).toFixed(0)}%`}
+                </span>
                 <Flexbox horizontal align={'center'} gap={8}>
                   <Text color={cssVar.colorTextTertiary} fontSize={12}>
                     {t('benchmark.card.bestPassRate')}

@@ -1,108 +1,72 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Button, confirmModal, Progress, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
-import { Play, RotateCcw } from 'lucide-react';
-import { memo, useState } from 'react';
+import { Skeleton } from '@lobehub/ui/base-ui';
+import { ListChecks } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
 import AsyncBoundary from '@/components/AsyncBoundary';
-import { RouteLoading } from '@/components/Skeleton/RouteSegment';
+import EvalEmpty from '@/features/Eval/components/EvalEmpty';
+import EvalPage from '@/features/Eval/components/EvalPage';
+import EvalSection from '@/features/Eval/components/EvalSection';
+import { StatGrid } from '@/features/Eval/components/StatTile';
 import { runSelectors, useEvalStore } from '@/store/eval';
 
-import { createBatchResumeModal } from './BatchResumeModal';
 import CaseResultsTable from './CaseResultsTable';
 import BenchmarkCharts from './Charts/BenchmarkCharts';
-import IdleState from './IdleState';
-import PendingState from './PendingState';
 import { getResumeTarget } from './resumeTarget';
 import RunHeader from './RunHeader';
-import RunningState from './RunningState';
-import StatsCards from './StatsCards';
+import RunProgress from './RunProgress';
+import RunStats from './RunStats';
 
 const POLLING_INTERVAL = 3000;
+const FINISHED = new Set(['completed', 'failed', 'aborted']);
 
-const styles = createStaticStyles(({ css }) => ({
-  panel: css`
-    overflow: hidden;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorBgContainer};
-  `,
-  panelBody: css`
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    padding: 20px;
-  `,
-  panelHeader: css`
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
+const RunPageSkeleton = () => (
+  <EvalPage
+    header={
+      <Flexbox gap={12}>
+        <Skeleton height={14} width={120} />
+        <Skeleton height={28} width={320} />
+        <Skeleton height={16} width={480} />
+      </Flexbox>
+    }
+  >
+    <StatGrid>
+      {Array.from({ length: 6 }, (_, i) => (
+        <Skeleton height={78} key={i} radius={12} width="100%" />
+      ))}
+    </StatGrid>
+    <Skeleton height={280} radius={12} width="100%" />
+    <Skeleton height={360} radius={12} width="100%" />
+  </EvalPage>
+);
 
-    padding-block: 12px;
-    padding-inline: 20px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-  `,
-  panelLabel: css`
-    font-size: ${cssVar.fontSizeSM};
-    font-weight: 500;
-    color: ${cssVar.colorTextSecondary};
-  `,
-  stateBody: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    min-height: 430px;
-    padding: 20px;
-  `,
-}));
-
-const RunDetail = memo(() => {
+const RunPage = () => {
   const { t } = useTranslation('eval');
   const { benchmarkId, runId } = useParams<{ benchmarkId: string; runId: string }>();
   const useFetchRunDetail = useEvalStore((s) => s.useFetchRunDetail);
   const useFetchRunResults = useEvalStore((s) => s.useFetchRunResults);
-  const retryRunErrors = useEvalStore((s) => s.retryRunErrors);
   const retryRunCase = useEvalStore((s) => s.retryRunCase);
   const resumeRunCase = useEvalStore((s) => s.resumeRunCase);
-  const batchResumeRunCases = useEvalStore((s) => s.batchResumeRunCases);
   const runDetail = useEvalStore(runSelectors.getRunDetailById(runId!));
   const runResults = useEvalStore(runSelectors.getRunResultsById(runId!));
   const isActive = useEvalStore(runSelectors.isRunActive(runId!));
-  const [retrying, setRetrying] = useState(false);
 
   const pollingConfig = { refreshInterval: isActive ? POLLING_INTERVAL : 0 };
-
   const { error, isLoading, mutate } = useFetchRunDetail(runId!, pollingConfig);
-  useFetchRunResults(runId!, pollingConfig);
+  const results = useFetchRunResults(runId!, pollingConfig);
 
-  const hasResults = !!runResults?.results?.length;
-  const isFinished =
-    runDetail?.status === 'completed' ||
-    runDetail?.status === 'failed' ||
-    runDetail?.status === 'aborted';
-
-  const metrics = runDetail?.metrics;
-  const completedCases = metrics?.completedCases ?? 0;
-  const totalCases = metrics?.totalCases ?? 0;
-  const progress = totalCases > 0 ? Math.round((completedCases / totalCases) * 100) : 0;
-  const showProgress = totalCases > 0 && progress < 100;
-  const errorCount = (metrics?.errorCases ?? 0) + (metrics?.timeoutCases ?? 0);
-  const canRetry = isFinished && errorCount > 0;
-
+  const resultList: any[] = runResults?.results ?? [];
+  const isFinished = !!runDetail && FINISHED.has(runDetail.status);
   const k = runDetail?.config?.k ?? 1;
-  const canBatchResume = (runResults?.results ?? []).some(
-    (result: any) => !!getResumeTarget(result, k),
-  );
+  const metrics = runDetail?.metrics;
+  const errorCount = (metrics?.errorCases ?? 0) + (metrics?.timeoutCases ?? 0);
+  const provider = runDetail?.config?.subjectModel
+    ? runDetail.config.subjectProvider
+    : runDetail?.config?.agentSnapshot?.provider || runDetail?.targetAgent?.provider;
 
-  // Skeleton → error → (resolved-null) blank, instead of a bare `return null`
-  // that flashed blank on the happy path and stayed permanently blank on a
-  // failed fetch (ux Read §1.1). A page-level failure gets a reason + Reload.
   return (
     <AsyncBoundary
       data={runDetail}
@@ -110,132 +74,64 @@ const RunDetail = memo(() => {
       errorVariant={'page'}
       isEmpty={!runDetail}
       isLoading={isLoading}
-      loading={<RouteLoading />}
+      loading={<RunPageSkeleton />}
       onRetry={() => mutate()}
     >
       {runDetail && (
-        <Flexbox gap={24} padding={24} style={{ margin: '0 auto', maxWidth: 1440, width: '100%' }}>
-          <RunHeader
-            benchmarkId={benchmarkId!}
-            hideStart={runDetail.status === 'idle'}
-            run={runDetail}
-          />
-
-          {/* Report panel (when finished) or state panel (when not finished) */}
+        <EvalPage
+          header={
+            <RunHeader
+              benchmarkId={benchmarkId!}
+              canBatchResume={resultList.some((r) => !!getResumeTarget(r, k))}
+              canRetryErrors={isFinished && errorCount > 0}
+              run={runDetail}
+            />
+          }
+        >
           {isFinished ? (
-            <section className={styles.panel}>
-              <header className={styles.panelHeader}>
-                <span className={styles.panelLabel}>{t('run.detail.report')}</span>
-              </header>
-              <div className={styles.panelBody}>
-                <StatsCards metrics={runDetail.metrics ?? undefined} />
-                {hasResults && (
-                  <BenchmarkCharts
-                    benchmarkId={benchmarkId!}
-                    results={runResults.results}
-                    runId={runId!}
-                  />
-                )}
-              </div>
-            </section>
+            <EvalSection title={t('run.detail.report')}>
+              <RunStats k={k} metrics={metrics} />
+              {resultList.length > 0 && (
+                <BenchmarkCharts benchmarkId={benchmarkId!} results={resultList} runId={runId!} />
+              )}
+            </EvalSection>
           ) : (
-            <section className={styles.panel}>
-              <header className={styles.panelHeader}>
-                <span className={styles.panelLabel}>{t('run.detail.report')}</span>
-              </header>
-              <div className={styles.stateBody}>
-                {runDetail.status === 'running' ? (
-                  <RunningState />
-                ) : runDetail.status === 'pending' ? (
-                  <PendingState hint={t('run.pending.hint')} />
-                ) : runDetail.status === 'external' ? (
-                  <PendingState hint={t('run.external.hint')} />
-                ) : (
-                  <IdleState run={runDetail} />
-                )}
-              </div>
-            </section>
+            <RunProgress results={resultList} run={runDetail} />
           )}
 
-          {/* Case Results (always shown when results exist) */}
-          {hasResults && (
-            <section className={styles.panel}>
-              <header className={styles.panelHeader}>
-                <span className={styles.panelLabel}>{t('run.detail.caseResults')}</span>
-                {(showProgress || canRetry || canBatchResume) && (
-                  <Flexbox horizontal align="center" gap={8}>
-                    {showProgress && (
-                      <>
-                        <Text fontSize={12} style={{ whiteSpace: 'nowrap' }} type={'secondary'}>
-                          {completedCases}/{totalCases} {t('run.detail.progressCases')}
-                        </Text>
-                        <Progress
-                          percent={progress}
-                          showInfo={false}
-                          size="small"
-                          status={isActive ? 'active' : undefined}
-                          style={{ margin: 0, width: 120 }}
-                        />
-                        <Text fontSize={12} type={'secondary'}>
-                          {progress}%
-                        </Text>
-                      </>
-                    )}
-                    {canBatchResume && (
-                      <Button
-                        icon={<Play size={14} />}
-                        size="small"
-                        onClick={() =>
-                          createBatchResumeModal({
-                            onConfirm: (targets) => batchResumeRunCases(runId!, targets),
-                            runId: runId!,
-                          })
-                        }
-                      >
-                        {t('run.actions.batchResume')}
-                      </Button>
-                    )}
-                    {canRetry && (
-                      <Button
-                        icon={<RotateCcw size={14} />}
-                        loading={retrying}
-                        size="small"
-                        onClick={() => {
-                          confirmModal({
-                            content: t('run.actions.retryErrors.confirm'),
-                            onOk: async () => {
-                              setRetrying(true);
-                              try {
-                                await retryRunErrors(runId!);
-                              } finally {
-                                setRetrying(false);
-                              }
-                            },
-                            title: t('run.actions.retryErrors'),
-                          });
-                        }}
-                      >
-                        {t('run.actions.retryErrors')}
-                      </Button>
-                    )}
-                  </Flexbox>
-                )}
-              </header>
+          <EvalSection count={resultList.length || undefined} title={t('run.detail.caseResults')}>
+            <AsyncBoundary
+              data={runResults ?? results.data}
+              error={results.error}
+              isEmpty={!results.error && resultList.length === 0}
+              isLoading={results.isLoading}
+              loading={<Skeleton height={360} radius={12} width="100%" />}
+              empty={
+                <EvalEmpty
+                  compact
+                  description={t('run.results.empty.desc')}
+                  icon={ListChecks}
+                  title={t('run.results.empty.title')}
+                />
+              }
+              onRetry={() => results.mutate()}
+            >
               <CaseResultsTable
                 benchmarkId={benchmarkId!}
                 k={k}
-                results={runResults.results}
+                provider={provider}
+                results={resultList}
                 runId={runId!}
                 runStatus={runDetail.status}
                 onResumeCase={(testCaseId, threadId) => resumeRunCase(runId!, testCaseId, threadId)}
                 onRetryCase={(testCaseId) => retryRunCase(runId!, testCaseId)}
               />
-            </section>
-          )}
-        </Flexbox>
+            </AsyncBoundary>
+          </EvalSection>
+        </EvalPage>
       )}
     </AsyncBoundary>
   );
-});
+};
 
-export default RunDetail;
+export default RunPage;

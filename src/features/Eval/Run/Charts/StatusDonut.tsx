@@ -23,7 +23,7 @@ const StatusDonut = memo<StatusDonutProps>(({ passedCases, failedCases, errorCas
 
   const colors = [
     theme.colorSuccess,
-    theme.colorFill,
+    theme.colorError,
     ...(errorCases > 0 ? [theme.colorWarning] : []),
   ];
 
