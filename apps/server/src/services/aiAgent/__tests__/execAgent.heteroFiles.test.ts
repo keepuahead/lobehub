@@ -23,7 +23,11 @@ const {
   mockIngestAttachment,
   mockPublishAgentRuntimeInit,
   mockPublishAgentRuntimeEnd,
+  mockIsStartupInterrupted,
+  mockMarkStartupInterrupted,
 } = vi.hoisted(() => ({
+  mockIsStartupInterrupted: vi.fn().mockResolvedValue(false),
+  mockMarkStartupInterrupted: vi.fn().mockResolvedValue(undefined),
   mockBuildRemoteDeviceHeteroContext: vi.fn().mockReturnValue('device context'),
   mockCreateOperationMetadata: vi.fn().mockResolvedValue(undefined),
   mockDeviceFindByDeviceId: vi.fn(),
@@ -51,6 +55,8 @@ vi.mock('@/server/modules/AgentRuntime/factory', () => ({
   createAgentStateManager: vi.fn(function () {
     return {
       createOperationMetadata: mockCreateOperationMetadata,
+      isInterrupted: mockIsStartupInterrupted,
+      markInterrupted: mockMarkStartupInterrupted,
     };
   }),
   createStreamEventManager: () => ({
@@ -999,6 +1005,76 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
         resumeSessionId: undefined,
       }),
     );
+  });
+
+  /** @example Equal request IDs cannot cancel another user or workspace's startup. */
+  it('isolates durable startup cancellation by authenticated owner and workspace', async () => {
+    await service.cancelHeterogeneousStartup('same-request');
+    /** @example The owner is taken from the service rather than client input. */
+    expect(mockMarkStartupInterrupted).toHaveBeenCalledWith(
+      'hetero_start:[null,"test-user-id","same-request"]',
+    );
+    const otherUser = new AiAgentService(mockDb, 'user-2');
+    await otherUser.cancelHeterogeneousStartup('same-request');
+    /** @example Another user writes a different interruption sentinel. */
+    expect(mockMarkStartupInterrupted).toHaveBeenCalledWith(
+      'hetero_start:[null,"user-2","same-request"]',
+    );
+    const workspaceService = new AiAgentService(mockDb, 'user-1', { workspaceId: 'workspace-1' });
+    await workspaceService.cancelHeterogeneousStartup('same-request');
+    /** @example Personal and workspace requests never share a sentinel. */
+    expect(mockMarkStartupInterrupted).toHaveBeenCalledWith(
+      'hetero_start:["workspace-1","user-1","same-request"]',
+    );
+  });
+
+  /** @example Stop recorded during the real placeholder INSERT prevents device dispatch. */
+  it('honors a durable startup cancellation after placeholder creation without HTTP abort', async () => {
+    // ROOT CAUSE:
+    // Electron protocol.handle constructs a new Request without the renderer
+    // abort signal. HTTP abort alone therefore let a delayed INSERT launch later.
+    // Read the scoped interrupt sentinel again after persistence and before dispatch.
+    mockMessageFindById.mockResolvedValue({
+      id: 'user-A',
+      role: 'user',
+      topicId: 'topic-1',
+      content: 'A',
+    });
+    Object.assign(heteroAgentConfig, {
+      agencyConfig: {
+        boundDeviceId: 'device-1',
+        executionTarget: 'device',
+        heterogeneousProvider: { type: 'codex' },
+      },
+      model: 'codex',
+      provider: 'codex',
+    });
+    mockIsStartupInterrupted.mockResolvedValue(false);
+    mockMessageCreate.mockImplementationOnce(async () => {
+      mockIsStartupInterrupted.mockResolvedValue(true);
+      return { id: 'assistant-message' };
+    });
+    try {
+      /** @example Cancellation is detected with no request AbortSignal at all. */
+      await expect(
+        service.execAgent({
+          agentId: 'agent-1',
+          appContext: { topicId: 'topic-1' },
+          parentMessageId: 'user-A',
+          prompt: 'A',
+          resume: true,
+          heterogeneousFreshSession: {
+            historyBoundaryMessageId: 'user-A',
+            systemContext: 'early',
+            startupRequestId: 'request-A',
+          },
+        }),
+      ).rejects.toThrow(/abort/i);
+      /** @example The delayed assistant placeholder never starts a native process. */
+      expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    } finally {
+      mockIsStartupInterrupted.mockResolvedValue(false);
+    }
   });
 
   /** @example An already-spawned sandbox remains owned by its existing lifecycle after request abort. */
