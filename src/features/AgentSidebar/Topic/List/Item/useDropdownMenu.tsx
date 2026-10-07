@@ -1,8 +1,7 @@
 import { AGENT_CHAT_TOPIC_URL } from '@lobechat/const';
 import type { ChatTopicStatus } from '@lobechat/types';
-import { type MenuProps } from '@lobehub/ui';
-import { copyToClipboard, Icon } from '@lobehub/ui';
-import { toast } from '@lobehub/ui';
+import { type DropdownItem } from '@lobehub/ui';
+import { copyToClipboard, Icon, toast  } from '@lobehub/ui';
 import {
   Archive,
   ArchiveRestore,
@@ -316,7 +315,7 @@ export const useTopicItemDropdownMenu = ({
         },
         sfSymbol: 'trash',
       },
-    ].filter(Boolean) as MenuProps['items'];
+    ].filter(Boolean) as DropdownItem[];
   }, [
     id,
     fav,

@@ -1,11 +1,10 @@
-import { CLASSNAMES } from '@lobehub/ui';
-import type { Theme } from '@lobehub/ui';
-import { css } from '@lobehub/ui';
+import type { LobeTheme } from '@lobehub/ui';
+import { CLASSNAMES, css  } from '@lobehub/ui';
 
 // fix ios input keyboard
 // overflow: hidden;
 // ref: https://zhuanlan.zhihu.com/p/113855026
-const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
+const genGlobalStyle = ({ token }: { prefixCls: string; token: LobeTheme }) => css`
   html,
   body,
   #__next {

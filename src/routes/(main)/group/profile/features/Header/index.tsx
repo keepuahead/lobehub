@@ -1,6 +1,6 @@
 'use client';
 
-import { Flexbox, Icon, type MenuProps } from '@lobehub/ui';
+import { type DropdownItem,Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles } from '@lobehub/ui';
 import { Crown, Sparkles, Users, UsersRound } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
@@ -107,7 +107,7 @@ const Header = memo(() => {
     if (newAgentId) setSelectedTabId(newAgentId);
   };
 
-  const addMenuItems = useMemo<MenuProps['items']>(
+  const addMenuItems = useMemo<DropdownItem[]>(
     () => [
       {
         icon: <Icon icon={Sparkles} />,
