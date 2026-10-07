@@ -4,14 +4,16 @@ import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
+import { AgentModel } from '@/database/models/agent';
+import { ProjectModel } from '@/database/models/project';
 import { GoalModel } from '@/database/models/goal';
 import { GoalGraphModel } from '@/database/models/goalGraph';
 import { MetricModel } from '@/database/models/metric';
 import { WidgetModel } from '@/database/models/widget';
 import { goals } from '@/database/schemas/goal';
-import { type GoalSubscriptionRow,goalSubscriptions } from '@/database/schemas/goalSubscription';
-import { metricPoints,metrics } from '@/database/schemas/metric';
-import { widgetRuns,widgets } from '@/database/schemas/widget';
+import { type GoalSubscriptionRow, goalSubscriptions } from '@/database/schemas/goalSubscription';
+import { metricPoints, metrics } from '@/database/schemas/metric';
+import { widgetRuns, widgets } from '@/database/schemas/widget';
 import { workspaceMembers } from '@/database/schemas/workspace';
 import type { LobeChatDatabase } from '@/database/type';
 
@@ -57,6 +59,16 @@ export class GoalSubscriptionService {
   private async goal(db: LobeChatDatabase, id: string, manage = false) {
     const goal = await new GoalModel(db, this.userId, this.workspaceId).lockById(id);
     if (!goal) throw unavailable();
+    if (
+      goal.projectId &&
+      !(await new ProjectModel(db, this.userId, this.workspaceId).findById(goal.projectId))
+    )
+      throw unavailable();
+    if (
+      goal.agentId &&
+      !(await new AgentModel(db, this.userId, this.workspaceId).findById(goal.agentId))
+    )
+      throw unavailable();
     if (this.workspaceId) {
       const [member] = await db
         .select()
