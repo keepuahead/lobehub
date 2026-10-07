@@ -56,7 +56,7 @@ const RunCreateFooter: FC<FooterProps> = ({ loading, onCreateAndStart, onCreateO
           {t('run.create.createOnly')}
         </Button>
         <DropdownMenu items={menuItems}>
-          <Button icon={<ChevronDown size={14} />} loading={loading} type="primary" />
+          <Button icon={<ChevronDown size={14} />} loading={loading} />
         </DropdownMenu>
       </Flexbox>
     </ModalFooter>

@@ -16,15 +16,16 @@ import {
 import { Form, useForm, useWatch } from '@lobehub/ui/base-ui/form';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { SquareArrowOutUpRight } from 'lucide-react';
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FC, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
-import { agentService } from '@/services/agent';
 import { useEvalStore } from '@/store/eval';
+
+import { type AgentOption, useAgentOptions } from '../../hooks/useAgentOptions';
 
 const MAX_TIMEOUT_MINUTES = 240;
 
@@ -41,14 +42,6 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextQuaternary};
   `,
 }));
-
-interface AgentOption {
-  avatar?: string | null;
-  backgroundColor?: string | null;
-  description?: string | null;
-  id: string;
-  title?: string | null;
-}
 
 export interface RunEditContentProps {
   formId: string;
@@ -73,8 +66,6 @@ const RunEditContent: FC<RunEditContentProps> = ({ formId, onLoadingChange, run 
   const { benchmarkId } = useParams<{ benchmarkId: string }>();
   const updateRun = useEvalStore((s) => s.updateRun);
   const datasetList = useEvalStore((s) => s.datasetList);
-  const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
 
   const canChangeConfig = run?.status === 'idle';
   const isFinished = run?.status === 'completed';
@@ -84,14 +75,7 @@ const RunEditContent: FC<RunEditContentProps> = ({ formId, onLoadingChange, run 
     [datasetList, run?.datasetId],
   );
 
-  useEffect(() => {
-    if (!canChangeConfig) return;
-    setLoadingAgents(true);
-    agentService
-      .queryAgents()
-      .then((list) => setAgents(list as AgentOption[]))
-      .finally(() => setLoadingAgents(false));
-  }, [canChangeConfig]);
+  const { agents, loadingAgents } = useAgentOptions(canChangeConfig);
 
   const inboxAgent: AgentOption = useMemo(
     () => ({

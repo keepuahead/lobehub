@@ -6,6 +6,8 @@ import { type FC, memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 
 import { ArticleSkeleton } from '@/components/Skeleton';
+import { useClientDataSWR } from '@/libs/swr';
+import { evalKeys } from '@/libs/swr/keys';
 import { agentEvalService } from '@/services/agentEval';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -39,42 +41,42 @@ const BatchResumeContent: FC<BatchResumeContentProps> = ({
   submitter,
 }) => {
   const { t } = useTranslation('eval');
-  const [cases, setCases] = useState<ResumableCase[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const { data, isLoading: loading } = useClientDataSWR(evalKeys.resumableCases(runId), () =>
+    agentEvalService.getResumableCases(runId),
+  );
+  const cases = useMemo<ResumableCase[]>(() => data ?? [], [data]);
+  // `null` until the user touches a checkbox: every resumable case starts
+  // selected, derived from the fetched list rather than copied into state.
+  const [pickedIds, setPickedIds] = useState<string[] | null>(null);
   const [pageSize, setPageSize] = useState(10);
 
-  useEffect(() => {
-    setLoading(true);
-    agentEvalService
-      .getResumableCases(runId)
-      .then((data) => {
-        setCases(data);
-        setSelectedIds(data.filter((c) => c.canResume).map((c) => c.testCaseId));
-      })
-      .finally(() => setLoading(false));
-  }, [runId]);
+  const resumableCases = useMemo(() => cases.filter((c) => c.canResume), [cases]);
+  const selectedIds = useMemo(
+    () => pickedIds ?? resumableCases.map((c) => c.testCaseId),
+    [pickedIds, resumableCases],
+  );
 
   useEffect(() => {
     onSelectionChange(selectedIds.length);
   }, [onSelectionChange, selectedIds]);
 
-  const resumableCases = useMemo(() => cases.filter((c) => c.canResume), [cases]);
   const allSelected = selectedIds.length === resumableCases.length && resumableCases.length > 0;
   const indeterminate = selectedIds.length > 0 && selectedIds.length < resumableCases.length;
 
   const handleToggleAll = useCallback(
     (checked: boolean) => {
-      setSelectedIds(checked ? resumableCases.map((c) => c.testCaseId) : []);
+      setPickedIds(checked ? resumableCases.map((c) => c.testCaseId) : []);
     },
     [resumableCases],
   );
 
-  const handleToggleRow = useCallback((testCaseId: string, checked: boolean) => {
-    setSelectedIds((prev) =>
-      checked ? [...prev, testCaseId] : prev.filter((id) => id !== testCaseId),
-    );
-  }, []);
+  const handleToggleRow = useCallback(
+    (testCaseId: string, checked: boolean) => {
+      const prev = selectedIds;
+      setPickedIds(checked ? [...prev, testCaseId] : prev.filter((id) => id !== testCaseId));
+    },
+    [selectedIds],
+  );
 
   const confirm = useCallback(async () => {
     if (selectedIds.length === 0) return;

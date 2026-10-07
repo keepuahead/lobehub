@@ -17,15 +17,16 @@ import { Form, useForm, useWatch } from '@lobehub/ui/base-ui/form';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { SquareArrowOutUpRight } from 'lucide-react';
 import pMap from 'p-map';
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
 import ModelMultiSelect, { fromTargetKey } from '@/features/Eval/components/ModelMultiSelect';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
-import { agentService } from '@/services/agent';
 import { useEvalStore } from '@/store/eval';
+
+import { type AgentOption, useAgentOptions } from '../../hooks/useAgentOptions';
 
 const DEFAULT_MAX_STEPS = 100;
 const DEFAULT_TIMEOUT_MINUTES = 30;
@@ -75,14 +76,6 @@ interface RunCreateFormValues {
   timeoutMinutes?: number | null;
 }
 
-interface AgentOption {
-  avatar?: string | null;
-  backgroundColor?: string | null;
-  description?: string | null;
-  id: string;
-  title?: string | null;
-}
-
 export interface RunCreateContentProps {
   benchmarkId: string;
   datasetId?: string;
@@ -124,16 +117,7 @@ const RunCreateContent: FC<RunCreateContentProps> = ({
   const kValue = useWatch(form, 'k') ?? 1;
   const subjectCount = useWatch(form, 'subjects')?.length ?? 0;
 
-  const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
-
-  useEffect(() => {
-    setLoadingAgents(true);
-    agentService
-      .queryAgents()
-      .then((list) => setAgents(list as AgentOption[]))
-      .finally(() => setLoadingAgents(false));
-  }, []);
+  const { agents, loadingAgents } = useAgentOptions();
 
   const inboxAgent: AgentOption = useMemo(
     () => ({

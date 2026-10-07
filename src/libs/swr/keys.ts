@@ -762,6 +762,8 @@ export const discoverKeys = {
 
 // ---- agent eval ---------------------------------------------------------
 export const evalKeys = {
+  /** Agents a run can target, for the run create / edit pickers. */
+  agentOptions: def('eval:agentOptions', () => ['eval:agentOptions']),
   benchmarkDetail: def('eval:benchmarkDetail', (id: string) => ['eval:benchmarkDetail', id]),
   benchmarks: def('eval:benchmarks', () => ['eval:benchmarks']),
   datasetDetail: def('eval:datasetDetail', (id: string) => ['eval:datasetDetail', id]),
@@ -774,6 +776,7 @@ export const evalKeys = {
     'eval:replayComparison',
     runId,
   ]),
+  resumableCases: def('eval:resumableCases', (runId: string) => ['eval:resumableCases', runId]),
   runDetail: def('eval:runDetail', (id: string) => ['eval:runDetail', id]),
   runResults: def('eval:runResults', (id: string) => ['eval:runResults', id]),
   runs: def('eval:runs', (benchmarkId?: string) => ['eval:runs', benchmarkId]),
