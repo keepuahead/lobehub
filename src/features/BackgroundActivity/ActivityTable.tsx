@@ -21,6 +21,7 @@ import {
   activityLocation,
   formatCpu,
   formatMemory,
+  groupByConversation,
   processTree,
   refreshActivities,
   useActivities,
@@ -308,9 +309,7 @@ export default function ActivityTable() {
         <Skeleton.Text rows={3} />
       </Flexbox>
     );
-  const groups = [...new Set(state.activities.map((row) => row.topicId))].sort(
-    (a, b) => Number(a === undefined) - Number(b === undefined),
-  );
+  const conversations = groupByConversation(state.activities);
   return (
     <Flexbox>
       {state.error && (
@@ -347,16 +346,14 @@ export default function ActivityTable() {
             <span className={tableStyles.headNum}>{t('backgroundActivity.cpu')}</span>
             <span />
           </div>
-          {groups.map((group) => {
-            const activities = state.activities.filter((row) => row.topicId === group);
-            const agentId = activities.find((row) => row.agentId)?.agentId;
+          {conversations.map(({ activities, agentId, key, topicId }) => {
             return (
-              <div key={group ?? 'shared'}>
+              <div key={key}>
                 <div className={tableStyles.group}>
-                  {group ? (
+                  {topicId ? (
                     <>
                       {!agentId && <Icon icon={MessageSquareIcon} size={13} />}
-                      <ConversationTitle agentId={agentId} topicId={group} />
+                      <ConversationTitle agentId={agentId} topicId={topicId} />
                     </>
                   ) : (
                     <>

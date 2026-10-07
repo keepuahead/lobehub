@@ -56,6 +56,38 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
   return [...groups.values()];
 };
 
+export interface ActivityConversation {
+  activities: Activity[];
+  agentId?: string;
+  /** Unique per topic and owning agent; `shared` for activities no conversation owns. */
+  key: string;
+  topicId?: string;
+}
+
+/**
+ * Activities by the conversation that owns them. A group topic holds several
+ * member agents, each the owner of its own commands, so the owner is the topic
+ * AND the agent — a topic alone would file every member's commands under the
+ * first one. Unowned activities come last.
+ */
+export const groupByConversation = (activities: Activity[]): ActivityConversation[] => {
+  const conversations = new Map<string, ActivityConversation>();
+  for (const activity of activities) {
+    const { topicId } = activity;
+    const agentId = topicId ? activity.agentId : undefined;
+    const key = topicId ? (agentId ? `${topicId}:${agentId}` : topicId) : 'shared';
+    let conversation = conversations.get(key);
+    if (!conversation) {
+      conversation = { activities: [], agentId, key, topicId };
+      conversations.set(key, conversation);
+    }
+    conversation.activities.push(activity);
+  }
+  return [...conversations.values()].sort(
+    (a, b) => Number(a.topicId === undefined) - Number(b.topicId === undefined),
+  );
+};
+
 /** Workspace id → its URL slug, or undefined when the user cannot reach that workspace. */
 export type WorkspaceSlugOf = (workspaceId: string) => string | undefined;
 

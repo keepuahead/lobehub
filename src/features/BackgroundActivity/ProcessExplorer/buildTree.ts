@@ -1,7 +1,13 @@
 import type { AppProcessRow } from '@lobechat/electron-client-ipc';
 import type { TreeDataNode } from '@lobehub/ui/base-ui';
 
-import { type Activity, activityLocation, type ProcessRow, type WorkspaceSlugOf } from '../state';
+import {
+  type Activity,
+  activityLocation,
+  groupByConversation,
+  type ProcessRow,
+  type WorkspaceSlugOf,
+} from '../state';
 
 export type SortKey = 'cpu' | 'memory';
 
@@ -126,10 +132,8 @@ export const buildProcessTree = ({
     values.some((value) => value !== undefined && String(value).toLowerCase().includes(needle));
   const memoryLimit = Math.min(2048, totalMemoryMB * 0.15 || 2048);
 
-  const topics = [...new Set(activities.map((row) => row.topicId))];
-  const conversations: Draft[] = topics.flatMap((topicId) => {
-    const topicActivities = activities.filter((row) => row.topicId === topicId);
-    const agentId = topicId ? topicActivities.find((row) => row.agentId)?.agentId : undefined;
+  const conversations: Draft[] = groupByConversation(activities).flatMap((conversation) => {
+    const { activities: topicActivities, agentId, topicId } = conversation;
     const agent = agentId && agentTitle(agentId);
     const topic = topicId ? (topicTitle(topicId) ?? labels.conversation) : labels.shared;
     const title = agent ? `${agent} / ${topic}` : topic;
@@ -160,7 +164,7 @@ export const buildProcessTree = ({
     return [
       {
         children,
-        key: `conversation:${topicId ?? 'shared'}`,
+        key: `conversation:${conversation.key}`,
         row: {
           ...sum(children.map((c) => c.row)),
           agentId,
