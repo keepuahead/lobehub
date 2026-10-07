@@ -44,6 +44,17 @@ const safeSegment = (value: string): string => value.replaceAll(/[^\w-]/g, '') |
 /** A command that starts with an `lh`/`lobe`/`lobehub` invocation (keyword + boundary). */
 const SIMPLE_LH_PREFIX = /^\s*(?:lh|lobe|lobehub)(?=\s|$)/;
 
+/**
+ * The CLI named anywhere in a command as a standalone word — `echo …; lh …`,
+ * `if lh whoami`, `$x = lh …`, a loop body — not only at its start. Same rule
+ * as the cloud sandbox's `isLhCommand`, so a command shape that authenticates
+ * there authenticates on a device too. Erring permissive costs one unused
+ * credential on a command that merely mentions `lh`; a miss costs a broken
+ * one. Paths and longer names (`./lh`, `lobe-chat`, `app.lobehub.com`) are not
+ * matches.
+ */
+const MENTIONS_LH = /(?<![\w./~-])(?:lh|lobe|lobehub)(?![\w./-])/;
+
 export default class ShellCommandCtr extends ControllerModule {
   static override readonly groupName = 'shellCommand';
 
@@ -284,7 +295,23 @@ export default class ShellCommandCtr extends ControllerModule {
       }
     }
 
-    if (!params.sandbox) return runCommand(params, { logger, processManager, spawnProcess });
+    if (!params.sandbox) {
+      // A command that reaches the CLI later in its text gets the same
+      // environment. Without it, `lh` fell back to the device's own stored
+      // login — on most devices missing or long expired — and failed with "No
+      // authentication found" or `invalid_grant`, alternating with successes
+      // depending only on how the model happened to start each command.
+      //
+      // Deliberately gated on the text rather than given to every command: the
+      // environment carries the signed-in session's token, and an unrelated
+      // `npm install` or build must not hand it to third-party code.
+      const cliCtr = this.app.getController(CliCtr);
+      if (cliCtr && MENTIONS_LH.test(params.command)) {
+        const env = await cliCtr.buildCliEnv(params.env);
+        return runCommand({ ...params, env }, { logger, processManager, spawnProcess });
+      }
+      return runCommand(params, { logger, processManager, spawnProcess });
+    }
 
     // Sandboxed run. The policy is scoped to the run's working directory, so
     // without one there is nothing to scope to — refuse rather than fall back

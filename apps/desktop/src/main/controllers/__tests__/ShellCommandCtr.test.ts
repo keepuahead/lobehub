@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import type * as FsPromises from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 
@@ -29,7 +30,7 @@ vi.mock('node:child_process', () => ({
 // The shared runner checks cwd exists before spawning; `spawn` is mocked, so
 // treat the fixture cwd (`/repo`) as a real directory.
 vi.mock('node:fs/promises', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('node:fs/promises')>()),
+  ...(await importOriginal<typeof FsPromises>()),
   stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
 }));
 
@@ -290,6 +291,45 @@ describe('ShellCommandCtr (thin wrapper)', () => {
       expect(mockChildProcess.kill).not.toHaveBeenCalled();
     });
 
+    it.each([
+      [
+        'a command that only reaches lh later',
+        'echo "=== config ==="; lh provider config deepseek --show',
+      ],
+      ['a condition', 'if lh whoami >/dev/null 2>&1; then echo AUTH_OK; else echo AUTH_FAIL; fi'],
+      ['a loop', 'for id in a b; do lh memory delete context $id --yes; done'],
+      ['a command substitution', 'IDS=$(lh file list -L 500 2>&1 | grep -oE "^file_[A-Za-z0-9]+")'],
+      ['a PowerShell assignment', '$raw = lh doc view docs_x --json'],
+    ])('injects the CLI env into %s', async (_, command) => {
+      exitWith(0);
+
+      await ctr.handleRunCommand({ command, env: { DS_KEY: 'sk-real-secret' } });
+
+      expect(mockCliCtr.buildCliEnv).toHaveBeenCalledWith(
+        expect.objectContaining({ DS_KEY: 'sk-real-secret' }),
+      );
+      const options = mockSpawn.mock.calls[0][2];
+      expect(options.env).toMatchObject({
+        DS_KEY: 'sk-real-secret',
+        LOBEHUB_JWT: 'jwt-token',
+        LOBEHUB_SERVER: 'https://app.example.com',
+      });
+      expect(options.env.PATH.split(delimiter)[0]).toBe('/cli/bin');
+    });
+
+    it.each([
+      ['an unrelated install', 'npm install && npm run build'],
+      ['a path that merely contains lh', 'cat ./lh/notes.md ~/lh-backup.txt'],
+      ['a longer name', 'cd ~/code/lobe-chat && git pull'],
+    ])('keeps the session token away from %s', async (_, command) => {
+      exitWith(0);
+
+      await ctr.handleRunCommand({ command });
+
+      expect(mockCliCtr.buildCliEnv).not.toHaveBeenCalled();
+      expect(mockSpawn.mock.calls[0][2].env?.LOBEHUB_JWT).not.toBe('jwt-token');
+    });
+
     it('keeps lh out of the sandbox so the injected credentials still reach it', async () => {
       exitWith(0);
 
@@ -358,6 +398,9 @@ describe('ShellCommandCtr (thin wrapper)', () => {
         ['-c', 'echo test'],
         expect.anything(),
       );
+      // Only a command that starts with `lh` leaves the fence with credentials;
+      // anything else sandboxed never sees them.
+      expect(mockCliCtr.buildCliEnv).not.toHaveBeenCalled();
     });
 
     it('refuses a sandboxed run with no working directory to confine', async () => {
