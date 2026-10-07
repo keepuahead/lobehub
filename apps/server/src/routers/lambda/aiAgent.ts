@@ -1521,7 +1521,6 @@ const AgentStreamEventSchema = z.object({
     'stream_end',
     'visible_output_end',
     'stream_retry',
-    'session_title',
     'tool_start',
     'tool_end',
     'tool_execute',

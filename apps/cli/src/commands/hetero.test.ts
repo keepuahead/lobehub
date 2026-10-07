@@ -17,12 +17,12 @@ const {
   mockCreatePiRpcAgentHandle,
   mockResolveHeteroSpawnCommand,
   mockSpawnAgent,
-  mockSpawnDshSdkSession,
+  mockSpawnDshAcpSession,
 } = vi.hoisted(() => ({
   mockCreatePiRpcAgentHandle: vi.fn(),
   mockResolveHeteroSpawnCommand: vi.fn(),
   mockSpawnAgent: vi.fn(),
-  mockSpawnDshSdkSession: vi.fn(),
+  mockSpawnDshAcpSession: vi.fn(),
 }));
 const { mockGetTrpcClient, mockHeteroFinishMutate, mockHeteroIngestMutate } = vi.hoisted(() => ({
   mockGetTrpcClient: vi.fn(),
@@ -35,7 +35,7 @@ const { mockGetTrpcClient, mockHeteroFinishMutate, mockHeteroIngestMutate } = vi
 vi.mock('@lobechat/heterogeneous-agents/spawn', async (importOriginal) => ({
   ...(await importOriginal<typeof HeteroSpawn>()),
   spawnAgent: mockSpawnAgent,
-  spawnDshSdkSession: mockSpawnDshSdkSession,
+  spawnDshAcpSession: mockSpawnDshAcpSession,
 }));
 
 vi.mock('@lobechat/heterogeneous-agents/resolveCliCommand', () => ({
@@ -130,7 +130,7 @@ describe('hetero exec command', () => {
     );
     mockCreatePiRpcAgentHandle.mockReset();
     mockSpawnAgent.mockReset();
-    mockSpawnDshSdkSession.mockReset();
+    mockSpawnDshAcpSession.mockReset();
     mockHeteroIngestMutate.mockReset();
     mockHeteroFinishMutate.mockReset();
     mockGetTrpcClient.mockReset();
@@ -446,7 +446,7 @@ describe('hetero exec command', () => {
     );
   });
 
-  it('runs DeepSeek Harness through its dsh CLI sdk-profile session', async () => {
+  it('runs DeepSeek Harness through its dsh CLI acp-profile session', async () => {
     const dispose = vi.fn().mockResolvedValue(undefined);
     const prompt = vi.fn(async function* () {
       yield {
@@ -460,7 +460,7 @@ describe('hetero exec command', () => {
         type: 'agent_runtime_end',
       };
     });
-    mockSpawnDshSdkSession.mockResolvedValue({ dispose, prompt });
+    mockSpawnDshAcpSession.mockReturnValue({ dispose, prompt, sessionId: 'dsh-session-1' });
 
     await runCmd([
       'hetero',
@@ -475,12 +475,11 @@ describe('hetero exec command', () => {
       'deepseek-chat',
     ]);
 
-    expect(mockSpawnDshSdkSession).toHaveBeenCalledWith(
+    expect(mockSpawnDshAcpSession).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/work',
         model: 'deepseek-chat',
-        provider: 'deepseek-official',
-        sessionId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+        resumeSessionId: undefined,
       }),
     );
     expect(prompt).toHaveBeenCalledWith('say hi');
@@ -489,9 +488,42 @@ describe('hetero exec command', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('resumes the harness session named by --resume and reports it on finish', async () => {
+    vi.spyOn(HeteroTraceRecorder.prototype, 'finalize').mockResolvedValue(undefined);
+    mockSpawnDshAcpSession.mockReturnValue({
+      dispose: vi.fn().mockResolvedValue(undefined),
+      prompt: vi.fn(async function* () {
+        yield { data: {}, operationId: 'op-1', type: 'agent_runtime_end' };
+      }),
+      sessionId: 'dsh-prev',
+    });
+
+    await runCmd([
+      'hetero',
+      'exec',
+      '--type',
+      'deepseek-harness',
+      '--prompt',
+      'next',
+      '--resume',
+      'dsh-prev',
+      '--topic',
+      'topic-1',
+      '--operation-id',
+      'op-1',
+    ]);
+
+    expect(mockSpawnDshAcpSession).toHaveBeenCalledWith(
+      expect.objectContaining({ resumeSessionId: 'dsh-prev' }),
+    );
+    expect(mockHeteroFinishMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ result: 'success', sessionId: 'dsh-prev' }),
+    );
+  });
+
   it('passes the conversation identity into a server-ingest DeepSeek Harness run', async () => {
     vi.spyOn(HeteroTraceRecorder.prototype, 'finalize').mockResolvedValue(undefined);
-    mockSpawnDshSdkSession.mockResolvedValue({
+    mockSpawnDshAcpSession.mockReturnValue({
       dispose: vi.fn().mockResolvedValue(undefined),
       prompt: vi.fn(async function* () {
         yield { data: {}, operationId: 'op-1', type: 'agent_runtime_end' };
@@ -511,7 +543,7 @@ describe('hetero exec command', () => {
       'op-1',
     ]);
 
-    expect(mockSpawnDshSdkSession).toHaveBeenCalledWith(
+    expect(mockSpawnDshAcpSession).toHaveBeenCalledWith(
       expect.objectContaining({
         env: { LOBEHUB_OPERATION_ID: 'op-1', LOBEHUB_TOPIC_ID: 'topic-1' },
       }),
@@ -523,7 +555,7 @@ describe('hetero exec command', () => {
     const finalize = vi
       .spyOn(HeteroTraceRecorder.prototype, 'finalize')
       .mockResolvedValue(undefined);
-    mockSpawnDshSdkSession.mockResolvedValue({
+    mockSpawnDshAcpSession.mockReturnValue({
       dispose: vi.fn().mockResolvedValue(undefined),
       prompt: vi.fn(async function* () {
         yield { data: {}, operationId: 'op-dsh', type: 'stream_start' };
@@ -550,7 +582,7 @@ describe('hetero exec command', () => {
       markKilled = resolve;
     });
     const dispose = vi.fn(async () => markKilled());
-    mockSpawnDshSdkSession.mockResolvedValue({
+    mockSpawnDshAcpSession.mockReturnValue({
       dispose,
       // A long-running harness: one event, then nothing until it is disposed.
       prompt: vi.fn(async function* () {
