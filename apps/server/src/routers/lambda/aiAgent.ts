@@ -1264,6 +1264,7 @@ const ExecAgentSchema = z
     heterogeneousFreshSession: z
       .object({
         historyBoundaryMessageId: z.string().min(1),
+        startupRequestId: z.string().min(8).max(128).optional(),
         systemContext: z.string().optional(),
       })
       .optional(),
@@ -2486,6 +2487,13 @@ export const aiAgentRouter = router({
           message: `Failed to create client task thread: ${error.message}`,
         });
       }
+    }),
+
+  cancelHeterogeneousStartup: aiAgentWriteProcedure
+    .input(z.object({ requestId: z.string().min(8).max(128) }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.aiAgentService.cancelHeterogeneousStartup(input.requestId);
+      return { success: true };
     }),
 
   execAgent: aiAgentWriteProcedure.input(ExecAgentSchema).mutation(async (opts) => {

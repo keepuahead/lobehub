@@ -2,12 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { aiAgentService } from './aiAgent';
 
-const mocks = vi.hoisted(() => ({ execAgent: vi.fn(), llmExecutor: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  execAgent: vi.fn(),
+  llmExecutor: vi.fn(),
+  cancelStartup: vi.fn().mockResolvedValue({ success: true }),
+}));
 
 vi.mock('@/services/llmRelay', () => ({ buildLlmExecutorDeclaration: mocks.llmExecutor }));
 
 vi.mock('@/libs/trpc/client', () => ({
-  lambdaClient: { aiAgent: { execAgent: { mutate: mocks.execAgent } } },
+  lambdaClient: {
+    aiAgent: {
+      execAgent: { mutate: mocks.execAgent },
+      cancelHeterogeneousStartup: { mutate: mocks.cancelStartup },
+    },
+  },
 }));
 
 describe('aiAgentService.execAgentTask', () => {
@@ -42,5 +51,41 @@ describe('aiAgentService.execAgentTask', () => {
       expect.objectContaining({ llmExecutor }),
       undefined,
     );
+  });
+  /** @example Stop reaches the server even when a protocol proxy cannot abort HTTP. */
+  it('records startup cancellation without abandoning the fresh-session response', async () => {
+    // ROOT CAUSE:
+    // Aborting a proxied fetch only rejected the renderer promise; the backend
+    // could finish creating the placeholder and dispatch a device after Stop.
+    // A durable owner-scoped cancellation request must survive that transport.
+    const controller = new AbortController();
+    let finish: ((result: { success: boolean; operationId: string }) => void) | undefined;
+    mocks.execAgent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = aiAgentService.execAgentTask(
+      {
+        agentId: 'agt-1',
+        parentMessageId: 'user-A',
+        prompt: 'A',
+        heterogeneousFreshSession: { historyBoundaryMessageId: 'user-A', systemContext: 'early' },
+      },
+      { signal: controller.signal },
+    );
+    /** @example A request id is sent before the backend creates any operation. */
+    await vi.waitFor(() => expect(mocks.execAgent).toHaveBeenCalledOnce());
+    controller.abort();
+    finish?.({ success: false, operationId: 'cancelled-operation' });
+    const result = await pending;
+    const requestId = mocks.execAgent.mock.calls[0][0].heterogeneousFreshSession.startupRequestId;
+    /** @example Stop is an explicit authenticated mutation, not a lost fetch. */
+    expect(mocks.cancelStartup).toHaveBeenCalledWith({ requestId });
+    /** @example The server result remains available for late physical cancellation. */
+    expect(result.operationId).toBe('cancelled-operation');
+    /** @example The transport does not abandon the response on the same abort signal. */
+    expect(mocks.execAgent.mock.calls[0][1]?.signal).toBeUndefined();
   });
 });

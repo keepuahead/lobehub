@@ -56,6 +56,7 @@ import {
   resolveHeteroDispatchErrorType,
   supportsCloudHeterogeneousSandbox,
 } from '../helpers/heteroErrors';
+import { getHeteroStartupCancellationId } from '../helpers/heteroStartup';
 import { resolveDeviceWorkingDirectoryConfig } from '../resolveDeviceWorkingDirectory';
 import type {
   BindTopicWorkingDirectoryParams,
@@ -426,7 +427,14 @@ export const dispatchHeteroAgent = async (
    */
   const cancelIfRequested = async (): Promise<ExecAgentResult | undefined> => {
     // Other execution transports retain their existing completion/cancellation owner.
-    if (!input.signal?.aborted || dispatchOwner === 'other') return;
+    if (dispatchOwner === 'other') return;
+    const requestId = input.heterogeneousFreshSession?.startupRequestId;
+    const startupCancelled = requestId
+      ? await createAgentStateManager().isInterrupted(
+          getHeteroStartupCancellationId(deps.userId, requestId, deps.workspaceId),
+        )
+      : false;
+    if (!input.signal?.aborted && !startupCancelled) return;
 
     const confirmed =
       dispatchOwner === 'preparing' ||

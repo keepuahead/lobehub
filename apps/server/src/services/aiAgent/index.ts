@@ -34,6 +34,7 @@ import { TaskModel } from '@/database/models/task';
 import { ThreadModel } from '@/database/models/thread';
 import { TopicModel } from '@/database/models/topic';
 import { UserModel } from '@/database/models/user';
+import { createAgentStateManager } from '@/server/modules/AgentRuntime/factory';
 import { AgentService } from '@/server/services/agent';
 import { AgentDocumentsService } from '@/server/services/agentDocuments';
 import type {
@@ -44,7 +45,7 @@ import type {
   SubAgentBridgeParams,
 } from '@/server/services/agentRuntime';
 import { AgentRuntimeService } from '@/server/services/agentRuntime';
-import { getAbortError, throwIfAborted } from '@/server/services/agentRuntime/abort';
+import { getAbortError } from '@/server/services/agentRuntime/abort';
 // Imported from the module itself: tests mock the `agentRuntime` barrel.
 import {
   isComposerSupersedableTrigger,
@@ -61,6 +62,7 @@ import { MarketService } from '@/server/services/market';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
 import { createGraphAwareAgentFactory } from './helpers/agentFactory';
+import { getHeteroStartupCancellationId } from './helpers/heteroStartup';
 import {
   createGroupActionMemberBridgeHook,
   createThreadHooks,
@@ -541,6 +543,30 @@ export class AiAgentService {
     );
 
     return { agentId: resolvedAgentId, runAt: runAtDate.toISOString(), topicId: topic.id };
+  }
+
+  /**
+   * Records Stop while a fresh heterogeneous run is still creating its placeholder.
+   *
+   * Use when:
+   * - The caller has a startup request ID but no persisted operation ID yet.
+   *
+   * Expects:
+   * - This service's authenticated user and workspace own the request scope.
+   *
+   * Returns:
+   * - After the existing expiring interruption sentinel has been persisted.
+   *
+   * Call stack:
+   * aiAgent.cancelHeterogeneousStartup
+   *   -> AiAgentService.cancelHeterogeneousStartup
+   *     -> {@link getHeteroStartupCancellationId}
+   *     -> AgentStateManager.markInterrupted
+   */
+  async cancelHeterogeneousStartup(requestId: string): Promise<void> {
+    await createAgentStateManager().markInterrupted(
+      getHeteroStartupCancellationId(this.userId, requestId, this.workspaceId),
+    );
   }
 
   /**
@@ -1033,14 +1059,20 @@ export class AiAgentService {
       }
     };
     const throwIfExecutionAborted = async (stage: string) => {
-      if (!signal?.aborted) return;
+      const requestId = heterogeneousFreshSession?.startupRequestId;
+      const startupCancelled = requestId
+        ? await createAgentStateManager().isInterrupted(
+            getHeteroStartupCancellationId(this.userId, requestId, this.workspaceId),
+          )
+        : false;
+      if (!signal?.aborted && !startupCancelled) return;
 
       const error = getAbortError(signal, `Agent execution aborted during ${stage}`);
       await updateAbortedAssistantMessage(error.message);
       throw error;
     };
 
-    throwIfAborted(signal, 'Agent execution aborted before startup');
+    await throwIfExecutionAborted('startup');
 
     // Stages 1–2.5 — resolve the effective agent config for this run
     // (see `pipeline/resolveRunAgentConfig`).

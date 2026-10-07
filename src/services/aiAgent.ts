@@ -12,6 +12,7 @@ import type {
   ScheduleAgentRunResult,
   UserInterventionConfig,
 } from '@lobechat/types';
+import { nanoid } from '@lobechat/utils';
 
 import { canUseGatewayProtocolV2 } from '@/helpers/gatewayProtocol';
 import { lambdaClient } from '@/libs/trpc/client';
@@ -293,15 +294,43 @@ class AiAgentService {
     // endpoint); the server hands them over as `llm_execute`.
     const llmExecutor = buildLlmExecutorDeclaration();
 
-    return await lambdaClient.aiAgent.execAgent.mutate(
-      {
-        clientProtocol,
-        ...(llmExecutor && { llmExecutor }),
-        ...params,
-        streamFeatures: STREAM_FEATURES,
-      },
-      options,
-    );
+    const input = {
+      clientProtocol,
+      ...(llmExecutor && { llmExecutor }),
+      ...params,
+      streamFeatures: STREAM_FEATURES,
+    };
+    const signal = options?.signal;
+    if (!params.heterogeneousFreshSession || !signal) {
+      return await lambdaClient.aiAgent.execAgent.mutate(input, options);
+    }
+    signal.throwIfAborted();
+    const requestId = nanoid();
+    let cancellation: Promise<unknown> | undefined;
+    // NOTICE:
+    // Stop must reach startup even through a protocol proxy that loses HTTP abort.
+    // Electron 44.5.1 creates its protocol Request without a connected AbortSignal:
+    // `https://github.com/electron/electron/blob/v44.5.1/lib/browser/api/protocol.ts#L154-L160`.
+    // Keep the response for late physical cancellation; remove this extra request
+    // only when every supported transport reliably propagates startup cancellation.
+    const cancelStartup = () => {
+      cancellation = lambdaClient.aiAgent.cancelHeterogeneousStartup
+        .mutate({ requestId })
+        .catch((error) => console.error('[Gateway] startup cancellation failed:', error));
+    };
+    signal.addEventListener('abort', cancelStartup, { once: true });
+    try {
+      return await lambdaClient.aiAgent.execAgent.mutate({
+        ...input,
+        heterogeneousFreshSession: {
+          ...params.heterogeneousFreshSession,
+          startupRequestId: requestId,
+        },
+      });
+    } finally {
+      signal.removeEventListener('abort', cancelStartup);
+      await cancellation;
+    }
   }
 
   /**
