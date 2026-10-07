@@ -155,6 +155,7 @@ const listSchema = z.object({
   // misconfigured one cannot), false → its exact complement. Omitted leaves the
   // set unnarrowed.
   automated: z.boolean().optional(),
+  includeDisabledAutomation: z.boolean().optional(),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
   // Which timestamp orders the page, newest first. Defaults to creation time.

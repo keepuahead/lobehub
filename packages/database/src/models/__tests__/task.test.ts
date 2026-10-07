@@ -542,6 +542,31 @@ describe('TaskModel', () => {
       expect(rest.map((t) => t.id)).toEqual([c.id, b.id]);
     });
 
+    it('keeps switched-off configured automation in the management list but out of the runnable roll-up', async () => {
+      const model = new TaskModel(serverDB, userId);
+      const cron = await model.create({
+        automationMode: 'schedule',
+        instruction: 'Cron',
+        schedulePattern: '0 9 * * *',
+      });
+      const heartbeat = await model.create({
+        automationMode: 'heartbeat',
+        heartbeatInterval: 3600,
+        instruction: 'Heartbeat',
+      });
+      await model.update(cron.id, { automationMode: null });
+      await model.update(heartbeat.id, { automationMode: null });
+      await model.create({ instruction: 'Manual' });
+      const other = new TaskModel(serverDB, userId2);
+      await other.create({ instruction: 'Other owner', schedulePattern: '0 9 * * *' });
+      const management = await model.list({ automated: true, includeDisabledAutomation: true });
+      expect(management.total).toBe(2);
+      expect(management.tasks.map((item) => item.id).sort()).toEqual(
+        [cron.id, heartbeat.id].sort(),
+      );
+      expect((await model.list({ automated: true })).total).toBe(0);
+    });
+
     it('should split automated tasks from manual ones', async () => {
       const model = new TaskModel(serverDB, userId);
       const cron = await model.create({

@@ -139,7 +139,8 @@ export const getScheduledTaskViewOptions = (
 ): TaskListViewOptions => ({
   ...viewOptions,
   ...PAGINATED_COLLECTION_VIEW,
-  groupBy: 'automationMode',
+  groupBy: 'automationEnabled',
+  subGroupBy: 'none',
   hideCompleted: false,
 });
 
@@ -170,6 +171,18 @@ export const resolveTaskCollectionView = (
   collection: TaskCollection,
   viewMode: TaskViewMode,
 ): 'board' | 'list' => (collection !== 'scheduled' && viewMode === 'kanban' ? 'board' : 'list');
+
+export const getTaskCreateVisibility = (
+  collection: TaskCollection,
+  viewMode: TaskViewMode,
+  inlineCollapsed: boolean,
+) => {
+  const isList = resolveTaskCollectionView(collection, viewMode) === 'list';
+  return {
+    showAction: collection !== 'mine' && (inlineCollapsed || !isList),
+    showInline: collection !== 'mine' && isList && !inlineCollapsed,
+  };
+};
 
 const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
   const { t } = useTranslation('chat');
@@ -239,6 +252,7 @@ const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
   const scheduledSWR = useFetchScheduledTaskList({
     agentId,
     enabled: isScheduledCollection,
+    includeDisabledAutomation: true,
     limit: COLLECTION_PAGE_SIZE,
     offset: (collectionPage - 1) * COLLECTION_PAGE_SIZE,
     projectId,
@@ -281,22 +295,30 @@ const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
       const normalized = normalizeTaskListViewOptions(updater(viewOptions));
       const next = {
         ...normalized,
-        groupBy: normalized.groupBy === 'automationMode' ? 'status' : normalized.groupBy,
-        subGroupBy: normalized.subGroupBy === 'automationMode' ? 'none' : normalized.subGroupBy,
+        groupBy:
+          normalized.groupBy === 'automationMode' || normalized.groupBy === 'automationEnabled'
+            ? 'status'
+            : normalized.groupBy,
+        subGroupBy:
+          normalized.subGroupBy === 'automationMode' ||
+          normalized.subGroupBy === 'automationEnabled'
+            ? 'none'
+            : normalized.subGroupBy,
       };
       updateSystemStatus({ taskListViewOptions: next }, 'updateTaskListViewOptions');
     },
     [updateSystemStatus, viewOptions],
   );
 
+  const createVisibility = getTaskCreateVisibility(collection, viewMode, inlineCollapsed);
   const createActionBehavior = useMemo(
     () =>
       getTaskCreateActionBehavior({
         canCreateTask,
         inlineCollapsed,
-        viewMode,
+        viewMode: isBoardView ? 'kanban' : 'list',
       }),
-    [canCreateTask, inlineCollapsed, viewMode],
+    [canCreateTask, inlineCollapsed, isBoardView],
   );
 
   const handleCreateTask = useCallback(() => {
@@ -387,7 +409,7 @@ const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
         right={
           <Flexbox horizontal align={'center'} gap={4}>
             {isOrdinaryCollection && !agentId && !projectId && <TaskListVisibilityFilter />}
-            {isOrdinaryCollection && (inlineCollapsed || viewMode === 'kanban') && (
+            {createVisibility.showAction && (
               <ActionIcon
                 disabled={createActionBehavior.disabled}
                 icon={Plus}
@@ -440,6 +462,13 @@ const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
           paddingInline={16}
           wrapperStyle={{ flex: 1, overflowY: 'auto' }}
         >
+          {createVisibility.showInline && (
+            <CreateTaskInlineEntry
+              agentId={agentId}
+              lockAssignee={!!agentId}
+              projectId={projectId}
+            />
+          )}
           <TaskList
             data={isCollectionListInit || undefined}
             error={collectionSWR.error}
@@ -489,7 +518,7 @@ const AgentTasksPage = memo<AgentTasksPageProps>(({ agentId, projectId }) => {
           paddingInline={16}
           wrapperStyle={{ flex: 1, overflowY: 'auto' }}
         >
-          {!inlineCollapsed && (
+          {createVisibility.showInline && (
             <CreateTaskInlineEntry
               agentId={agentId}
               lockAssignee={!!agentId}

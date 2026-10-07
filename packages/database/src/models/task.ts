@@ -286,6 +286,8 @@ interface TaskListFilterOptions {
   automated?: boolean;
   /** Only tasks created by this user. */
   createdByUserId?: string;
+  /** Include configured automation whose switch is off, for the management list. */
+  includeDisabledAutomation?: boolean;
   parentTaskId?: string | null;
   projectId?: string;
   visibility?: 'private' | 'public';
@@ -392,6 +394,7 @@ export class TaskModel {
     assigneeUserId,
     automated,
     createdByUserId,
+    includeDisabledAutomation,
     parentTaskId,
     projectId,
     visibility,
@@ -401,7 +404,17 @@ export class TaskModel {
     if (assigneeAgentId) conditions.push(eq(tasks.assigneeAgentId, assigneeAgentId));
     if (assigneeUserId) conditions.push(eq(tasks.assigneeUserId, assigneeUserId));
     if (createdByUserId) conditions.push(eq(tasks.createdByUserId, createdByUserId));
-    if (automated === true) conditions.push(RUNNABLE_AUTOMATION);
+    if (automated === true) {
+      conditions.push(
+        includeDisabledAutomation
+          ? or(
+              isNotNull(tasks.automationMode),
+              and(isNotNull(tasks.schedulePattern), ne(tasks.schedulePattern, '')),
+              gt(tasks.heartbeatInterval, 0),
+            )!
+          : RUNNABLE_AUTOMATION,
+      );
+    }
     // `IS NOT TRUE`, not `NOT (…)`: nullable automation fields make the
     // runnable expression NULL for manual tasks, and WHERE would drop them.
     if (automated === false) conditions.push(sql`${RUNNABLE_AUTOMATION} IS NOT TRUE`);

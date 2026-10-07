@@ -336,21 +336,32 @@ export class TaskListSliceActionImpl {
     options: {
       agentId?: string;
       enabled?: boolean;
+      includeDisabledAutomation?: boolean;
       limit?: number;
       offset?: number;
       projectId?: string;
     } = {},
   ) => {
-    const { agentId, enabled = true, limit, offset, projectId } = options;
+    const {
+      agentId,
+      enabled = true,
+      includeDisabledAutomation = false,
+      limit,
+      offset,
+      projectId,
+    } = options;
     const scopeKey = projectId
       ? `${PROJECT_LIST_KEY_PREFIX}${projectId}`
       : (agentId ?? ALL_AGENTS_LIST_KEY);
     return useClientDataSWR(
-      enabled ? taskKeys.scheduledList(scopeKey, 'all', limit, offset) : null,
+      enabled
+        ? taskKeys.scheduledList(scopeKey, 'all', limit, offset, includeDisabledAutomation)
+        : null,
       async () =>
         this.fetchTaskList({
           ...(projectId ? { projectId } : agentId ? { assigneeAgentId: agentId } : {}),
           automated: true,
+          ...(includeDisabledAutomation ? { includeDisabledAutomation: true } : {}),
           limit,
           offset,
           orderBy: 'updatedAt',
