@@ -152,6 +152,7 @@ describe('FollowUpActionService.extract', () => {
       dbMock,
       TEST_USER,
       'custom-provider',
+      undefined,
     );
     expect(runtimeMock.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
