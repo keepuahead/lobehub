@@ -1,4 +1,4 @@
-import { AGENT_CHAT_TOPIC_URL } from '@lobechat/const';
+import { AGENT_CHAT_TOPIC_URL, GROUP_CHAT_TOPIC_URL } from '@lobechat/const';
 import { useSyncExternalStore } from 'react';
 
 import { isDesktop } from '@/const/version';
@@ -10,7 +10,7 @@ export type ProcessSnapshot = Awaited<
 export type ProcessRow = ProcessSnapshot['processes'][number];
 export interface Activity extends Pick<
   ProcessRow,
-  'rootId' | 'topicId' | 'agentId' | 'label' | 'messageId'
+  'rootId' | 'topicId' | 'agentId' | 'groupId' | 'label' | 'messageId' | 'workspaceId'
 > {
   cpuPercent: number | null;
   memoryMB: number;
@@ -27,7 +27,9 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
         rootId: row.rootId,
         topicId: row.topicId,
         agentId: row.agentId,
+        groupId: row.groupId,
         messageId: row.messageId,
+        workspaceId: row.workspaceId,
         label: row.label || row.name,
         memoryMB: 0,
         cpuPercent: null,
@@ -54,14 +56,32 @@ export const groupActivities = (snapshot: ProcessSnapshot): Activity[] => {
   return [...groups.values()];
 };
 
-/** The conversation an activity belongs to, scrolled to the message that started it. */
-export const activityLocation = ({
-  agentId,
-  messageId,
-  topicId,
-}: Pick<Activity, 'agentId' | 'messageId' | 'topicId'>) => {
-  if (!agentId || !topicId) return;
-  const path = AGENT_CHAT_TOPIC_URL(agentId, topicId);
+/** Workspace id → its URL slug, or undefined when the user cannot reach that workspace. */
+export type WorkspaceSlugOf = (workspaceId: string) => string | undefined;
+
+/**
+ * The conversation an activity belongs to, scrolled to the message that started
+ * it. A process outlives the scope it was launched from, so the path names that
+ * scope itself — the launching workspace's slug, or none for a personal run —
+ * and callers must navigate with `escape` rather than prefix the active one.
+ */
+export const activityLocation = (
+  {
+    agentId,
+    groupId,
+    messageId,
+    topicId,
+    workspaceId,
+  }: Pick<Activity, 'agentId' | 'groupId' | 'messageId' | 'topicId' | 'workspaceId'>,
+  slugOf: WorkspaceSlugOf,
+) => {
+  if (!topicId || (!groupId && !agentId)) return;
+  const slug = workspaceId ? slugOf(workspaceId) : undefined;
+  if (workspaceId && !slug) return;
+  const conversation = groupId
+    ? GROUP_CHAT_TOPIC_URL(groupId, topicId)
+    : AGENT_CHAT_TOPIC_URL(agentId!, topicId);
+  const path = slug ? `/${slug}${conversation}` : conversation;
   const hash = messageId ? encodeURIComponent(messageId) : undefined;
   return { hash, href: hash ? `${path}#${hash}` : path, path };
 };

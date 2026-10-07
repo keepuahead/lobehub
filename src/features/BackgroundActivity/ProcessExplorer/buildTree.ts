@@ -1,7 +1,7 @@
 import type { AppProcessRow } from '@lobechat/electron-client-ipc';
 import type { TreeDataNode } from '@lobehub/ui/base-ui';
 
-import { type Activity, activityLocation, type ProcessRow } from '../state';
+import { type Activity, activityLocation, type ProcessRow, type WorkspaceSlugOf } from '../state';
 
 export type SortKey = 'cpu' | 'memory';
 
@@ -43,6 +43,7 @@ export interface BuildTreeInput {
   sort: SortKey;
   topicTitle: (id: string) => string | undefined;
   totalMemoryMB: number;
+  workspaceSlug: WorkspaceSlugOf;
 }
 
 export const SECTION_BACKGROUND = 'section:background';
@@ -117,6 +118,7 @@ export const buildProcessTree = ({
   sort,
   topicTitle,
   totalMemoryMB,
+  workspaceSlug,
 }: BuildTreeInput) => {
   const needle = query.trim().toLowerCase();
   const matches = (...values: (number | string | undefined)[]) =>
@@ -141,7 +143,7 @@ export const buildProcessTree = ({
           row: {
             cpu: activity.cpuPercent,
             cpuHot: hot && (activity.cpuPercent ?? 0) >= 200,
-            href: activityLocation(activity)?.href,
+            href: activityLocation(activity, workspaceSlug)?.href,
             kind: 'activity',
             label: activity.label ?? '',
             memory: activity.memoryMB,

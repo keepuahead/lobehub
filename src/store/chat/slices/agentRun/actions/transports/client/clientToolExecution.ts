@@ -3,6 +3,7 @@ import { type BuiltinToolContext } from '@lobechat/types';
 import debug from 'debug';
 import { produce } from 'immer';
 
+import { getActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 // Import the state-taking resolver, NOT `@/helpers/parserPlaceholder` — that
 // module imports `useChatStore`, which would close a cycle back into this store
 // and leave the action classes undefined at module-eval time.
@@ -188,6 +189,7 @@ export class ClientToolExecutionActionImpl {
             topicId ?? operation?.context?.topicId,
             agentId ?? operation?.context?.agentId,
           ),
+          workspaceId: getActiveWorkspaceId() ?? undefined,
         };
 
         log('[ClientToolCall] execute:start', {

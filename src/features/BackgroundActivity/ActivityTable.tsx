@@ -12,7 +12,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useQueryRoute } from '@/hooks/useQueryRoute';
+import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useChatStore } from '@/store/chat';
 
 import { AgentName } from './AgentName';
@@ -26,6 +26,7 @@ import {
   useActivities,
 } from './state';
 import StopButton from './StopButton';
+import { useWorkspaceSlugOf } from './useWorkspaceSlugOf';
 
 export const topicName = (id?: string) => {
   if (!id) return undefined;
@@ -226,8 +227,9 @@ function ActivityRows({ activity, selected }: { activity: Activity; selected: bo
     setOpen(true);
     ref.current?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
-  const router = useQueryRoute();
-  const location = activityLocation(activity);
+  const navigate = useWorkspaceAwareNavigate();
+  const slugOf = useWorkspaceSlugOf();
+  const location = activityLocation(activity, slugOf);
   const alert = activity.severity !== 'normal';
   const tone = activity.severity === 'critical' ? tableStyles.critical : tableStyles.warning;
   return (
@@ -272,7 +274,7 @@ function ActivityRows({ activity, selected }: { activity: Activity; selected: bo
               title={t('backgroundActivity.openMessage')}
               onClick={(event) => {
                 event.stopPropagation();
-                router.push(location.path, { hash: location.hash });
+                navigate(location.href, { escape: true });
               }}
             />
           )}

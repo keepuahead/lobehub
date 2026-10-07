@@ -3,7 +3,7 @@ import { createStaticStyles, cssVar } from 'antd-style';
 import { useEffect, useRef } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
-import { useQueryRoute } from '@/hooks/useQueryRoute';
+import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useSingleton } from '@/hooks/useSingleton';
 import { electronDevtoolsService } from '@/services/electron/devtools';
 import { useGlobalStore } from '@/store/global';
@@ -19,6 +19,7 @@ import {
   useActivities,
 } from './state';
 import { useActivityOwner } from './useActivityOwner';
+import { useWorkspaceSlugOf } from './useWorkspaceSlugOf';
 
 const styles = createStaticStyles(({ css }) => ({
   link: css`
@@ -63,7 +64,7 @@ function AlertDescription({
     label: activity.label,
     memory: formatMemory(activity.memoryMB),
   };
-  if (!topic || !onOpen || !activityLocation(activity))
+  if (!topic || !onOpen)
     return t('backgroundActivity.alertDesc', { ...values, name: activity.label });
   return (
     <Trans
@@ -80,7 +81,8 @@ function AlertDescription({
 export default function BackgroundActivityMonitor() {
   const state = useActivities();
   const { t } = useTranslation('chat');
-  const router = useQueryRoute();
+  const navigate = useWorkspaceAwareNavigate();
+  const slugOf = useWorkspaceSlugOf();
   const alerts = useSingleton(() => new ResourceAlerts());
   const sampled = useRef(0);
   useEffect(() => {
@@ -88,7 +90,7 @@ export default function BackgroundActivityMonitor() {
     sampled.current = state.sampledAt;
     for (const activity of alerts.update(state.activities)) {
       const id = `background-${activity.rootId}`;
-      const location = activityLocation(activity);
+      const location = activityLocation(activity, slugOf);
       toast.warning({
         title: <AlertTitle activity={activity} />,
         id,
@@ -98,7 +100,7 @@ export default function BackgroundActivityMonitor() {
             onOpen={
               location &&
               (() => {
-                router.push(location.path, { hash: location.hash });
+                navigate(location.href, { escape: true });
                 toast.dismiss(id);
               })
             }
@@ -111,7 +113,7 @@ export default function BackgroundActivityMonitor() {
             onClick: () => {
               selectActivity(activity.rootId);
               if (location) {
-                router.push(location.path);
+                navigate(location.path, { escape: true });
                 useGlobalStore.getState().toggleRightPanel(false);
                 useGlobalStore.getState().toggleWorkingOverview(true);
               } else {
@@ -132,6 +134,6 @@ export default function BackgroundActivityMonitor() {
         ],
       });
     }
-  }, [state, t, router, alerts]);
+  }, [state, t, navigate, slugOf, alerts]);
   return null;
 }

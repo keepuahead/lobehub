@@ -138,6 +138,14 @@ describe('BrowserWindowsCtr', () => {
       expect(mockShow).toHaveBeenCalled();
       expect(mockBroadcast).toHaveBeenCalledWith('navigate', { path: '/agent/agt_1/tpc_1#msg_1' });
     });
+
+    it('keeps an already-scoped path from being prefixed with the active workspace', () => {
+      browserWindowsCtr.openInMainWindow({ escape: true, path: '/acme/agent/agt_1/tpc_1' });
+      expect(mockBroadcast).toHaveBeenCalledWith('navigate', {
+        escape: true,
+        path: '/acme/agent/agt_1/tpc_1',
+      });
+    });
   });
 
   describe('closeWindow', () => {

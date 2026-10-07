@@ -67,6 +67,7 @@ const build = (query = '') =>
     sort: 'cpu',
     topicTitle: (id) => (id === 't1' ? 'Auth topic' : undefined),
     totalMemoryMB: 16_384,
+    workspaceSlug: () => undefined,
   });
 
 describe('buildProcessTree', () => {

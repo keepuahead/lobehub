@@ -70,7 +70,9 @@ class LocalSystemExecutor extends BaseExecutor<typeof LocalSystemApiEnum> {
               ...params,
               topicId: ctx?.topicId ?? undefined,
               agentId: ctx?.agentId,
+              groupId: ctx?.groupId,
               messageId: ctx?.messageId,
+              workspaceId: ctx?.workspaceId,
             }
           : params,
         {

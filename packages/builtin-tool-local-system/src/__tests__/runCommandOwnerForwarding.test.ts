@@ -32,4 +32,20 @@ describe('localSystemExecutor.runCommand — owner forwarding', () => {
       }),
     );
   });
+
+  it('forwards the group and workspace so the link opens in the launching conversation', async () => {
+    runCommand.mockResolvedValue({ output: '', shell_id: 'sh-2', success: true });
+
+    await localSystemExecutor.runCommand({ command: 'npm run dev' }, {
+      agentId: 'agt_1',
+      groupId: 'grp_1',
+      messageId: 'msg_tool_2',
+      topicId: 'tpc_1',
+      workspaceId: 'ws_1',
+    } as any);
+
+    expect(runCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({ groupId: 'grp_1', workspaceId: 'ws_1' }),
+    );
+  });
 });

@@ -88,13 +88,33 @@ describe('background resources', () => {
   });
   it('links an owned activity back to the message that started it', () => {
     const [owned, shared] = groupActivities(snapshot);
+    const noWorkspaces = () => undefined;
     expect(owned.messageId).toBe('msg/tool 1');
-    expect(activityLocation(owned)).toEqual({
+    expect(activityLocation(owned, noWorkspaces)).toEqual({
       hash: 'msg%2Ftool%201',
       href: '/agent/agt_1/one#msg%2Ftool%201',
       path: '/agent/agt_1/one',
     });
-    expect(activityLocation({ ...owned, messageId: undefined })?.href).toBe('/agent/agt_1/one');
-    expect(activityLocation(shared)).toBeUndefined();
+    expect(activityLocation({ ...owned, messageId: undefined }, noWorkspaces)?.href).toBe(
+      '/agent/agt_1/one',
+    );
+    expect(activityLocation(shared, noWorkspaces)).toBeUndefined();
+  });
+  it('opens a group-owned activity in the group conversation', () => {
+    const [owned] = groupActivities(snapshot);
+    expect(activityLocation({ ...owned, groupId: 'grp_1' }, () => undefined)?.href).toBe(
+      '/group/grp_1/one#msg%2Ftool%201',
+    );
+  });
+  it('scopes the link to the workspace that launched the process, not the active one', () => {
+    const [owned] = groupActivities({
+      ...snapshot,
+      processes: snapshot.processes.map((row) => ({ ...row, workspaceId: 'ws_1' })),
+    });
+    const slugOf = (id: string) => (id === 'ws_1' ? 'acme' : undefined);
+    expect(owned.workspaceId).toBe('ws_1');
+    expect(activityLocation(owned, slugOf)?.href).toBe('/acme/agent/agt_1/one#msg%2Ftool%201');
+    // A workspace the user can no longer reach gets no link rather than a wrong one.
+    expect(activityLocation({ ...owned, workspaceId: 'ws_gone' }, slugOf)).toBeUndefined();
   });
 });

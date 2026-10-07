@@ -32,6 +32,7 @@ import { ConversationTitle, topicName } from '../ActivityTable';
 import { agentName } from '../AgentName';
 import { formatCpu, formatMemory, stopActivity, useActivities } from '../state';
 import StopButton from '../StopButton';
+import { useWorkspaceSlugOf } from '../useWorkspaceSlugOf';
 import {
   buildProcessTree,
   type RowModel,
@@ -57,8 +58,12 @@ const rowIcon = (row: RowModel): LucideIcon | undefined => {
   }
 };
 
+// The href already names the launching workspace (see activityLocation), so the
+// main window must not prefix whichever workspace it happens to have open.
 const openMessage = (href: string) =>
-  electronDevtoolsService.openInMainWindow(href).catch((error) => console.error(error));
+  electronDevtoolsService
+    .openInMainWindow(href, { escape: true })
+    .catch((error) => console.error(error));
 
 function Cells({ row }: { row: RowModel }) {
   const { t } = useTranslation('chat');
@@ -127,6 +132,7 @@ export default function ProcessExplorer() {
     () => selectedActivity && `activity:${selectedActivity}`,
   );
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
+  const workspaceSlug = useWorkspaceSlugOf();
 
   const { rows, treeData } = useMemo(
     () =>
@@ -149,8 +155,9 @@ export default function ProcessExplorer() {
         sort,
         topicTitle: topicName,
         totalMemoryMB,
+        workspaceSlug,
       }),
-    [activities, metrics, query, sort, t, totalMemoryMB],
+    [activities, metrics, query, sort, t, totalMemoryMB, workspaceSlug],
   );
 
   const expandedKeys = collectExpandable(treeData).filter(

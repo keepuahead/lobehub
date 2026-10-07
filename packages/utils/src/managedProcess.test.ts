@@ -182,9 +182,11 @@ describe.skipIf(process.platform === 'win32')('managed process shutdown', () => 
     managed.enableManagedProcesses();
     const env = managed.managedProcessEnvironment({
       agentId: 'agt_1',
+      groupId: 'grp_1',
       label: 'dev server',
       messageId: 'msg_tool_1',
       topicId: 'tpc_1',
+      workspaceId: 'ws_1',
     });
     expect(env.LOBEHUB_PROCESS_MESSAGE).toBe('msg_tool_1');
     const child = managed.spawnManaged(
@@ -197,8 +199,53 @@ describe.skipIf(process.platform === 'win32')('managed process shutdown', () => 
     const { processes } = await managed.getManagedProcesses();
     expect(processes.find((row) => row.pid === child.pid)).toMatchObject({
       agentId: 'agt_1',
+      groupId: 'grp_1',
       messageId: 'msg_tool_1',
       topicId: 'tpc_1',
+      workspaceId: 'ws_1',
+    });
+  });
+
+  it('links a browser daemon to its message only when one call could have launched it', async () => {
+    const registry = new ManagedProcessRegistry();
+    // Two calls in one topic share the namespace before the daemon is sampled:
+    // the later call must not claim a daemon the earlier one may have started.
+    const raced = registry.environment({ messageId: 'msg_a', topicId: 'race-topic' });
+    registry.environment({ messageId: 'msg_b', topicId: 'race-topic' });
+    const solo = registry.environment({ messageId: 'msg_solo', topicId: 'solo-topic' });
+    const daemons = [raced, solo].map(() =>
+      spawn(
+        process.execPath,
+        [
+          '-e',
+          "process.title='agent-browser-owner'; console.log('ready'); setInterval(()=>{},1000)",
+        ],
+        { detached: true, stdio: 'pipe' },
+      ),
+    );
+    cleanup.push(async () => {
+      for (const daemon of daemons) daemon.kill('SIGKILL');
+      await registry.shutdown(0);
+      await rm(raced.AGENT_BROWSER_SOCKET_DIR, { recursive: true, force: true });
+    });
+    await Promise.all(daemons.map((daemon) => once(daemon.stdout!, 'data')));
+    for (const [index, env] of [raced, solo].entries()) {
+      const directory = path.join(
+        env.AGENT_BROWSER_SOCKET_DIR,
+        'namespaces',
+        env.AGENT_BROWSER_NAMESPACE,
+        'run',
+      );
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, 'default.pid'), String(daemons[index].pid));
+    }
+    const { processes } = await registry.snapshot();
+    const raceRow = processes.find((row) => row.pid === daemons[0].pid);
+    expect(raceRow).toMatchObject({ topicId: 'race-topic' });
+    expect(raceRow?.messageId).toBeUndefined();
+    expect(processes.find((row) => row.pid === daemons[1].pid)).toMatchObject({
+      messageId: 'msg_solo',
+      topicId: 'solo-topic',
     });
   });
 });

@@ -285,6 +285,23 @@ describe('localSystemRuntime', () => {
       });
     });
 
+    it('tags runCommand with the group and workspace the run belongs to', async () => {
+      mockExecuteToolCall.mockResolvedValue({ content: '', success: true });
+      const proxy = localSystemRuntime.factory({
+        activeDeviceId: 'device-1',
+        agentId: 'agt-1',
+        groupId: 'grp-1',
+        toolManifestMap: {},
+        toolMessageId: 'msg-tool-1',
+        topicId: 'tpc-1',
+        userId: 'user-1',
+        workspaceId: 'ws-42',
+      });
+      await proxy[LocalSystemApiName.runCommand]({ command: 'npm run dev' });
+
+      expect(parseArgs()).toMatchObject({ groupId: 'grp-1', workspaceId: 'ws-42' });
+    });
+
     it('forwards the sandbox decision to runCommand', async () => {
       mockExecuteToolCall.mockResolvedValue({ content: '', success: true });
       const proxy = localSystemRuntime.factory({
