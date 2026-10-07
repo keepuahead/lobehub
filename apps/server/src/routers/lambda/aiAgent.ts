@@ -1260,6 +1260,13 @@ const ExecAgentSchema = z
       .optional(),
     /** Explicit device ID to bind to the topic and activate for this run */
     deviceId: z.string().optional(),
+    /** Selected history replaces native resume and latest-topic recovery for Codex. */
+    heterogeneousFreshSession: z
+      .object({
+        historyBoundaryMessageId: z.string().min(1),
+        systemContext: z.string().optional(),
+      })
+      .optional(),
     /** Current desktop device hint, honored only for an effective local target */
     localDeviceId: z.string().optional(),
     /** Optional existing message IDs to include in context */
@@ -2481,7 +2488,8 @@ export const aiAgentRouter = router({
       }
     }),
 
-  execAgent: aiAgentWriteProcedure.input(ExecAgentSchema).mutation(async ({ input, ctx }) => {
+  execAgent: aiAgentWriteProcedure.input(ExecAgentSchema).mutation(async (opts) => {
+    const { ctx, input, signal } = opts;
     const {
       agentId,
       slug,
@@ -2571,6 +2579,8 @@ export const aiAgentRouter = router({
       const result = await ctx.aiAgentService.execAgent({
         acceptsFileWorks: acceptsFileWorksOf(input.streamFeatures),
         acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures),
+        heterogeneousFreshSession: input.heterogeneousFreshSession,
+        signal,
         agentId,
         appContext,
         autoStart,

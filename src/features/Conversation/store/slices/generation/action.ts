@@ -581,6 +581,11 @@ const regenerateUserMessageFromSource = async (
     }
 
     await ensureEffectiveAgencyAccess(context.agentId);
+    const postAccessOp = operationSelectors.getOperationById(operationId)(useChatStore.getState());
+    if (postAccessOp && postAccessOp.status !== 'running') {
+      await restoreBranch();
+      return;
+    }
     const { agencyConfig, isWorkspaceAgent, workspaceScoped } = getEffectiveAgencyConfig(
       context.agentId,
       context.topicId
@@ -599,6 +604,7 @@ const regenerateUserMessageFromSource = async (
 
     // ── Gateway mode: trigger server-side regeneration ──
     if (runtimeType === 'gateway') {
+      replyStarted = false;
       // Hand the wrapper op off at phase-1 (`executeGatewayAgent` completes
       // `parentOperationId` once the child `execServerAgentRuntime` op is
       // running) — the documented interim-op contract this branch used to
@@ -611,8 +617,23 @@ const regenerateUserMessageFromSource = async (
       // actually aborts the request instead of being swallowed.
       // `onComplete` still fires at session end for the UI hook; re-completing
       // the already-settled wrapper is an idempotent no-op.
-      await chatStore.executeGatewayAgent({
+      const result = await chatStore.executeGatewayAgent({
         context,
+        fileIds: [
+          ...(item.imageList ?? []),
+          ...(item.fileList ?? []),
+          ...(item.videoList ?? []),
+        ].map((file) => file.id),
+        heterogeneousFreshSession:
+          heterogeneousProvider?.type === 'codex'
+            ? {
+                historyBoundaryMessageId: messageId,
+                systemContext: buildCodexRegenerateContext(
+                  displayMessages.slice(0, currentIndex),
+                  item,
+                ),
+              }
+            : undefined,
         message: item.content,
         onComplete: () =>
           settleGenerationEntry(chatStore, operationId, () =>
@@ -621,6 +642,12 @@ const regenerateUserMessageFromSource = async (
         parentMessageId: messageId,
         parentOperationId: operationId,
       });
+      // An unconfirmed cancellation may still own a live native process.
+      replyStarted = result.autoStarted;
+      if (!replyStarted) {
+        await restoreBranch(false);
+        settleGenerationEntry(chatStore, operationId);
+      }
 
       return;
     }
@@ -1046,12 +1073,14 @@ export const generationSlice: StateCreator<
   },
 
   continueHeteroAfterError: async (groupMessageId: string) => {
-    const { context, dbMessages, displayMessages, hooks } = get();
+    const regenerationSource = captureRegenerateUserMessageSource(get);
+    const { context, displayMessages, hooks } = regenerationSource;
+    const dbMessages = regenerationSource.readDbMessages();
     const chatStore = useChatStore.getState();
 
     const group = displayMessages.find((m) => m.id === groupMessageId);
     const erroredStep = group?.children?.at(-1);
-    if (!erroredStep) return;
+    if (!group || !erroredStep) return;
 
     // Only the dedicated hetero status errors (rate limit, upstream overload,
     // auth, missing CLI) mean "the run died but its session survives". A generic
@@ -1074,6 +1103,14 @@ export const generationSlice: StateCreator<
       isWorkspaceAgent,
       workspaceScoped,
     });
+    // Device Codex recovery retries the original user turn with its selected
+    // ancestors in a fresh session. It preserves the failed reply as a branch;
+    // it does not continue the topic's potentially newer native transcript.
+    // Local heterogeneous continuation below retains its existing resume semantics.
+    if (runtimeType === 'gateway' && heterogeneousProvider?.type === 'codex') {
+      if (group.parentId) await regenerateUserMessageFromSource(group.parentId, regenerationSource);
+      return;
+    }
     const agentId = context.agentId;
 
     const resumeSessionId = agentId
