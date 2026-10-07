@@ -65,18 +65,25 @@ export const forkCodexMessage = async (
       workspaceScoped,
     });
     if (
-      runtimeType !== 'hetero' ||
+      (runtimeType !== 'hetero' && runtimeType !== 'gateway') ||
       heterogeneousProvider?.type !== 'codex' ||
       heterogeneousProvider.authMode === 'api'
     ) {
-      throw new Error('Codex message branches require the local native Codex runtime');
+      throw new Error(
+        'Codex message branches require a native Codex runtime on the selected device',
+      );
     }
-    const runtime = resolveHeteroRunContext(
-      useChatStore.getState(),
-      context,
-      context.agentId,
-      topic,
-    );
+    const sourceMetadata = context.threadId
+      ? useChatStore.getState().threadMaps[topicId]?.find((item) => item.id === context.threadId)
+          ?.metadata
+      : topic?.metadata;
+    const runtime =
+      runtimeType === 'hetero'
+        ? resolveHeteroRunContext(useChatStore.getState(), context, context.agentId, topic)
+        : {
+            resumeSessionId: source.metadata?.heteroSessionId,
+            workingDirectory: sourceMetadata?.workingDirectory,
+          };
     if (!runtime.resumeSessionId) {
       throw new Error('The native Codex thread is unavailable on this device');
     }
@@ -125,18 +132,27 @@ export const forkCodexMessage = async (
     if (!isRunning()) return;
 
     if (messageParams && branch.messageId) {
-      await runHeterogeneousFromExistingMessage(useChatStore.getState(), {
-        codexForkTarget: threadParams.metadata?.codexForkTarget,
-        context: branchContext,
-        contextSelections: source.metadata?.contextSelections,
-        heterogeneousProvider,
-        imageList: source.imageList,
-        pageSelections: source.metadata?.pageSelections,
-        parentMessageId: branch.messageId,
-        parentOperationId: operationId,
-        prompt: messageParams.content,
-        topic,
-      });
+      if (runtimeType === 'gateway') {
+        await useChatStore.getState().executeGatewayAgent({
+          context: branchContext,
+          fileIds: messageParams.files,
+          message: messageParams.content,
+          parentMessageId: branch.messageId,
+          parentOperationId: operationId,
+        });
+      } else
+        await runHeterogeneousFromExistingMessage(useChatStore.getState(), {
+          codexForkTarget: threadParams.metadata?.codexForkTarget,
+          context: branchContext,
+          contextSelections: source.metadata?.contextSelections,
+          heterogeneousProvider,
+          imageList: source.imageList,
+          pageSelections: source.metadata?.pageSelections,
+          parentMessageId: branch.messageId,
+          parentOperationId: operationId,
+          prompt: messageParams.content,
+          topic,
+        });
     }
     chatStore.completeOperation(operationId);
   } catch (error) {

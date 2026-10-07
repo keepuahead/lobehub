@@ -969,6 +969,7 @@ function bindGatewayClientHandlers(
     try {
       const ack = await spawnHeteroAgentRun(
         {
+          agentId: request.agentId,
           agentType: request.agentType,
           assistantMessageId: request.assistantMessageId,
           args: request.args,
@@ -1097,6 +1098,7 @@ function collectSystemInfo(): DeviceSystemInfo {
     homePath: home,
     musicPath: path.join(home, 'Music'),
     picturesPath: path.join(home, 'Pictures'),
+    supportedAgentRuntimes: ['codex-app-server-v1'],
     userDataPath: path.join(home, CLI_CONFIG_DIR_NAME),
     videosPath: path.join(home, videosDir),
     workingDirectory: process.cwd(),

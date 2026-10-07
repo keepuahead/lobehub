@@ -11,6 +11,8 @@ import { getTask, removeTask, saveTask } from '../daemon/taskRegistry';
 import { registerAgentRun } from './agentRunRegistry';
 
 export interface SpawnHeteroAgentRunParams {
+  /** Agent owning the dispatched operation; never inherited from connect. */
+  agentId?: string;
   agentType: string;
   /** Resolved `lh hetero exec` wrapper args. */
   args?: string[];
@@ -61,6 +63,7 @@ export function spawnHeteroAgentRun(
   logger?: SpawnHeteroAgentRunLogger,
 ): Promise<AgentRunAckResult> {
   const {
+    agentId,
     agentType,
     assistantMessageId,
     args: extraArgs,
@@ -143,6 +146,7 @@ export function spawnHeteroAgentRun(
       detached: true,
       env: {
         ...childEnv,
+        ...(agentId ? { LOBEHUB_AGENT_ID: agentId } : {}),
         ...(assistantMessageId ? { LOBEHUB_ASSISTANT_MESSAGE_ID: assistantMessageId } : {}),
         [HETERO_EXEC_INHERIT_PROCESS_GROUP_ENV]: '1',
         LOBEHUB_JWT: jwt,
@@ -165,6 +169,7 @@ export function spawnHeteroAgentRun(
       pid = child.pid;
       if (pid !== undefined) {
         saveTask({
+          agentId,
           agentType,
           operationId,
           pid,

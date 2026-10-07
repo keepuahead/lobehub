@@ -300,6 +300,10 @@ describe('connect command', () => {
     expect(lastSentSystemInfoResponse.result.success).toBe(true);
     expect(lastSentSystemInfoResponse.result.systemInfo).toHaveProperty('homePath');
     expect(lastSentSystemInfoResponse.result.systemInfo).toHaveProperty('arch');
+    /** @example The current connection advertises native Fork support without relying on stale DB metadata. */
+    expect(lastSentSystemInfoResponse.result.systemInfo.supportedAgentRuntimes).toEqual([
+      'codex-app-server-v1',
+    ]);
   });
 
   it('should handle auth_failed', async () => {

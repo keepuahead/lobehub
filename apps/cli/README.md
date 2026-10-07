@@ -123,3 +123,24 @@ Signal and VFS tests additionally require their documented Agent ID variables.
 Search fixtures wait up to 60 seconds for asynchronous indexing; a timeout fails
 the suite rather than accepting empty results. The command above supplies a live
 network budget explicitly; this does not change unit-test timeouts or enable retries.
+
+### Native Codex Fork on a connected device
+
+A current source CLI can advertise `codex-app-server-v1` through its live system info.
+The server then runs native Codex turns through app-server and persists each message's
+native session and turn IDs. Older connected CLIs keep the ordinary `codex exec` path;
+Fork requires a capable connection and never silently replays history as text.
+
+In the product, select that device and use Fork on a user or assistant message. User
+Fork resends the selected user input and its attachments before that native turn;
+assistant Fork continues after the selected turn when the next prompt is sent. Each
+branch receives an independent native session and can resume after refresh or device
+reconnection. A missing child session is an error: restore that device's native
+history before retrying. Branching shares the working directory and does not roll
+files back.
+
+The internal `lh hetero exec --codex-app-server` transport accepts an optional
+`--codex-fork-target` JSON object with `threadId`, `turnId`, and `position` (`before`
+or `after`). A per-operation process owns cancellation and shell identity. This
+transport rejects unsupported approval or sandbox arguments instead of weakening
+permissions. The richer permission bridge is maintained separately.

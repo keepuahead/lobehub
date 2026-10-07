@@ -27,6 +27,7 @@ describe('forkCodexMessage', () => {
   const source = {
     id: 'original',
     content: 'Original prompt',
+    files: ['file-1'],
     role: 'user' as const,
     createdAt: 0,
     updatedAt: 0,
@@ -91,6 +92,54 @@ describe('forkCodexMessage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     useChatStore.setState(useChatStore.getInitialState(), true);
+  });
+
+  /** @example A user-message Fork on a connected device dispatches the new child through the server. */
+  it('automatically resends a device user fork through the gateway', async () => {
+    vi.mocked(dispatcher.selectRuntimeType).mockReturnValue('gateway');
+    const dispatch = vi.spyOn(useChatStore.getState(), 'executeGatewayAgent').mockResolvedValue();
+    const store = createStore({ context, initialMessages: [source] });
+    const original = structuredClone(source);
+    await store.getState().forkCodexMessage(source.id);
+    /** @example Only the replayed user row in the child is used as the run parent. */
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({ topicId: 'topic', threadId: 'branch', scope: 'thread' }),
+        fileIds: ['file-1'],
+        message: source.content,
+        parentMessageId: 'forked-user',
+      }),
+    );
+    /** @example The device request cannot accidentally run through Electron IPC. */
+    expect(executor.executeHeterogeneousAgent).not.toHaveBeenCalled();
+    /** @example Source message data remains unchanged. */
+    expect(source).toEqual(original);
+    /** @example Native user-before boundary is persisted for authenticated server dispatch. */
+    expect(threads[0].metadata?.codexForkTarget).toEqual({
+      position: 'before',
+      threadId: 'native-source',
+      turnId: 'turn-2',
+    });
+  });
+
+  /** @example Assistant-after Fork creates a child but waits for its next user input. */
+  it('creates a device assistant fork without replaying the assistant as a prompt', async () => {
+    vi.mocked(dispatcher.selectRuntimeType).mockReturnValue('gateway');
+    const dispatch = vi.spyOn(useChatStore.getState(), 'executeGatewayAgent').mockResolvedValue();
+    const store = createStore({ context, initialMessages: [{ ...source, role: 'assistant' }] });
+    await store.getState().forkCodexMessage(source.id);
+    /** @example The exact after-turn boundary is saved on the new child. */
+    expect(threadService.createThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          codexForkTarget: { position: 'after', threadId: 'native-source', turnId: 'turn-2' },
+        }),
+      }),
+    );
+    /** @example No unsolicited assistant replay or local native execution occurs. */
+    expect(dispatch).not.toHaveBeenCalled();
+    /** @example No Electron shortcut is used. */
+    expect(executor.executeHeterogeneousAgent).not.toHaveBeenCalled();
   });
 
   it('runs the forked prompt in a separate branch while preserving the original', async () => {
