@@ -295,6 +295,8 @@ export interface ResumeClientLlmWaitResult {
 export interface HeterogeneousFreshSession {
   /** Existing user message in the authorized topic; must equal the run's parent message. */
   historyBoundaryMessageId: string;
+  /** Unique request ID for owner-scoped Stop before the server returns an operation ID. */
+  startupRequestId?: string;
   /** Bounded selected ancestors plus current attachment/selection context; excludes replaced/later replies. */
   systemContext?: string;
 }
