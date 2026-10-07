@@ -904,6 +904,44 @@ describe('GatewayActionImpl', () => {
       delete (globalThis as any).window;
     });
 
+    /** @example An offline device's persisted error cannot create a running client operation. */
+    it('does not open a stream or mark the topic running after dispatch rejection', async () => {
+      // ROOT CAUSE:
+      // A structured {success:false, autoStarted:false} response followed the
+      // success path and left a local operation waiting for a stream that never starts.
+      const { action, startOperation, updateTopicStatus, connectToGateway, replaceMessages } =
+        createExecuteTestAction();
+      vi.mocked(aiAgentService.execAgentTask).mockResolvedValue({
+        agentId: 'agent-1',
+        assistantMessageId: 'failed-placeholder',
+        autoStarted: false,
+        createdAt: '2026-10-07T00:00:00.000Z',
+        error: 'DEVICE_OFFLINE',
+        message: 'Device dispatch failed',
+        operationId: 'failed-op',
+        status: 'error',
+        success: false,
+        timestamp: '2026-10-07T00:00:00.000Z',
+        topicId: 'topic-1',
+        userMessageId: 'user-A',
+      });
+      const result = await action.executeGatewayAgent({
+        context: { agentId: 'agent-1', scope: 'main', topicId: 'topic-1' },
+        message: 'A',
+        parentMessageId: 'user-A',
+      });
+      /** @example The caller receives the failure and no false running state is installed. */
+      expect(result.success).toBe(false);
+      /** @example Existing topics hydrate the persisted error without requiring a page refresh. */
+      expect(messageService.getMessages).toHaveBeenCalledWith(
+        expect.objectContaining({ topicId: 'topic-1' }),
+      );
+      expect(replaceMessages).toHaveBeenCalled();
+      expect(startOperation).not.toHaveBeenCalled();
+      expect(updateTopicStatus).not.toHaveBeenCalled();
+      expect(connectToGateway).not.toHaveBeenCalled();
+    });
+
     it('acknowledges an isolated topic before UI hydration without switching topics', async () => {
       const { action, switchTopic, connectToGateway } = createExecuteTestAction();
       vi.mocked(aiAgentService.execAgentTask).mockResolvedValue({

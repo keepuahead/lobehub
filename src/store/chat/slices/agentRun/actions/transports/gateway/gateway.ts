@@ -19,6 +19,7 @@ import type {
   ChatTopicStatus,
   ConversationContext,
   ExecAgentResult,
+  HeterogeneousFreshSession,
   MessageMetadata,
   RuntimeMentionedAgent,
 } from '@lobechat/types';
@@ -936,6 +937,8 @@ export class GatewayActionImpl {
     context: ConversationContext;
     /** File IDs of already-uploaded attachments to attach to the new user message */
     fileIds?: string[];
+    /** Explicit selected history for a fresh Codex regeneration. */
+    heterogeneousFreshSession?: HeterogeneousFreshSession;
     message: string;
     /**
      * Conversation context that owns the rendered messages. Defaults to the
@@ -1024,6 +1027,7 @@ export class GatewayActionImpl {
       clientOperations,
       context: executionContext,
       fileIds,
+      heterogeneousFreshSession,
       message,
       messageContext = executionContext,
       metadata,
@@ -1164,6 +1168,7 @@ export class GatewayActionImpl {
         : await aiAgentService.execAgentTask(
             {
               agentId: executionContext.agentId,
+              heterogeneousFreshSession,
               // Fresh sends only — resume flows never pass this, and the server drops
               // it defensively on resume-like params anyway.
               clientIds,
@@ -1353,12 +1358,14 @@ export class GatewayActionImpl {
       }
     }
 
-    if (!isCreateNewTopic && cancelledAfterPersistence) {
+    if (!isCreateNewTopic && (cancelledAfterPersistence || !result.autoStarted)) {
       try {
+        // A rejected dispatch has no stream to replace the optimistic loading row.
         const messages = await messageService.getMessages(resolvedMessageContext);
         this.#get().replaceMessages(messages, { context: resolvedMessageContext });
-      } catch {
-        /* non-critical */
+      } catch (error) {
+        // A failed dispatch must surface a failed refresh to the caller's error handler.
+        if (!result.autoStarted) throw error;
       }
     }
 
@@ -1455,6 +1462,13 @@ export class GatewayActionImpl {
           });
         });
       }
+      if (parentOperationId) this.#get().completeOperation(parentOperationId);
+      return result;
+    }
+
+    if (!result.autoStarted) {
+      // Persistence may have created an error placeholder, but no stream will
+      // arrive to settle a local running operation for a rejected dispatch.
       if (parentOperationId) this.#get().completeOperation(parentOperationId);
       return result;
     }
