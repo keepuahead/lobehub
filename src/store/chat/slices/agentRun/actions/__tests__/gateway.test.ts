@@ -1624,139 +1624,171 @@ describe('GatewayActionImpl', () => {
       );
     });
 
-    it('reconciles an accepted message but skips the gateway child when cancel races with phase-1 persistence', async () => {
-      const startOperation = vi.fn(() => ({ operationId: 'gw-op-local' }));
-      const completeOperation = vi.fn();
-      const associateMessageWithOperation = vi.fn();
-      const connectToGateway = vi.fn();
-      const moveQueuedMessages = vi.fn();
-      const onOperationCancel = vi.fn();
-      const onMessageAccepted = vi.fn();
-      const replaceMessages = vi.fn();
+    /** @example Fresh regeneration reports a confirmed late Stop as not running. */
+    it.each([
+      { freshSession: false, confirmed: true },
+      { freshSession: true, confirmed: true },
+      { freshSession: true, confirmed: false },
+    ])(
+      'reconciles phase-1 persistence after Stop ($freshSession, $confirmed)',
+      async ({ freshSession, confirmed }) => {
+        // ROOT CAUSE:
+        // The late interrupt stopped the device but returned autoStarted=true.
+        // Regeneration therefore kept the replacement branch instead of restoring
+        // the original reply. Confirmed cancellation must reach that caller.
+        const startOperation = vi.fn(() => ({ operationId: 'gw-op-local' }));
+        const completeOperation = vi.fn();
+        const associateMessageWithOperation = vi.fn();
+        const connectToGateway = vi.fn();
+        const moveQueuedMessages = vi.fn();
+        const onOperationCancel = vi.fn();
+        const onMessageAccepted = vi.fn();
+        const replaceMessages = vi.fn();
 
-      const controller = new AbortController();
+        const controller = new AbortController();
 
-      const mockClient = createMockClient();
-      const internalDispatchTopic = vi.fn();
-      const internalPinTopicStatus = vi.fn();
-      // `refreshTopic` has already pulled in the server's running row: this
-      // path opens no socket, so no terminal frame would ever retire it.
-      const state: Record<string, any> = {
-        gatewayConnections: {},
-        topicDataMap: {
-          'agent_agent-1': {
-            items: [
-              {
-                id: 'topic-1',
-                metadata: {
-                  runningOperation: {
-                    assistantMessageId: 'ast-1',
-                    operationId: 'server-op-cancel',
+        const mockClient = createMockClient();
+        const internalDispatchTopic = vi.fn();
+        const internalPinTopicStatus = vi.fn();
+        // `refreshTopic` has already pulled in the server's running row: this
+        // path opens no socket, so no terminal frame would ever retire it.
+        const state: Record<string, any> = {
+          gatewayConnections: {},
+          topicDataMap: {
+            'agent_agent-1': {
+              items: [
+                {
+                  id: 'topic-1',
+                  metadata: {
+                    runningOperation: {
+                      assistantMessageId: 'ast-1',
+                      operationId: 'server-op-cancel',
+                    },
                   },
+                  status: 'running',
                 },
-                status: 'running',
-              },
-            ],
+              ],
+            },
           },
-        },
-      };
-      const set = vi.fn((updater: any) => {
-        if (typeof updater === 'function') Object.assign(state, updater(state));
-        else Object.assign(state, updater);
-      });
-      const get = vi.fn(() => ({
-        ...state,
-        associateMessageWithOperation,
-        completeOperation,
-        connectToGateway,
-        getOperationAbortSignal: vi.fn(() => controller.signal),
-        internal_dispatchTopic: internalDispatchTopic,
-        internal_pinTopicStatus: internalPinTopicStatus,
-        moveQueuedMessages,
-        moveVoiceMessages: vi.fn(),
-        onOperationCancel,
-        replaceMessages,
-        startOperation,
-        switchTopic: vi.fn(),
-      })) as any;
+        };
+        const set = vi.fn((updater: any) => {
+          if (typeof updater === 'function') Object.assign(state, updater(state));
+          else Object.assign(state, updater);
+        });
+        const get = vi.fn(() => ({
+          ...state,
+          associateMessageWithOperation,
+          completeOperation,
+          connectToGateway,
+          getOperationAbortSignal: vi.fn(() => controller.signal),
+          internal_dispatchTopic: internalDispatchTopic,
+          internal_pinTopicStatus: internalPinTopicStatus,
+          moveQueuedMessages,
+          moveVoiceMessages: vi.fn(),
+          onOperationCancel,
+          replaceMessages,
+          startOperation,
+          switchTopic: vi.fn(),
+        })) as any;
 
-      (globalThis as any).window = {
-        global_serverConfigStore: {
-          getState: () => ({ serverConfig: { agentGatewayUrl: 'https://gateway.test.com' } }),
-        },
-      };
+        (globalThis as any).window = {
+          global_serverConfigStore: {
+            getState: () => ({ serverConfig: { agentGatewayUrl: 'https://gateway.test.com' } }),
+          },
+        };
 
-      const action = new GatewayActionImpl(set as any, get, undefined);
-      action.createClient = vi.fn(() => mockClient);
-      const interruptTaskSpy = vi
-        .mocked(aiAgentService.interruptTask)
-        .mockResolvedValue({ operationId: 'server-op-cancel', success: true });
-      const persistedResult = {
-        agentId: 'agent-1',
-        assistantMessageId: 'ast-1',
-        autoStarted: true,
-        createdAt: new Date().toISOString(),
-        message: 'ok',
-        operationId: 'server-op-cancel',
-        status: 'created',
-        success: true,
-        timestamp: new Date().toISOString(),
-        token: 'test-token',
-        topicId: 'topic-1',
-        userMessageId: 'usr-1',
-      } as const;
-      let resolvePersistence!: (value: typeof persistedResult) => void;
-      vi.mocked(aiAgentService.execAgentTask).mockReturnValue(
-        new Promise((resolve) => {
-          resolvePersistence = resolve;
-        }),
-      );
-      vi.mocked(messageService.getMessages).mockRejectedValueOnce(new Error('refresh failed'));
-
-      const execution = action.executeGatewayAgent({
-        context: { agentId: 'agent-1', topicId: 'topic-1', threadId: null, scope: 'main' },
-        message: 'Hello',
-        onMessageAccepted,
-        parentOperationId: 'parent-send-msg-op',
-      });
-      await vi.waitFor(() => expect(aiAgentService.execAgentTask).toHaveBeenCalledOnce());
-      controller.abort('user cancelled');
-      resolvePersistence(persistedResult);
-
-      await expect(execution).resolves.toEqual(persistedResult);
-
-      expect(aiAgentService.execAgentTask).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ signal: controller.signal }),
-      );
-      // Server task was created before the signal flipped — best-effort
-      // interrupt must fire so the agent run stops server-side.
-      await vi.waitFor(() =>
-        expect(interruptTaskSpy).toHaveBeenCalledWith({
+        const action = new GatewayActionImpl(set as any, get, undefined);
+        action.createClient = vi.fn(() => mockClient);
+        const interruptTaskSpy = vi.mocked(aiAgentService.interruptTask).mockResolvedValue({
           operationId: 'server-op-cancel',
+          success: confirmed,
+          deviceCancellationConfirmed: confirmed,
+        });
+        const persistedResult = {
+          agentId: 'agent-1',
+          assistantMessageId: 'ast-1',
+          autoStarted: true,
+          createdAt: new Date().toISOString(),
+          message: 'ok',
+          operationId: 'server-op-cancel',
+          status: 'created',
+          success: true,
+          timestamp: new Date().toISOString(),
+          token: 'test-token',
           topicId: 'topic-1',
-        }),
-      );
-      expect(onMessageAccepted).toHaveBeenCalledOnce();
-      expect(replaceMessages).not.toHaveBeenCalled();
-      expect(moveQueuedMessages).toHaveBeenCalledOnce();
-      expect(startOperation).not.toHaveBeenCalled();
-      expect(associateMessageWithOperation).not.toHaveBeenCalled();
-      expect(connectToGateway).not.toHaveBeenCalled();
-      expect(completeOperation).toHaveBeenCalledWith('parent-send-msg-op');
-      // The confirmed late interrupt retires the row itself.
-      await vi.waitFor(() =>
-        expect(internalPinTopicStatus).toHaveBeenCalledWith(
-          expect.objectContaining({ status: 'active', topicId: 'topic-1' }),
-        ),
-      );
-      expect(internalDispatchTopic).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'topic-1',
-          value: { metadata: { runningOperation: null } },
-        }),
-      );
-    });
+          userMessageId: 'usr-1',
+        } as const;
+        let resolvePersistence!: (value: typeof persistedResult) => void;
+        vi.mocked(aiAgentService.execAgentTask).mockReturnValue(
+          new Promise((resolve) => {
+            resolvePersistence = resolve;
+          }),
+        );
+        vi.mocked(messageService.getMessages).mockRejectedValueOnce(new Error('refresh failed'));
+
+        const execution = action.executeGatewayAgent({
+          context: { agentId: 'agent-1', topicId: 'topic-1', threadId: null, scope: 'main' },
+          heterogeneousFreshSession: freshSession
+            ? { historyBoundaryMessageId: 'usr-1' }
+            : undefined,
+          message: 'Hello',
+          onMessageAccepted,
+          parentOperationId: 'parent-send-msg-op',
+        });
+        await vi.waitFor(() => expect(aiAgentService.execAgentTask).toHaveBeenCalledOnce());
+        controller.abort('user cancelled');
+        resolvePersistence(persistedResult);
+
+        /** @example Only confirmed fresh-session cancellation restores the old branch. */
+        await expect(execution).resolves.toEqual(
+          freshSession
+            ? {
+                ...persistedResult,
+                autoStarted: !confirmed,
+                status: confirmed ? 'interrupted' : 'cancel_pending',
+                success: false,
+              }
+            : persistedResult,
+        );
+
+        expect(aiAgentService.execAgentTask).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ signal: controller.signal }),
+        );
+        // Server task was created before the signal flipped — best-effort
+        // interrupt must fire so the agent run stops server-side.
+        await vi.waitFor(() =>
+          expect(interruptTaskSpy).toHaveBeenCalledWith({
+            operationId: 'server-op-cancel',
+            topicId: 'topic-1',
+          }),
+        );
+        expect(onMessageAccepted).toHaveBeenCalledOnce();
+        expect(replaceMessages).not.toHaveBeenCalled();
+        expect(moveQueuedMessages).toHaveBeenCalledOnce();
+        expect(startOperation).not.toHaveBeenCalled();
+        expect(associateMessageWithOperation).not.toHaveBeenCalled();
+        expect(connectToGateway).not.toHaveBeenCalled();
+        expect(completeOperation).toHaveBeenCalledWith('parent-send-msg-op');
+        if (!confirmed) {
+          /** @example An uncertain device still owns its running marker. */
+          expect(internalPinTopicStatus).not.toHaveBeenCalled();
+          return;
+        }
+        // The confirmed late interrupt retires the row itself.
+        await vi.waitFor(() =>
+          expect(internalPinTopicStatus).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'active', topicId: 'topic-1' }),
+          ),
+        );
+        expect(internalDispatchTopic).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'topic-1',
+            value: { metadata: { runningOperation: null } },
+          }),
+        );
+      },
+    );
 
     /**
      * @example A stop confirmed before the new topic's sidebar refetch lands still retires the row.

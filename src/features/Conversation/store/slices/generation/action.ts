@@ -759,10 +759,11 @@ export interface GenerationAction {
   continueGenerationMessage: (displayMessageId: string, messageId: string) => Promise<boolean>;
 
   /**
-   * Resume a heterogeneous (CC / Codex) run whose LAST step died on a status
-   * error (rate limit, upstream overload, ...), keeping every step that
-   * succeeded before it. Falls back to `delAndRegenerateMessage` when there is
-   * nothing to keep or no CLI session left to resume.
+   * Recover a heterogeneous run whose last step ended with a status error.
+   * Device Codex retries the original user turn with bounded selected ancestors
+   * in a fresh session and retains the failed branch. Local heterogeneous runs
+   * resume their native session, preserving successful steps, or regenerate
+   * when there is no retained step/session to resume.
    *
    * @param groupMessageId - the assistantGroup id of the failed run
    */

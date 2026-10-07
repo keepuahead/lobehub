@@ -1152,6 +1152,8 @@ export class GatewayActionImpl {
             .catch((err) =>
               console.error('[Gateway] share interruptTask after cancel failed:', err),
             );
+        else if (heterogeneousFreshSession && !result.autoStarted)
+          lateInterruptConfirmed = Promise.resolve(true);
         else
           lateInterruptConfirmed = interruptGatewayTaskOrThrow({
             operationId: result.operationId,
@@ -1323,6 +1325,26 @@ export class GatewayActionImpl {
       // refetch has landed: settling first would find no marker to clear, and
       // the refetch would then install a `running` row nobody retires.
       const { topicId } = result;
+      if (heterogeneousFreshSession && lateInterruptConfirmed) {
+        // Regeneration restores the old branch only when the device is known to
+        // be stopped. Keep ownership visible while physical cancellation is uncertain.
+        const [confirmed] = await Promise.all([lateInterruptConfirmed, topicRefresh]);
+        if (confirmed && topicId) {
+          this.#settleLocalTopicAfterConfirmedStop({
+            agentId: messageContext.agentId,
+            groupId: messageContext.groupId,
+            operationId: result.operationId,
+            topicId,
+          });
+        }
+        if (parentOperationId) this.#get().completeOperation(parentOperationId);
+        return {
+          ...result,
+          autoStarted: !confirmed,
+          status: confirmed ? 'interrupted' : 'cancel_pending',
+          success: false,
+        };
+      }
       if (lateInterruptConfirmed && topicId) {
         void Promise.all([lateInterruptConfirmed, topicRefresh]).then(([confirmed]) => {
           if (!confirmed) return;
