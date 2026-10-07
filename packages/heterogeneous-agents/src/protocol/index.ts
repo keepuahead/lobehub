@@ -18,7 +18,7 @@ export {
   type CodexBranchRun,
   resolveCodexBranchRun,
   resolveCodexForkTarget,
-} from './codexForkTarget';
+} from '../codexForkTarget';
 export {
   buildHeterogeneousPrompt,
   type HeterogeneousPromptContextProvider,

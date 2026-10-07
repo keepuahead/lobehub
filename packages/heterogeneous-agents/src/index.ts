@@ -5,6 +5,11 @@ export {
   GrokBuildAdapter,
   QoderAdapter,
 } from './adapters';
+export {
+  type CodexBranchRun,
+  resolveCodexBranchRun,
+  resolveCodexForkTarget,
+} from './codexForkTarget';
 export type {
   HeterogeneousAgentCliError,
   HeterogeneousAgentDescriptor,
@@ -83,11 +88,6 @@ export type {
   SetErrorIntent,
 } from './mainAgentCoordinator';
 export { createMainAgentRunState, reduceMainAgent } from './mainAgentCoordinator';
-export {
-  type CodexBranchRun,
-  resolveCodexBranchRun,
-  resolveCodexForkTarget,
-} from './protocol/codexForkTarget';
 export type {
   EnabledProviderBindingModelRef,
   HeterogeneousProviderBindingCapability,
