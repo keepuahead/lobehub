@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { GOAL_ACCEPTANCE_TASK_TITLE } from '@lobechat/const/goal';
+import {
+  GOAL_ACCEPTANCE_TASK_TITLE,
+  GOAL_CLARIFICATION_OPTION,
+  GOAL_COORDINATOR_ACTOR_ID,
+  GOAL_MANAGER_QUESTION_TITLE,
+} from '@lobechat/const/goal';
 import { buildGoalManagerPrompt } from '@lobechat/prompts';
 import type {
   GoalGraphSnapshot,
@@ -24,15 +29,77 @@ import { TopicModel } from '@/database/models/topic';
 import { goals } from '@/database/schemas/goal';
 import type { LobeChatDatabase } from '@/database/type';
 import { AiAgentService } from '@/server/services/aiAgent';
+import { readDeviceDispatchRoute } from '@/server/services/aiAgent/helpers/heteroErrors';
 import { TopicStartReservationError } from '@/server/services/aiAgent/topicStartReservation';
+import { deviceGateway } from '@/server/services/deviceGateway';
 
+import { GoalBriefService } from './goalBriefs';
 import { TERMINAL_GOAL_STATUSES as finishedGoalStatuses } from './goalTraceRecorder';
-import { countDeviceOfflineRuns, DEFAULT_MANAGER_MAX_TURNS } from './recoveryPolicy';
+import {
+  classifyRunFailure,
+  countUnchargedRuns,
+  DEFAULT_MANAGER_MAX_TURNS,
+  nextDeviceOfflineRetryAt,
+  QUOTA_RESET_MARGIN_MS,
+  type RunFailure,
+} from './recoveryPolicy';
 import { scheduleGoalAdvance } from './scheduler';
 import { recoveryEligibility } from './supervisor/policy';
 import { goalWaitSchema, GoalWaitService } from './wait';
 
 const reason = z.string().trim().min(1).max(8000);
+/**
+ * The question an escalation puts to the owner. A bare reason left the gate
+ * asking "retry or retire?" while the decision that actually blocked the goal —
+ * waive a criterion, restore a closed PR — was buried in its text with no
+ * button to answer it.
+ */
+/**
+ * Option ids the coordinator and the planner own. Their gates are labelled by
+ * id on the goal page and in the inbox, so an authored answer reusing one would
+ * show the coordinator's label ("Retry task") over a different consequence.
+ */
+const RESERVED_ASK_OPTION_IDS = new Set<string>([
+  'fail',
+  'retire',
+  'retry',
+  ...Object.values(GOAL_CLARIFICATION_OPTION),
+]);
+
+const goalAskSchema = z
+  .object({
+    question: z.string().trim().min(1).max(2000),
+    options: z
+      .array(
+        z
+          .object({
+            id: z
+              .string()
+              .trim()
+              .regex(/^[\w-]{1,40}$/),
+            label: z.string().trim().min(1).max(120),
+            description: z.string().trim().max(600).optional(),
+            effect: z.enum(['retry', 'retire']).optional(),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(4),
+    recommendedOptionId: z.string().trim().optional(),
+  })
+  .strict()
+  .refine((ask) => new Set(ask.options.map((option) => option.id)).size === ask.options.length, {
+    message: 'Option ids must be unique',
+  })
+  .refine((ask) => ask.options.every((option) => !RESERVED_ASK_OPTION_IDS.has(option.id)), {
+    message: `Option ids ${[...RESERVED_ASK_OPTION_IDS].join(', ')} are reserved; name the answer itself (e.g. "waive")`,
+  })
+  .refine(
+    (ask) =>
+      !ask.recommendedOptionId ||
+      ask.options.some((option) => option.id === ask.recommendedOptionId),
+    { message: 'recommendedOptionId must name one of the options' },
+  );
 export const goalPlanSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -69,7 +136,7 @@ export const goalPlanSchema = z.discriminatedUnion('action', [
       failedOperationId: z.string().min(1),
     })
     .strict(),
-  z.object({ action: z.literal('escalate'), reason }).strict(),
+  z.object({ action: z.literal('escalate'), reason, ask: goalAskSchema.optional() }).strict(),
 ]);
 type GoalPlan = z.infer<typeof goalPlanSchema>;
 const activeStatuses = new Set(['planning', 'running']);
@@ -80,6 +147,99 @@ const TIMEOUT_MS = 20 * 60_000;
 const FEEDBACK_NOTE_LIMIT = 20;
 /** Source message id prefix of a dispatched planning turn; the suffix is its token. */
 const MANAGER_SOURCE_MESSAGE_PREFIX = 'msg_goal_manager_';
+/** Consecutive charged turns that errored without a plan before the Goal pauses. */
+export const MAX_FAILED_MANAGER_TURNS = 5;
+const FAILED_TURN_BASE_BACKOFF_MS = 60_000;
+const FAILED_TURN_MAX_BACKOFF_MS = 30 * 60_000;
+
+export type FailedTurnDecision =
+  | { action: 'pause'; failure: RunFailure; reason: string }
+  | {
+      action: 'retry';
+      /** Whether the failed turn counts toward the manager turn budget. */
+      charged: boolean;
+      failure: RunFailure;
+      failedTurns: number;
+      offlineTurns: number;
+      retryAfter: string;
+    };
+
+/**
+ * What to do after a planning turn ended in an error without committing a plan.
+ *
+ * It follows the same classification as Task recovery (`classifyRunFailure`):
+ * - A usage window that reports its reset waits for that reset. The refused
+ *   turn did no work, so it is not charged.
+ * - A device that is not reachable follows the Task offline schedule
+ *   (30 min, doubling to 8 h, six retries). It is not charged, and the Goal
+ *   pauses once the device stays away.
+ * - Credentials, spend or permission pause at once, because no retry fixes them.
+ * - Anything else backs off exponentially from 1 min to 30 min and is charged.
+ *   `MAX_FAILED_MANAGER_TURNS` in a row pause the Goal.
+ *
+ * Before this, every failure re-dispatched on the next tick. That is how one Goal
+ * spent its whole 100-turn budget on a session limit in 20 minutes.
+ */
+export const decideFailedTurn = (
+  error: unknown,
+  streak: { failedTurns?: number; offlineTurns?: number },
+  now = Date.now(),
+): FailedTurnDecision => {
+  const failure = classifyRunFailure(error);
+  const failedTurns = streak.failedTurns ?? 0;
+  // `offlineTurns` counts turns that never reached their device back to back. Any
+  // other ending reached it, so only a device failure carries the streak forward.
+  const offlineTurns = failure.kind === 'device_unavailable' ? (streak.offlineTurns ?? 0) : 0;
+  const message = (error as { message?: unknown } | undefined)?.message;
+  const detail = typeof message === 'string' && message ? `: ${message}` : '';
+
+  if (failure.kind === 'quota_reset' && failure.resetsAt! + QUOTA_RESET_MARGIN_MS > now)
+    return {
+      action: 'retry',
+      charged: false,
+      failedTurns,
+      failure,
+      offlineTurns,
+      retryAfter: new Date(failure.resetsAt! + QUOTA_RESET_MARGIN_MS).toISOString(),
+    };
+  if (failure.kind === 'device_unavailable') {
+    const retryAt = nextDeviceOfflineRetryAt(offlineTurns + 1, new Date(now));
+    if (!retryAt)
+      return { action: 'pause', failure, reason: `Main Agent device stayed offline${detail}` };
+    return {
+      action: 'retry',
+      charged: false,
+      failedTurns,
+      failure,
+      offlineTurns: offlineTurns + 1,
+      retryAfter: retryAt.toISOString(),
+    };
+  }
+  if (failure.kind === 'needs_user')
+    return {
+      action: 'pause',
+      failure,
+      reason: `Main Agent needs credentials, spend or permission fixed${detail}`,
+    };
+  if (failedTurns + 1 >= MAX_FAILED_MANAGER_TURNS)
+    return {
+      action: 'pause',
+      failure,
+      reason: `Main Agent failed ${failedTurns + 1} turns in a row without a plan${detail}`,
+    };
+  const backoff = Math.min(
+    FAILED_TURN_MAX_BACKOFF_MS,
+    FAILED_TURN_BASE_BACKOFF_MS * 2 ** failedTurns,
+  );
+  return {
+    action: 'retry',
+    charged: true,
+    failedTurns: failedTurns + 1,
+    failure,
+    offlineTurns,
+    retryAfter: new Date(now + backoff).toISOString(),
+  };
+};
 
 /**
  * The token a planning turn is keyed by, carrying the Goal it belongs to.
@@ -94,7 +254,9 @@ const managerTurnToken = (goalId: string) => `${goalId}_${randomUUID()}`;
 
 /** Excludes only the manager's own receipt. Concurrent policy/graph changes invalidate its plan. */
 export const managerSnapshot = (graph: GoalGraphSnapshot) => {
-  const { managerState: _state, ...config } = graph.goal.config ?? {};
+  // Coordinator receipts are not planning input: arming a Task's quota wake while a
+  // turn runs must not make that turn's plan stale.
+  const { managerState: _state, quotaRetryWakeAt: _quotaWake, ...config } = graph.goal.config ?? {};
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -134,7 +296,7 @@ export const problemKey = (problem: { reason: string; taskId?: string }) =>
  */
 export const answeredProblem = (state?: GoalManagerState) =>
   state?.consumed && state.problem && state.submitted
-    ? { key: state.problem, reason: state.submitted.reason }
+    ? { ask: state.submitted.ask, key: state.problem, reason: state.submitted.reason }
     : undefined;
 
 export class GoalManagerService {
@@ -463,6 +625,11 @@ export class GoalManagerService {
   };
 
   private graph = (db = this.db) => new GoalGraphModel(db, this.userId, this.workspaceId);
+  private coordinatorGraph = (db = this.db) =>
+    new GoalGraphModel(db, this.userId, this.workspaceId, {
+      id: GOAL_COORDINATOR_ACTOR_ID,
+      type: 'system',
+    });
 
   private reviews = async (graph: GoalGraphSnapshot, db = this.db) => {
     const tasks = new TaskModel(db, this.userId, this.workspaceId);
@@ -528,13 +695,23 @@ export class GoalManagerService {
     return { goalId, outcome: 'waiting_external', message };
   };
 
+  /** Whether the device the last turn could not reach is connected again. */
+  private offlineDeviceIsBack = async (state: GoalManagerState) => {
+    const route = state.offlineDevice;
+    if (!route || !deviceGateway.isConfigured) return false;
+    const devices = await deviceGateway.queryDeviceList(route.userId, route.workspaceId);
+    return devices.some((device) => device.deviceId === route.deviceId);
+  };
+
   private pause = async (goalId: string, message: string): Promise<GoalTickResult> => {
     await this.db.transaction(async (db) => {
       const model = new GoalModel(db, this.userId, this.workspaceId);
       const goal = await model.lockById(goalId);
       if (goal && activeStatuses.has(goal.status)) {
         await model.updateStatus(goalId, 'paused');
-        await this.graph(db).recordGoalStatus(goalId, goal.status, 'paused', message);
+        // The system paused it (a spent turn budget, an unconfirmed main Agent
+        // turn), so the timeline must not file it as the owner's pause.
+        await this.coordinatorGraph(db).recordGoalStatus(goalId, goal.status, 'paused', message);
       }
     });
     return { goalId, outcome: 'no_progress', message };
@@ -709,19 +886,69 @@ export class GoalManagerService {
         }
         return this.wait(goal.id, 'Waiting for main Agent CLI planning turn');
       }
-      await this.db.transaction(async (db) => {
+      const failed = await this.db.transaction(async (db) => {
         const fresh = await new GoalModel(db, this.userId, this.workspaceId).lockById(goal.id);
-        if (
-          fresh?.config?.managerState?.token === state.token &&
-          !fresh.config.managerState.consumed
-        ) {
-          await this.save(db, goal.id, {
-            ...fresh.config.managerState,
-            operationId: operation?.id ?? state.operationId,
-            consumed: true,
-          });
+        const current = fresh?.config?.managerState;
+        if (current?.token !== state.token || current.consumed) return;
+        const settled: GoalManagerState = {
+          ...current,
+          operationId: operation?.id ?? state.operationId,
+          consumed: true,
+        };
+        const cleared = {
+          failedTurns: undefined,
+          offlineDevice: undefined,
+          offlineTurns: undefined,
+          retryAfter: undefined,
+        };
+        // A committed plan is progress whatever the run's ending; only an errored
+        // turn that committed nothing gates the next dispatch.
+        if (current.submitted || operation?.status !== 'error') {
+          await this.save(db, goal.id, { ...settled, ...cleared });
+          return;
         }
+        const decision = decideFailedTurn(operation.error, current);
+        if (decision.action === 'pause') {
+          // The person who resumes the Goal gets a fresh retry schedule. Pause in
+          // this same transaction: committing the consumed receipt first would
+          // let a concurrent tick claim and dispatch a replacement turn before
+          // the pause took the row lock.
+          await this.save(db, goal.id, { ...settled, ...cleared });
+          const message = `${decision.reason}. Resume with: lh goal resume ${goal.id}`;
+          if (activeStatuses.has(fresh!.status)) {
+            await new GoalModel(db, this.userId, this.workspaceId).updateStatus(goal.id, 'paused');
+            await this.graph(db).recordGoalStatus(goal.id, fresh!.status, 'paused', message);
+          }
+          return { ...decision, reason: message };
+        }
+        await this.save(db, goal.id, {
+          ...settled,
+          failedTurns: decision.failedTurns || undefined,
+          offlineDevice:
+            decision.failure.kind === 'device_unavailable'
+              ? readDeviceDispatchRoute(operation.error)
+              : undefined,
+          offlineTurns: decision.offlineTurns || undefined,
+          retryAfter: decision.retryAfter,
+          turns: decision.charged ? current.turns : Math.max(0, current.turns - 1),
+        });
+        return decision;
       });
+      if (failed?.action === 'pause')
+        return { goalId: goal.id, outcome: 'no_progress', message: failed.reason };
+      if (failed) {
+        await scheduleGoalAdvance({
+          goalId: goal.id,
+          userId: this.userId,
+          workspaceId: this.workspaceId,
+          delay: GoalWaitService.arm(failed.retryAfter).delay,
+        });
+        return {
+          goalId: goal.id,
+          outcome: 'waiting_external',
+          message: `Main Agent turn failed without a plan (${failed.failure.kind}); the next turn starts after ${failed.retryAfter}`,
+        };
+      }
       return {
         goalId: goal.id,
         outcome: 'advanced',
@@ -761,7 +988,7 @@ export class GoalManagerService {
           runs[0].operationId,
         )
       : undefined;
-    return !recoveryEligibility(graph, failed, op, false, countDeviceOfflineRuns(runs)).eligible;
+    return !recoveryEligibility(graph, failed, op, false, countUnchargedRuns(runs)).eligible;
   };
 
   private startTurn = async (
@@ -802,6 +1029,21 @@ export class GoalManagerService {
       if (problem) return null;
       return this.pause(goal.id, 'Goal or main Agent turn budget exhausted');
     }
+    // The previous turn failed without a plan. Its settlement already queued the
+    // wakeup for this time, so a tick arriving earlier (the sweep, a Task event)
+    // only reports the wait instead of queueing another one. An invited turn
+    // waits too: it would fail the same way, and the problem is still there later.
+    // A device seen back online ends the wait early, as it does for Tasks.
+    if (
+      state?.retryAfter &&
+      Date.parse(state.retryAfter) > Date.now() &&
+      !(await this.offlineDeviceIsBack(state))
+    )
+      return {
+        goalId: goal.id,
+        outcome: 'waiting_external',
+        message: `Main Agent turn deferred until ${state.retryAfter} after a failed turn`,
+      };
     const claimed = await this.db.transaction(async (db) => {
       const model = new GoalModel(db, this.userId, this.workspaceId);
       const fresh = await model.lockById(goal.id);
@@ -871,6 +1113,9 @@ export class GoalManagerService {
           : {}),
         ...(state?.adoptedOperationId && { adoptedOperationId: state.adoptedOperationId }),
         ...(previousTopicIds.length > 0 && { previousTopicIds }),
+        // Failure streaks span turns; settling a turn that did not error resets them.
+        ...(freshState?.failedTurns && { failedTurns: freshState.failedTurns }),
+        ...(freshState?.offlineTurns && { offlineTurns: freshState.offlineTurns }),
         reviewSnapshot: reviews.hash,
         topicId,
         turns: (state?.turns ?? 0) + 1,
@@ -1186,7 +1431,7 @@ export class GoalManagerService {
         if (
           !task ||
           runs[0]?.operationId !== plan.failedOperationId ||
-          !recoveryEligibility(graph, task, failure, false, countDeviceOfflineRuns(runs)).eligible
+          !recoveryEligibility(graph, task, failure, false, countUnchargedRuns(runs)).eligible
         )
           throw new TRPCError({
             code: 'CONFLICT',
@@ -1201,6 +1446,44 @@ export class GoalManagerService {
           ))
         )
           throw new TRPCError({ code: 'CONFLICT', message: 'Task changed before retry' });
+      } else if (plan.action === 'escalate' && state.problem && plan.ask) {
+        // A takeover question is answered on the failed Task's gate, so every
+        // answer has to say what happens to that Task — an answer that leaves it
+        // failed would only reopen the same gate on the next tick.
+        if (plan.ask.options.some((option) => !option.effect))
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'Every option of a takeover question needs an effect (retry or retire) for the blocked Task',
+          });
+      } else if (plan.action === 'escalate' && !state.problem && plan.ask) {
+        // A question with answers is asked, not parked: it opens a gate the
+        // owner can answer from anywhere, and the answer wakes the next turn.
+        const node = await authored.createNode(goalId, {
+          description: plan.reason,
+          kind: 'decision',
+          status: 'waiting',
+          title: GOAL_MANAGER_QUESTION_TITLE,
+        });
+        if (!node) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+        const problemNode = graph.nodes.find((n) => n.kind === 'problem');
+        if (problemNode) await authored.createEdge(goalId, problemNode.id, node.id, 'leads_to');
+        const decision = await authored.createDecision(goalId, node.id, {
+          authority: 'user',
+          options: plan.ask.options,
+          question: plan.ask.question,
+          recommendedOptionId: plan.ask.recommendedOptionId,
+          requestedUserId: this.userId,
+        });
+        await model.updateStatus(goalId, 'review');
+        await authored.recordGoalStatus(goalId, goal.status, 'review', plan.reason);
+        if (decision)
+          await new GoalBriefService(db, this.userId, this.workspaceId).openDecision(goal, {
+            decisionId: decision.id,
+            options: decision.options,
+            question: decision.question,
+            recommendedOptionId: decision.recommendedOptionId,
+          });
       } else if (plan.action === 'escalate' && !state.problem) {
         // Only an ORDINARY planning turn pauses the Goal here. A takeover turn has
         // a gate waiting behind it for this exact problem, and the coordinator
@@ -1216,6 +1499,7 @@ export class GoalManagerService {
           action: plan.action,
           reason: plan.reason,
           ...(plan.action === 'retry' ? { taskId: plan.taskId } : {}),
+          ...(plan.action === 'escalate' && plan.ask ? { ask: plan.ask } : {}),
         },
         readyForAcceptance: plan.action === 'verify',
         replanReason: undefined,
