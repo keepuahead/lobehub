@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Input, Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Input, Tag } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ChevronDown, ChevronRight, SearchIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

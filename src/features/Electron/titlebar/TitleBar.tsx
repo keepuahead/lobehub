@@ -1,6 +1,6 @@
 import { TITLE_BAR_HEIGHT } from '@lobechat/desktop-bridge';
 import { Flexbox } from '@lobehub/ui';
-import { Divider } from '@lobehub/ui/base-ui';
+import { Divider } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { useDeferredMount } from '@/hooks/useDeferredMount';

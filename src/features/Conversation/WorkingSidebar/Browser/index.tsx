@@ -1,8 +1,8 @@
 import { isDesktop } from '@lobechat/const';
 import { nanoid } from '@lobechat/utils';
 import { Center, Empty, Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Button, Input, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { ActionIcon, Button, Input, Text, toast } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import {
   Camera,
   ChevronLeft,

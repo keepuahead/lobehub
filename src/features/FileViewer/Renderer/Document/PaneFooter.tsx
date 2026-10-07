@@ -1,5 +1,5 @@
-import { Tabs } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Tabs } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { type ReactNode, useEffect, useState } from 'react';
 
 const styles = createStaticStyles(({ css }) => ({

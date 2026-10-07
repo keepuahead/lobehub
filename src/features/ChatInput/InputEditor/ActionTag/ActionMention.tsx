@@ -1,6 +1,6 @@
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
-import { cx } from 'antd-style';
+import { cx } from '@lobehub/ui';
 import { TargetIcon, TerminalIcon, WrenchIcon } from 'lucide-react';
 import type { FC, MouseEvent } from 'react';
 import { memo } from 'react';

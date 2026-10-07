@@ -1,7 +1,7 @@
 import { type DropdownMenuCheckboxItem } from '@lobehub/ui';
 import { DropdownMenu, Flexbox } from '@lobehub/ui';
-import { ActionIcon } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { ActionIcon } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { Clock3Icon, PlusIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';

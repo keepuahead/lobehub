@@ -2,7 +2,7 @@
 
 import { useEditor } from '@lobehub/editor/react';
 import { Flexbox } from '@lobehub/ui';
-import { toast } from '@lobehub/ui/base-ui';
+import { toast } from '@lobehub/ui';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

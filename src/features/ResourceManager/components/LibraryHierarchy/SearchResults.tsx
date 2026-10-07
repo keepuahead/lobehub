@@ -1,9 +1,9 @@
 'use client';
 
 import { Center, Flexbox, Icon } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import { useDebounce } from 'ahooks';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { SearchXIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

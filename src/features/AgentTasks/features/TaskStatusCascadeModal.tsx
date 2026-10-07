@@ -2,8 +2,8 @@
 
 import type { TaskStatus } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, createModal, ScrollArea, Text, toast, useModalContext } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, createModal, ScrollArea, Text, toast, useModalContext } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

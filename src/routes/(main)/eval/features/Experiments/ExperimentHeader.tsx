@@ -9,8 +9,8 @@ import {
   DropdownMenu,
   Text,
   toast,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { Ellipsis, Pencil, Trash2 } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

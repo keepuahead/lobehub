@@ -2,7 +2,7 @@
 
 import type { VerifyCodingPullRequest } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   GitMerge,
   GitPullRequest,

@@ -6,8 +6,8 @@ import { type IEditor } from '@lobehub/editor';
 import { HIDE_TOOLBAR_COMMAND } from '@lobehub/editor';
 import { type ChatInputActionsProps } from '@lobehub/editor/react';
 import { Block } from '@lobehub/ui';
-import { Avatar } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Avatar } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 

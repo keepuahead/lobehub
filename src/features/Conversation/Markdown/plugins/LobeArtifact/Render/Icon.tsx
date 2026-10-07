@@ -1,7 +1,7 @@
 import { SiReact } from '@icons-pack/react-simple-icons';
 import { Icon } from '@lobehub/ui';
-import { Spin } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Spin } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { CodeXml, GlobeIcon, ImageIcon, OrigamiIcon } from 'lucide-react';
 import { memo } from 'react';
 

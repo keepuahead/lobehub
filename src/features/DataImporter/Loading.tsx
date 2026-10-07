@@ -1,7 +1,7 @@
 'use client';
 
 import { Center } from '@lobehub/ui';
-import { createStaticStyles, keyframes } from 'antd-style';
+import { createStaticStyles, keyframes } from '@lobehub/ui';
 
 const size = 28;
 

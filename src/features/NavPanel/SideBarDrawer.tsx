@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { ActionIcon, DrawerPopup, DrawerPortal, DrawerRoot, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { ActionIcon, DrawerPopup, DrawerPortal, DrawerRoot, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { XIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { memo, Suspense, useEffect, useState } from 'react';

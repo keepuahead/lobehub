@@ -3,8 +3,8 @@
 import { type SkillResourceTreeNode } from '@lobechat/types';
 import { Github } from '@lobehub/icons';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Avatar } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, Avatar } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { unzip } from 'fflate';
 import { DotIcon, ExternalLinkIcon } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';

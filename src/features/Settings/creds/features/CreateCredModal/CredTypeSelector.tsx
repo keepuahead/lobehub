@@ -2,7 +2,7 @@
 
 import { type CredType } from '@lobechat/types';
 import { Block, Flexbox } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { File, Globe, Key, TerminalSquare } from 'lucide-react';
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -7,8 +7,8 @@ import {
   ModalFooter,
   toast,
   useModalContext,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { t as translate } from 'i18next';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

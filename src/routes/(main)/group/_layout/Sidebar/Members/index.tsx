@@ -9,8 +9,8 @@ import {
   AccordionTrigger,
   ActionIcon,
   Text,
-} from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+} from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { ArrowUpDown, Loader2Icon, UserPlus } from 'lucide-react';
 import { type MouseEvent } from 'react';
 import { memo, useState } from 'react';

@@ -1,8 +1,8 @@
 'use client';
 
 import type { PptxViewer, SlideHandle, TextSearchResult } from '@aiden0z/pptx-renderer';
-import { ActionIcon, Input } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, Input } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ChevronRightIcon, MinusIcon, PlusIcon, SearchIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

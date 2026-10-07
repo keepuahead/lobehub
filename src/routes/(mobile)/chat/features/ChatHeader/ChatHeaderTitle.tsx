@@ -1,7 +1,7 @@
 import { Flexbox } from '@lobehub/ui';
-import { ActionIcon } from '@lobehub/ui/base-ui';
+import { ActionIcon } from '@lobehub/ui';
 import { ChatHeader } from '@lobehub/ui/mobile';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { ChevronDown } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

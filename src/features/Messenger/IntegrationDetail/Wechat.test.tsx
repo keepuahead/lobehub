@@ -13,7 +13,7 @@ const messengerServiceMocks = vi.hoisted(() => ({
 }));
 const useSWRMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   QRCode: ({
     'aria-label': ariaLabel,
@@ -53,7 +53,7 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
   ),
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   createStaticStyles: () => ({ error: 'error', qrSlot: 'qrSlot', setup: 'setup' }),
 }));

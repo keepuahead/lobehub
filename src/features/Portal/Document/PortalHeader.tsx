@@ -2,7 +2,7 @@
 
 import { DESKTOP_HEADER_ICON_SMALL_SIZE } from '@lobechat/const';
 import { Flexbox } from '@lobehub/ui';
-import { ActionIcon } from '@lobehub/ui/base-ui';
+import { ActionIcon } from '@lobehub/ui';
 import { Maximize2Icon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

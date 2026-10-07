@@ -2,9 +2,9 @@
 
 import { type BuiltinSkillManifest, type SkillListItem } from '@lobechat/types';
 import { DropdownMenu, Flexbox, Icon, stopPropagation } from '@lobehub/ui';
-import { Avatar, Button, confirmModal, createModal } from '@lobehub/ui/base-ui';
+import { Avatar, Button, confirmModal, createModal } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { DownloadIcon, MoreHorizontalIcon, Plus, Trash2 } from 'lucide-react';
 import { lazy, memo, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';

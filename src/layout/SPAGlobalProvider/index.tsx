@@ -1,8 +1,8 @@
 'use client';
 
 import { ContextMenuHost, TooltipGroup } from '@lobehub/ui';
-import { ModalHost, ToastHost } from '@lobehub/ui/base-ui';
-import { StyleProvider } from 'antd-style';
+import { ModalHost, ToastHost } from '@lobehub/ui';
+import { StyleProvider } from '@lobehub/ui';
 import { domMax, LazyMotion } from 'motion/react';
 import { Component, type CSSProperties, lazy, memo, type PropsWithChildren, Suspense } from 'react';
 

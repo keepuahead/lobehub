@@ -1,6 +1,6 @@
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Badge, Button, Spin, Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Badge, Button, Spin, Tag } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { BoltIcon, RotateCwIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

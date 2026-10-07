@@ -2,8 +2,8 @@
 
 import type { EvalThreadResult } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Tabs } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Tabs } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';

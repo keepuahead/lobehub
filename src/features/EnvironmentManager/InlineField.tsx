@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { ActionIcon, Input, Select, Text, TextArea, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { ActionIcon, Input, Select, Text, TextArea, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { CheckIcon, PencilIcon, XIcon } from 'lucide-react';
 import { type KeyboardEvent, memo, type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';

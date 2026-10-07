@@ -9,7 +9,7 @@ import {
   Flexbox,
   menuSharedStyles,
 } from '@lobehub/ui';
-import { cssVar, cx } from 'antd-style';
+import { cssVar, cx } from '@lobehub/ui';
 import { Check } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { memo, useState } from 'react';

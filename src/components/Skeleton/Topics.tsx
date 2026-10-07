@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cssVar, responsive } from 'antd-style';
+import { createStaticStyles, cssVar, responsive } from '@lobehub/ui';
 
 import NavHeader from '@/features/NavHeader';
 import type { RouteSkeletonProps } from '@/spa/router/routeMeta';

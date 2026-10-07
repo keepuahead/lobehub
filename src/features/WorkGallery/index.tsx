@@ -2,8 +2,8 @@
 
 import type { WorkSummaryItem } from '@lobechat/types';
 import { Center, Empty, Flexbox } from '@lobehub/ui';
-import { Avatar, Button } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Avatar, Button } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { PackageOpenIcon, TriangleAlertIcon } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

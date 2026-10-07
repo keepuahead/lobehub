@@ -2,9 +2,9 @@
 
 import { agentDisplayName } from '@lobechat/types';
 import { Flexbox, SearchBar, Tooltip } from '@lobehub/ui';
-import { ActionIcon, Avatar, Button, Checkbox, List, Switch, Text } from '@lobehub/ui/base-ui';
+import { ActionIcon, Avatar, Button, Checkbox, List, Switch, Text } from '@lobehub/ui';
 import { useHover } from 'ahooks';
-import { createStaticStyles, cx } from 'antd-style';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { X } from 'lucide-react';
 import { type ChangeEvent } from 'react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';

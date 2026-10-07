@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Empty, Flexbox, Icon, SortableList } from '@lobehub/ui';
-import { Button, Text, toast } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { Button, Text, toast } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { ArrowDownIcon, ArrowUpIcon, FlaskConicalIcon, PencilIcon, PlusIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

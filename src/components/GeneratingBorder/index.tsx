@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { createGlobalStyle, createStaticStyles, cssVar } from 'antd-style';
+import { createGlobalStyle, createStaticStyles, cssVar } from '@lobehub/ui';
 import { memo, type ReactNode } from 'react';
 
 /**

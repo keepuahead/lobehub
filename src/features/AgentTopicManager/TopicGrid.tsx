@@ -2,8 +2,8 @@
 
 import type { GroupedTopic } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, responsive } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, responsive } from '@lobehub/ui';
 import { Fragment, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 

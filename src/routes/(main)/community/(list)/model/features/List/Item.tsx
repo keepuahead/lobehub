@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Flexbox, Icon, Popover } from '@lobehub/ui';
-import { Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Tag, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { ClockIcon } from 'lucide-react';
 import { memo } from 'react';

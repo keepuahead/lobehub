@@ -8,12 +8,12 @@ const messengerServiceMocks = vi.hoisted(() => ({
   pollLinqLink: vi.fn(),
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   QRCode: ({ value }: { value: string }) => <span data-value={value} role="img" />,
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   createStaticStyles: () => ({ code: 'code', qrSlot: 'qrSlot', setup: 'setup', tips: 'tips' }),
 }));

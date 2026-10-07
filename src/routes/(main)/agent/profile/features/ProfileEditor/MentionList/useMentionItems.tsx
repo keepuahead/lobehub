@@ -7,7 +7,7 @@ import { type ToolManifest } from '@lobechat/types';
 import { type IEditor } from '@lobehub/editor';
 import { INSERT_MENTION_COMMAND } from '@lobehub/editor';
 import { Icon, Image } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { memo, useCallback, useMemo } from 'react';
 

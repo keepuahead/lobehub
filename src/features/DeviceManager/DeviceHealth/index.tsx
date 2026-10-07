@@ -2,7 +2,7 @@
 
 import { AreaChart, Tracker } from '@lobehub/charts';
 import { Flexbox } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
+import { Button, Text } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import { formatSize } from '@/utils/format';

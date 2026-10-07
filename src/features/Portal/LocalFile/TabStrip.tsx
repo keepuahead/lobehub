@@ -2,9 +2,9 @@
 
 import { isDesktop } from '@lobechat/const';
 import { ContextMenuTrigger, type GenericItemType, Icon } from '@lobehub/ui';
-import { confirmModal, ScrollArea } from '@lobehub/ui/base-ui';
+import { confirmModal, ScrollArea } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { XIcon } from 'lucide-react';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';

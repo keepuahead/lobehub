@@ -2,8 +2,8 @@
 
 import { type FlexboxProps } from '@lobehub/ui';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles, responsive, useResponsive } from 'antd-style';
+import { Button, Tag } from '@lobehub/ui';
+import { createStaticStyles, responsive, useResponsive } from '@lobehub/ui';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode } from 'react';
 import { memo } from 'react';

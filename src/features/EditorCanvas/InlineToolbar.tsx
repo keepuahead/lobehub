@@ -5,7 +5,7 @@ import { getHotkeyById, HotkeyEnum, INSERT_HEADING_COMMAND } from '@lobehub/edit
 import { type ChatInputActionsProps, type EditorState } from '@lobehub/editor/react';
 import { ChatInputActions, FloatActions } from '@lobehub/editor/react';
 import { Block } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import {
   BoldIcon,
   CodeXmlIcon,

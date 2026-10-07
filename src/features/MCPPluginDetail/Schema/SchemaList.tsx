@@ -5,7 +5,7 @@ import {
   AccordionPanel,
   AccordionRoot,
   AccordionTrigger,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo } from 'react';
 

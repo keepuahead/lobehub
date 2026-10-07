@@ -2,7 +2,7 @@
 
 import { TITLE_BAR_HEIGHT } from '@lobechat/desktop-bridge';
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { useWatchThemeUpdate } from '@/features/Electron/system/useWatchThemeUpdate';

@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { useResponsive } from 'antd-style';
+import { useResponsive } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { useQueryState } from '@/hooks/useQueryParam';

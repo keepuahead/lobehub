@@ -2,7 +2,7 @@
 
 import type { DeviceVisibility } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Tabs } from '@lobehub/ui/base-ui';
+import { Button, Tabs } from '@lobehub/ui';
 import { LockIcon, RefreshCwIcon, TerminalIcon, UsersIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

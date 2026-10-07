@@ -1,8 +1,8 @@
 import { isDesktop } from '@lobechat/const';
 import type { DropdownItem } from '@lobehub/ui';
 import { Icon } from '@lobehub/ui';
-import { confirmModal, toast } from '@lobehub/ui/base-ui';
-import { cssVar, useResponsive } from 'antd-style';
+import { confirmModal, toast } from '@lobehub/ui';
+import { cssVar, useResponsive } from '@lobehub/ui';
 import {
   Clock3Icon,
   CopyPlus,

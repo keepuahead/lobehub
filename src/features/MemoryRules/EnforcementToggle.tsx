@@ -2,8 +2,8 @@
 
 import type { ExpertiseEnforcement } from '@lobechat/types';
 import { Icon } from '@lobehub/ui';
-import { Tooltip } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { Tooltip } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { BellIcon, ShieldCheckIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

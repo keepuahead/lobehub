@@ -2,8 +2,8 @@
 
 import type { TaskRunVerifySummary } from '@lobechat/types';
 import { Icon } from '@lobehub/ui';
-import { Tag } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Tag } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { CircleCheck, CircleDashed, CircleX, Loader2, TriangleAlert } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

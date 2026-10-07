@@ -2,8 +2,8 @@
 
 import { type GroupAvatarProps } from '@lobehub/ui';
 import { GroupAvatar } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Skeleton } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 
 import { DEFAULT_AVATAR } from '@/const/meta';

@@ -1,8 +1,8 @@
 import { isDesktop } from '@lobechat/const';
 import type { MarkdownProps } from '@lobehub/ui';
 import { Center, Empty, Flexbox, Image, Markdown } from '@lobehub/ui';
-import { Text, ToggleGroup } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Text, ToggleGroup } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { CodeIcon, ExternalLinkIcon, EyeIcon, RefreshCwIcon } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

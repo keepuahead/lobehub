@@ -1,5 +1,5 @@
 import { Tooltip } from '@lobehub/ui';
-import { Alert } from '@lobehub/ui/base-ui';
+import { Alert } from '@lobehub/ui';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 

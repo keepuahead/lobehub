@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
   renderDropdownMenuItems,
 } from '@lobehub/ui';
-import { createGlobalStyle, createStaticStyles, cssVar, cx } from 'antd-style';
+import { createGlobalStyle, createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { type CSSProperties, type ReactNode } from 'react';
 import {
   isValidElement,

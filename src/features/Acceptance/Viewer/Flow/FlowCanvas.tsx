@@ -9,7 +9,7 @@ import {
   useReactFlow,
   type Viewport,
 } from '@xyflow/react';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useEffect, useRef } from 'react';
 
 import { observeWidth } from '@/features/AgentGoals/ProcessControl/Graph/useFitViewOnResize';

@@ -1,5 +1,5 @@
 import { Center, Flexbox } from '@lobehub/ui';
-import { Checkbox, Spin } from '@lobehub/ui/base-ui';
+import { Checkbox, Spin } from '@lobehub/ui';
 import { type CSSProperties, type ReactNode } from 'react';
 import { memo, useState } from 'react';
 

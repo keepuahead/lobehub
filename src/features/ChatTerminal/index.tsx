@@ -1,8 +1,8 @@
 'use client';
 
 import { isDesktop } from '@lobechat/const';
-import { DraggablePanel } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { DraggablePanel } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { lazy, memo, Suspense, useEffect, useState } from 'react';
 
 import { useToggleTerminalPanelHotkey } from '@/hooks/useHotkeys';

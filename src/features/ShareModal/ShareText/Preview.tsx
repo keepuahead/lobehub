@@ -1,5 +1,5 @@
 import { Markdown } from '@lobehub/ui';
-import { cx } from 'antd-style';
+import { cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { containerStyles } from '../style';

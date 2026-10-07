@@ -2,8 +2,8 @@
 
 import { SendButton } from '@lobehub/editor/react';
 import { Flexbox } from '@lobehub/ui';
-import { Button, Select, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Button, Select, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { Undo2Icon } from 'lucide-react';
 import { memo, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

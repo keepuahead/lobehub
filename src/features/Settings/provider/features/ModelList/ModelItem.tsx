@@ -1,6 +1,6 @@
 import { copyToClipboard, Flexbox } from '@lobehub/ui';
-import { ActionIcon, confirmModal, Switch, Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, confirmModal, Switch, Tag, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { LucidePencil, TrashIcon } from 'lucide-react';
 import { type AiProviderModelListItem } from 'model-bank';
 import { AiModelSourceEnum } from 'model-bank/aiModel';

@@ -1,6 +1,6 @@
 import { Center, Flexbox } from '@lobehub/ui';
-import { Accordion, Spin, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Accordion, Spin, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo, type ReactNode, useState } from 'react';
 
 import AsyncError from '@/components/AsyncError';

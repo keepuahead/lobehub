@@ -1,9 +1,9 @@
 'use client';
 
 import { Center, Flexbox } from '@lobehub/ui';
-import { Checkbox, Spin } from '@lobehub/ui/base-ui';
+import { Checkbox, Spin } from '@lobehub/ui';
 import { VirtuosoMasonry } from '@virtuoso.dev/masonry';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { SearchIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

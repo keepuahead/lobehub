@@ -1,5 +1,5 @@
 import { Center, Icon, Tooltip } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { CircleUser } from 'lucide-react';
 import { memo } from 'react';
 

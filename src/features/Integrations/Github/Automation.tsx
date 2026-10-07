@@ -2,8 +2,8 @@
 
 import type { GithubIntegrationPreference } from '@lobechat/types';
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Switch, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Switch, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import {
   CircleXIcon,
   GitMergeIcon,

@@ -5,7 +5,7 @@ import {
   AccordionPanel,
   AccordionTrigger,
   Text,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,5 +1,5 @@
 import { Block, Empty, Flexbox, SortableList } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 

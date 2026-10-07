@@ -3,7 +3,7 @@
 import { BRANDING_PROVIDER } from '@lobechat/business-const';
 import { AES_GCM_URL, BASE_PROVIDER_DOC_URL, FORM_STYLE } from '@lobechat/const';
 import { Center, Flexbox, Icon, stopPropagation, Tooltip } from '@lobehub/ui';
-import { Avatar, Skeleton, Spin, Switch } from '@lobehub/ui/base-ui';
+import { Avatar, Skeleton, Spin, Switch } from '@lobehub/ui';
 import {
   Form,
   type FormFieldProps,
@@ -11,9 +11,9 @@ import {
   type FormValues,
   useForm,
   useWatch,
-} from '@lobehub/ui/base-ui/form';
+} from '@lobehub/ui/form';
 import { useDebounceFn } from 'ahooks';
-import { createStaticStyles, cssVar, cx, responsive } from 'antd-style';
+import { createStaticStyles, cssVar, cx, responsive } from '@lobehub/ui';
 import { get, set } from 'es-toolkit/compat';
 import { InfoIcon, LockIcon } from 'lucide-react';
 import { AiProviderBaseURLSchema } from 'model-bank/aiProvider';

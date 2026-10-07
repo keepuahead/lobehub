@@ -2,8 +2,8 @@
 
 import { ChatInput, ChatInputActionBar, SendButton } from '@lobehub/editor/react';
 import { Flexbox } from '@lobehub/ui';
-import { TextArea } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { TextArea } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { memo } from 'react';
 

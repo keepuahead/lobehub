@@ -6,7 +6,7 @@ import {
   ScrollArea,
   Text,
   useModalContext,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import { t } from 'i18next';
 import { useTranslation } from 'react-i18next';
 

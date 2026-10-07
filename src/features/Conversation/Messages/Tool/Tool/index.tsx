@@ -1,6 +1,6 @@
 import { getBuiltinRender } from '@lobechat/builtin-tools/renders';
 import { Flexbox } from '@lobehub/ui';
-import { Accordion, Skeleton } from '@lobehub/ui/base-ui';
+import { Accordion, Skeleton } from '@lobehub/ui';
 import { type CSSProperties } from 'react';
 import { memo, useState } from 'react';
 

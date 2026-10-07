@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Button, createModal, type ModalInstance, useModalContext } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, createModal, type ModalInstance, useModalContext } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo } from 'react';
 

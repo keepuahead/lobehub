@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo, useState } from 'react';
 
 import UploadCard, { UPLOAD_CARD_SIZE, type UploadData } from './UploadCard';

@@ -18,7 +18,7 @@ const userState = {
 
 const mockConfirmModal = vi.fn();
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Select: ({
     classNames,
@@ -58,7 +58,7 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
   confirmModal: (...args: unknown[]) => mockConfirmModal(...args),
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createStaticStyles: () => ({
     backButton: 'backButton',

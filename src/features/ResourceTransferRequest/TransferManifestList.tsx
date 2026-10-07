@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, SkeletonText, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Button, SkeletonText, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import type { LucideIcon } from 'lucide-react';
 import { PowerOff, RotateCcw, TriangleAlert, Unlink } from 'lucide-react';
 import type { CSSProperties } from 'react';

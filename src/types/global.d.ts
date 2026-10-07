@@ -1,4 +1,4 @@
-import 'antd-style';
+import '@lobehub/ui';
 
 import { type IEditor } from '@lobehub/editor';
 import { type LobeCustomStylish, type LobeCustomToken } from '@lobehub/ui';

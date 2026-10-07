@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox, Highlighter } from '@lobehub/ui';
-import { Alert } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Alert } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { MessageSquare, Timer, Wrench } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';

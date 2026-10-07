@@ -49,7 +49,7 @@ vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Text: ({ children }: { children: ReactNode }) => <span data-testid="label">{children}</span>,
 }));
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Text: ({ children }: { children: ReactNode }) => <span data-testid="label">{children}</span>,
 }));

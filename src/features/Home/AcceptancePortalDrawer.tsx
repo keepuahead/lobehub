@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Drawer } from '@lobehub/ui/base-ui';
+import { Drawer } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { PortalContent } from '@/features/Portal/router';

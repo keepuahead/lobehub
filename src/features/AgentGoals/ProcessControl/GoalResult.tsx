@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox, Markdown } from '@lobehub/ui';
-import { Divider, Skeleton } from '@lobehub/ui/base-ui';
+import { Divider, Skeleton } from '@lobehub/ui';
 import { useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 

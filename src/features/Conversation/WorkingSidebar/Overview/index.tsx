@@ -2,9 +2,9 @@
 
 import type { DeviceGitLinkedPullRequest } from '@lobechat/types';
 import { Empty, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Button, Skeleton, toast } from '@lobehub/ui/base-ui';
+import { Button, Skeleton, toast } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import {
   ArrowDownIcon,
   ArrowUpIcon,

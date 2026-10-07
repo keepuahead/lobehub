@@ -2,7 +2,7 @@
 
 import { RENDERER_HANDLED_LINK_ATTR } from '@lobechat/desktop-bridge';
 import { A } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import type { MouseEvent } from 'react';
 import { memo, useCallback } from 'react';
 

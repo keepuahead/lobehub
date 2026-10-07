@@ -1,5 +1,5 @@
 import { Flexbox, Icon, stopPropagation } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { AudioLinesIcon } from 'lucide-react';
 import { memo } from 'react';
 

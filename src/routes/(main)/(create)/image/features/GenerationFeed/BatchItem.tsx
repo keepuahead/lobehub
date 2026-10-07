@@ -2,8 +2,8 @@
 
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { ActionIconGroup, Block, Flexbox, Grid, Image, Markdown } from '@lobehub/ui';
-import { Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Tag, Text, toast } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { omit } from 'es-toolkit/compat';
 import { CopyIcon, RotateCcwSquareIcon, Trash2 } from 'lucide-react';

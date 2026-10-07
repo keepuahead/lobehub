@@ -2,8 +2,8 @@
 
 import { DERIVED_DOCUMENT_SOURCE_TYPE } from '@lobechat/const';
 import { Block, Center, Flexbox, Icon, stopPropagation, Tooltip } from '@lobehub/ui';
-import { ActionIcon, Input, Spin, toast } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { ActionIcon, Input, Spin, toast } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { ChevronDownIcon, FileText, FolderIcon, FolderOpenIcon, LockIcon } from 'lucide-react';
 import * as m from 'motion/react-m';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';

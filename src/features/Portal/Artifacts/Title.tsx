@@ -1,8 +1,8 @@
 import { ArtifactType } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Tabs, Text } from '@lobehub/ui/base-ui';
+import { Tabs, Text } from '@lobehub/ui';
 import { ConfigProvider } from 'antd';
-import { cx } from 'antd-style';
+import { cx } from '@lobehub/ui';
 import { CodeIcon, EyeIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

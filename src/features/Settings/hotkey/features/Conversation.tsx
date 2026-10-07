@@ -2,8 +2,8 @@
 
 import { HotkeyGroupEnum } from '@lobechat/const/hotkeys';
 import { HotkeyInput } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
-import { Form, type FormGroupItem, useForm } from '@lobehub/ui/base-ui/form';
+import { Skeleton } from '@lobehub/ui';
+import { Form, type FormGroupItem, useForm } from '@lobehub/ui/form';
 import isEqual from 'fast-deep-equal';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,5 +1,5 @@
 import { Icon } from '@lobehub/ui';
-import { Avatar } from '@lobehub/ui/base-ui';
+import { Avatar } from '@lobehub/ui';
 import { McpIcon, SkillsIcon } from '@lobehub/ui/icons';
 import { memo } from 'react';
 

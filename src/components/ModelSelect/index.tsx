@@ -3,8 +3,8 @@ import { type IconAvatarProps } from '@lobehub/icons';
 import { LobeHub } from '@lobehub/icons';
 import { type FlexboxProps } from '@lobehub/ui';
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Avatar, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, useResponsive } from 'antd-style';
+import { Avatar, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, useResponsive } from '@lobehub/ui';
 import {
   AudioLines,
   Infinity as InfinityIcon,

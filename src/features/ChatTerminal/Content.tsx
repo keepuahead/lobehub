@@ -11,8 +11,8 @@ import {
   TabsRoot,
   TabsTab,
   Text,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import {
   CopyXIcon,
   PlusIcon,

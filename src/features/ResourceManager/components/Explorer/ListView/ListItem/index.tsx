@@ -1,6 +1,6 @@
 import { Center, ContextMenuTrigger, Flexbox, Tooltip } from '@lobehub/ui';
-import { Avatar, Checkbox } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Avatar, Checkbox } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { isEqual } from 'es-toolkit';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';

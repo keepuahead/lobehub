@@ -2,9 +2,9 @@
 
 import type { AcceptanceStatus } from '@lobechat/types';
 import { Center, Flexbox, Icon } from '@lobehub/ui';
-import type { DropdownItem } from '@lobehub/ui/base-ui';
-import { ActionIcon, Checkbox, DropdownMenu, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import type { DropdownItem } from '@lobehub/ui';
+import { ActionIcon, Checkbox, DropdownMenu, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import {
   BadgeCheck,

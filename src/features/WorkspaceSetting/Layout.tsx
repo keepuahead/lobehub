@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import { type CSSProperties, type FC, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useMatch } from 'react-router';

@@ -1,7 +1,7 @@
 'use client';
 
 import { Block } from '@lobehub/ui';
-import { createStaticStyles, responsive } from 'antd-style';
+import { createStaticStyles, responsive } from '@lobehub/ui';
 import { memo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 

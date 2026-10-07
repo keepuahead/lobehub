@@ -2,8 +2,8 @@
 
 import { exportJSONFile } from '@lobechat/utils/client';
 import { Flexbox, Icon } from '@lobehub/ui';
-import type { DropdownItem } from '@lobehub/ui/base-ui';
-import { ActionIcon, confirmModal, DropdownMenu, Switch, Tag, toast } from '@lobehub/ui/base-ui';
+import type { DropdownItem } from '@lobehub/ui';
+import { ActionIcon, confirmModal, DropdownMenu, Switch, Tag, toast } from '@lobehub/ui';
 import {
   BookOpen,
   Download,

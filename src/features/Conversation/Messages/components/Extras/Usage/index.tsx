@@ -5,7 +5,7 @@ import {
 import type { ModelPerformance, ModelUsage } from '@lobechat/types';
 import { unwrapServerDefaultHeterogeneousModel } from '@lobechat/types';
 import { Center, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { CircleDollarSignIcon, CoinsIcon } from 'lucide-react';
 import { memo } from 'react';

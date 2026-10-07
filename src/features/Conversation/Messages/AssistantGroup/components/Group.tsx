@@ -1,6 +1,6 @@
 import { splitAssistantGroupFinalAnswer } from '@lobechat/conversation-flow';
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { Fragment, memo, useMemo } from 'react';
 

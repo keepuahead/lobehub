@@ -1,6 +1,6 @@
 import { Flexbox } from '@lobehub/ui';
-import { Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Tag } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 
 import { type SemanticSearchChunk } from '@/types/chunk';

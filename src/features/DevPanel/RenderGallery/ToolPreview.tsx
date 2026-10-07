@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Tabs, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Tabs, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { useMemo, useState } from 'react';
 
 import {

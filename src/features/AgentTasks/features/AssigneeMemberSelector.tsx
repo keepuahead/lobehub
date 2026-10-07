@@ -1,7 +1,7 @@
 import { canWorkspaceRoleBeTaskAssignee } from '@lobechat/const/rbac';
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Popover, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Popover, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { UserRoundX } from 'lucide-react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';

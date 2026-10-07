@@ -1,7 +1,7 @@
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
+import { Button, Text } from '@lobehub/ui';
 import type { Edge, Node } from '@xyflow/react';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   ArrowRight,
   CheckCircle2,

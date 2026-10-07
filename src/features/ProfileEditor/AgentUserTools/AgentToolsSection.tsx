@@ -2,7 +2,7 @@
 
 import { upsertPluginMode } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, confirmModal, DropdownMenu, Text } from '@lobehub/ui/base-ui';
+import { Button, confirmModal, DropdownMenu, Text } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { CopyIcon, PlugZapIcon, PlusIcon } from 'lucide-react';
 import { memo } from 'react';

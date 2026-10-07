@@ -2,8 +2,8 @@
 
 import { type UserImageConfig } from '@lobechat/types';
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Skeleton, Spin } from '@lobehub/ui/base-ui';
-import { Form, type FormGroupItem, useForm } from '@lobehub/ui/base-ui/form';
+import { Skeleton, Spin } from '@lobehub/ui';
+import { Form, type FormGroupItem, useForm } from '@lobehub/ui/form';
 import { CircleHelpIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,6 +1,6 @@
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Accordion, Checkbox, InputNumber, Select, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Accordion, Checkbox, InputNumber, Select, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import dayjs, { type Dayjs } from 'dayjs';
 import { Globe, Hash, SlidersHorizontal } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';

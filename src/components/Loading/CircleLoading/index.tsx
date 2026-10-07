@@ -1,7 +1,7 @@
 'use client';
 
 import { Center, Flexbox } from '@lobehub/ui';
-import { Spin, Text } from '@lobehub/ui/base-ui';
+import { Spin, Text } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 const CircleLoading = () => {

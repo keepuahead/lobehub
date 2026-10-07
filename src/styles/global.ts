@@ -1,6 +1,6 @@
 import { CLASSNAMES } from '@lobehub/ui';
-import type { Theme } from 'antd-style';
-import { css } from 'antd-style';
+import type { Theme } from '@lobehub/ui';
+import { css } from '@lobehub/ui';
 
 // fix ios input keyboard
 // overflow: hidden;

@@ -1,6 +1,6 @@
 import { type ConnectionConfig } from '@lobehub/market-types';
 import { Block, Highlighter } from '@lobehub/ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { genServerConfig } from '@/features/MCP/utils';

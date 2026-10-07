@@ -1,7 +1,7 @@
 'use client';
 
-import { ModalHost, ToastHost, TooltipGroup } from '@lobehub/ui/base-ui';
-import { StyleProvider } from 'antd-style';
+import { ModalHost, ToastHost, TooltipGroup } from '@lobehub/ui';
+import { StyleProvider } from '@lobehub/ui';
 import { memo, type PropsWithChildren } from 'react';
 
 import WorkbenchLocale from './WorkbenchLocale';

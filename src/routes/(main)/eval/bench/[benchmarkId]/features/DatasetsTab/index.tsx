@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Flexbox } from '@lobehub/ui';
-import { Button, confirmModal, Skeleton, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, confirmModal, Skeleton, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { Plus } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';

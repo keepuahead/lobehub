@@ -2,8 +2,8 @@
 
 import type { VerifyEvidenceChapter } from '@lobechat/types';
 import { Center, Flexbox, Icon } from '@lobehub/ui';
-import { Button, DropdownMenu } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { Button, DropdownMenu } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import {
   AlertTriangle,
   Captions,

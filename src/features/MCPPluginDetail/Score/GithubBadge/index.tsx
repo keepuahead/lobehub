@@ -1,6 +1,6 @@
 import { Markdown, Snippet } from '@lobehub/ui';
-import { Divider, Select, Tag } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Divider, Select, Tag } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';

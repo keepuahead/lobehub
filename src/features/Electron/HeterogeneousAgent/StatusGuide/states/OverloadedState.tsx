@@ -1,6 +1,6 @@
 import { Flexbox, Highlighter } from '@lobehub/ui';
-import { Button, Spin, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, Spin, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { Ban, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

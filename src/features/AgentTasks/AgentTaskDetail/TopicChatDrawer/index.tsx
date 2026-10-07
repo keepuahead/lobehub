@@ -4,8 +4,8 @@ import { AGENT_CHAT_TOPIC_URL } from '@lobechat/const';
 import type { ConversationContext, TaskDetailActivity } from '@lobechat/types';
 import type { DropdownItem } from '@lobehub/ui';
 import { copyToClipboard, DropdownMenu, Flexbox, Freeze } from '@lobehub/ui';
-import { ActionIcon, confirmModal, FloatingPanel, Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { ActionIcon, confirmModal, FloatingPanel, Tag, Text, toast } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import {
   Copy,
   ExternalLink,

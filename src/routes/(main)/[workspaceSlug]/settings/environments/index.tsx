@@ -2,7 +2,7 @@
 
 import type { EnvironmentVisibility } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Tabs } from '@lobehub/ui/base-ui';
+import { Tabs } from '@lobehub/ui';
 import { LockIcon, UsersIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

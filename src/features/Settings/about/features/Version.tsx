@@ -5,8 +5,8 @@ import {
   useWatchBroadcast,
 } from '@lobechat/electron-client-ipc';
 import { Block, Flexbox, Tooltip } from '@lobehub/ui';
-import { Button, Skeleton, Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, Skeleton, Tag } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo, Suspense, use, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

@@ -1,6 +1,6 @@
 import { Center, Flexbox, SortableList, Tooltip } from '@lobehub/ui';
-import { Switch, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Switch, Text } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 

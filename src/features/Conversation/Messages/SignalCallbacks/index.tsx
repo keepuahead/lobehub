@@ -2,8 +2,8 @@
 
 import { type UISignalCallbacksBlock } from '@lobechat/types';
 import { Block, Flexbox, Icon, Markdown } from '@lobehub/ui';
-import { Accordion, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Accordion, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { Radio } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

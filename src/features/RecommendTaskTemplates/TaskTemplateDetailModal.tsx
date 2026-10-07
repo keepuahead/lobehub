@@ -10,8 +10,8 @@ import {
   type ModalInstance,
   Text,
   useModalContext,
-} from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+} from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { Clock, X } from 'lucide-react';
 import { memo, useEffect, useMemo } from 'react';
 

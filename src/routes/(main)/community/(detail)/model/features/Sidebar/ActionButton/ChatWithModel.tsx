@@ -1,8 +1,8 @@
 'use client';
 
 import { DropdownMenu } from '@lobehub/ui';
-import { Button, SplitButton } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, SplitButton } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';

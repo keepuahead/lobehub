@@ -1,8 +1,8 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Alert, Badge, Button, Divider, Input, Text } from '@lobehub/ui/base-ui';
-import { Form, type FormInstance } from '@lobehub/ui/base-ui/form';
-import { createStaticStyles } from 'antd-style';
+import { Alert, Badge, Button, Divider, Input, Text } from '@lobehub/ui';
+import { Form, type FormInstance } from '@lobehub/ui/form';
+import { createStaticStyles } from '@lobehub/ui';
 import { Mail } from 'lucide-react';
 import { type CSSProperties, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';

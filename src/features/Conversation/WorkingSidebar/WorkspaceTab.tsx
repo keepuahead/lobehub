@@ -1,6 +1,6 @@
 import { Icon, type IconProps } from '@lobehub/ui';
-import { type ContextMenuItem, ContextMenuTrigger } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { type ContextMenuItem, ContextMenuTrigger } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { PinIcon, XIcon } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 

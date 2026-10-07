@@ -2,8 +2,8 @@
 
 import { MCP } from '@lobehub/icons';
 import { Flexbox, Icon, Tooltip, TooltipGroup } from '@lobehub/ui';
-import { ActionIcon, Avatar, Button, Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
+import { ActionIcon, Avatar, Button, Tag, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar, useResponsive } from '@lobehub/ui';
 import {
   BookmarkCheckIcon,
   BookmarkIcon,

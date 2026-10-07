@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Skeleton } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo } from 'react';
 
 interface FileTreeSkeletonProps {

@@ -1,6 +1,6 @@
 import { readHeterogeneousErrorContext } from '@lobechat/heterogeneous-agents/errors';
 import { Flexbox } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
+import { Button, Text } from '@lobehub/ui';
 import { CalendarClock, Forward, Play, RotateCcw } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -2,8 +2,8 @@
 
 import type { AcceptanceAttachment } from '@lobechat/types';
 import { Flexbox, Icon, Image } from '@lobehub/ui';
-import { Button, Spin, toast, Upload } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx, useResponsive } from 'antd-style';
+import { Button, Spin, toast, Upload } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx, useResponsive } from '@lobehub/ui';
 import { ImagePlus, X } from 'lucide-react';
 import { type ClipboardEvent, memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';

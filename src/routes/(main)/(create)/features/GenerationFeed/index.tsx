@@ -2,7 +2,7 @@
 
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Flexbox } from '@lobehub/ui';
-import { Divider } from '@lobehub/ui/base-ui';
+import { Divider } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { Fragment, memo, useEffect, useRef } from 'react';
 

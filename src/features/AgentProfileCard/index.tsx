@@ -1,8 +1,8 @@
 'use client';
 
 import { Center, Flexbox, Tooltip } from '@lobehub/ui';
-import { Avatar, Skeleton, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Avatar, Skeleton, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { memo, type ReactNode } from 'react';
 
 import { DEFAULT_AVATAR } from '@/const/meta';

@@ -1,8 +1,8 @@
 'use client';
 
 import { DropdownMenu, Flexbox, type MenuProps, Tooltip } from '@lobehub/ui';
-import { Avatar } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Avatar } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { Plus } from 'lucide-react';
 import { type ReactNode } from 'react';
 import { memo, useEffect, useRef } from 'react';

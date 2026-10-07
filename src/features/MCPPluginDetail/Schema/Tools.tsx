@@ -1,6 +1,6 @@
 import { Flexbox, Highlighter, Icon, Markdown } from '@lobehub/ui';
-import { Tag } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Tag } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { CheckIcon, MinusIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

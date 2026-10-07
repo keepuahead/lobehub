@@ -1,7 +1,7 @@
 'use client';
 
-import { ActionIcon, Input, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { ActionIcon, Input, toast } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { type Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { Check, Edit, X } from 'lucide-react';

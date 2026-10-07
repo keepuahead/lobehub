@@ -2,8 +2,8 @@
 
 import type { AcceptanceChecklistItem } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, useResponsive } from '@lobehub/ui';
 import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';

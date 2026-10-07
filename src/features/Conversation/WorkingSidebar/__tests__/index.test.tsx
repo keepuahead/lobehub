@@ -332,7 +332,7 @@ vi.mock('@lobehub/ui', async (importOriginal) => ({
   Skeleton: () => <div data-testid="params-loading" />,
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => {
+vi.mock('@lobehub/ui', async (importOriginal) => {
   const { useState } = await import('react');
   const actual = (await importOriginal()) as Record<string, unknown>;
 
@@ -395,7 +395,7 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => {
   };
 });
 
-vi.mock('antd-style', async (importOriginal) => {
+vi.mock('@lobehub/ui', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,

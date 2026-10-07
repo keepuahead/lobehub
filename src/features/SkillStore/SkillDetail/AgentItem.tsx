@@ -1,7 +1,7 @@
 'use client';
 
 import { Block, Flexbox } from '@lobehub/ui';
-import { Avatar } from '@lobehub/ui/base-ui';
+import { Avatar } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { itemStyles } from './style';

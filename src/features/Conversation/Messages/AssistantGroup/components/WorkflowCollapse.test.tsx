@@ -27,7 +27,7 @@ vi.mock('@lobehub/ui', async (importOriginal) => ({
     ),
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   ...(await import('~base-ui-stubs')).baseUiStubs,
   Accordion: ({

@@ -8,8 +8,8 @@ import {
   AccordionTrigger,
   Spin,
   Text,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { HashIcon } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 

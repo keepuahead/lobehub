@@ -1,10 +1,10 @@
 'use client';
 
 import { Empty, Flexbox } from '@lobehub/ui';
-import { Avatar, Button, Input, Select, Spin, TextArea } from '@lobehub/ui/base-ui';
-import { Form, useForm } from '@lobehub/ui/base-ui/form';
+import { Avatar, Button, Input, Select, Spin, TextArea } from '@lobehub/ui';
+import { Form, useForm } from '@lobehub/ui/form';
 import { useMutation } from '@tanstack/react-query';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 

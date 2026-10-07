@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
+import { createStaticStyles, cssVar, useResponsive } from '@lobehub/ui';
 import { useState } from 'react';
 import { useLocation } from 'react-router';
 

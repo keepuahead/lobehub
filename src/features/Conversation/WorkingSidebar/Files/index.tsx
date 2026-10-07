@@ -2,9 +2,9 @@
 
 import type { ProjectFileIndexEntry } from '@lobechat/electron-client-ipc';
 import { Center, Empty, Flexbox, Icon, stopPropagation } from '@lobehub/ui';
-import { ActionIcon, Button, DropdownMenu, Input, Spin } from '@lobehub/ui/base-ui';
+import { ActionIcon, Button, DropdownMenu, Input, Spin } from '@lobehub/ui';
 import type { GitStatusEntry } from '@pierre/trees';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import {
   CheckIcon,
   ChevronDownIcon,

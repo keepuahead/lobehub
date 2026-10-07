@@ -2,8 +2,8 @@
 
 import { BRANDING_EMAIL } from '@lobechat/business-const';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Input, toast, Upload, useModalContext } from '@lobehub/ui/base-ui';
-import { Form, useForm, useWatch } from '@lobehub/ui/base-ui/form';
+import { Button, Input, toast, Upload, useModalContext } from '@lobehub/ui';
+import { Form, useForm, useWatch } from '@lobehub/ui/form';
 import { ImagePlus, Send } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';

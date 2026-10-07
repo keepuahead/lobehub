@@ -1,6 +1,6 @@
 import { type BriefType } from '@lobechat/types';
 import { Block, Icon } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import type { CircleDot } from 'lucide-react';
 import { CheckCheckIcon, EyeIcon, HandIcon, Lightbulb, SirenIcon } from 'lucide-react';
 import { memo } from 'react';

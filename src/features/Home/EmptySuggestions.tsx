@@ -1,6 +1,6 @@
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { FileTextIcon, ListTodoIcon, SearchIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

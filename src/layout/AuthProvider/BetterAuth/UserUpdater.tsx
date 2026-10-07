@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Alert, Button } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Alert, Button } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, type PropsWithChildren, useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
+import { Skeleton } from '@lobehub/ui';
 
 const Loading = () => {
   return (

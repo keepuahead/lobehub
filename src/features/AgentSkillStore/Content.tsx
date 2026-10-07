@@ -2,7 +2,7 @@
 
 import { COMPOSIO_APP_TYPES } from '@lobechat/const';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import { memo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 

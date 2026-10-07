@@ -1,7 +1,7 @@
 'use client';
 
 import { Center, Flexbox } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 
 import { isDesktop } from '@/const/version';
 import { isMacOS } from '@/utils/platform';

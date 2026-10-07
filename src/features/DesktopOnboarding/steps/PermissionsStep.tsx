@@ -2,8 +2,8 @@
 
 import { useWatchBroadcast } from '@lobechat/electron-client-ipc';
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import {
   Bell,
   Check,

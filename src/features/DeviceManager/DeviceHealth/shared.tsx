@@ -1,7 +1,7 @@
 import type { DeviceMetricSeries } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 

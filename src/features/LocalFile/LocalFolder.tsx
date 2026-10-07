@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import path from 'path-browserify-esm';
 import React from 'react';
 

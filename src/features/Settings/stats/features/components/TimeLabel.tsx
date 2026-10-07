@@ -1,6 +1,6 @@
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Spin } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Spin } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { type LucideIcon } from 'lucide-react';
 import { memo } from 'react';
 

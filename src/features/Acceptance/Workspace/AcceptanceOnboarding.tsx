@@ -1,8 +1,8 @@
 'use client';
 
 import { CopyButton, Flexbox, Icon } from '@lobehub/ui';
-import { Button, TabsIndicator, TabsList, TabsRoot, TabsTab } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, TabsIndicator, TabsList, TabsRoot, TabsTab } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ArrowLeft, Bot, ClipboardCheck, Terminal } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';

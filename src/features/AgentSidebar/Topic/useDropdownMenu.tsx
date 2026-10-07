@@ -1,8 +1,8 @@
 import { isDesktop } from '@lobechat/const';
 import { type MenuProps } from '@lobehub/ui';
 import { Icon } from '@lobehub/ui';
-import { confirmModal, toast, Upload } from '@lobehub/ui/base-ui';
-import { css, cx } from 'antd-style';
+import { confirmModal, toast, Upload } from '@lobehub/ui';
+import { css, cx } from '@lobehub/ui';
 import { Archive, HardDriveDownload, Hash, Import, LucideCheck, Trash } from 'lucide-react';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';

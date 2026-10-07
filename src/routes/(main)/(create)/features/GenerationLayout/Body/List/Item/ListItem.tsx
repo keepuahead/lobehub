@@ -1,8 +1,8 @@
 'use client';
 
 import { type GenericItemType } from '@lobehub/ui';
-import { ActionIcon, Avatar } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { ActionIcon, Avatar } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { Trash } from 'lucide-react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { memo } from 'react';

@@ -1,7 +1,7 @@
 import type { GoalSpend } from '@lobechat/types';
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { InputNumber, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { InputNumber, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { memo, type ReactNode, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

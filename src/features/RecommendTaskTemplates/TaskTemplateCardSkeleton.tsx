@@ -1,6 +1,6 @@
 import { Block, Flexbox } from '@lobehub/ui';
-import { Divider, Skeleton } from '@lobehub/ui/base-ui';
-import { cssVar, cx } from 'antd-style';
+import { Divider, Skeleton } from '@lobehub/ui';
+import { cssVar, cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import { styles as briefStyles } from '@/features/DailyBrief/style';

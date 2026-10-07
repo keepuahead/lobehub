@@ -1,6 +1,6 @@
 import { createCache } from '@ant-design/cssinjs';
 import { buildInlineAntdStyle } from '@lobehub/ui/static-css/runtime';
-import { extractStaticStyle, StyleProvider } from 'antd-style';
+import { extractStaticStyle, StyleProvider } from '@lobehub/ui';
 import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext } from 'react-router';
 import { ServerRouter } from 'react-router';

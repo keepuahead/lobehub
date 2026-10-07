@@ -1,6 +1,6 @@
 import { Center, Flexbox, FluentEmoji, Icon } from '@lobehub/ui';
-import { Avatar } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Avatar } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { Link2Icon } from 'lucide-react';
 import React, { memo } from 'react';
 

@@ -2,8 +2,8 @@
 
 import { type AssistantContentBlock, type UIChatMessage } from '@lobechat/types';
 import { Block, Flexbox, Icon, Markdown } from '@lobehub/ui';
-import { Accordion, Spin, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Accordion, Spin, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ScrollText, Workflow } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

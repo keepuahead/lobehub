@@ -5,9 +5,9 @@ import {
   EMPTY_ARRAY,
 } from '@lobechat/const';
 import { Center, Empty, Flexbox } from '@lobehub/ui';
-import { ActionIcon, confirmModal, Spin, Text, toast } from '@lobehub/ui/base-ui';
+import { ActionIcon, confirmModal, Spin, Text, toast } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
-import { createStaticStyles, cx } from 'antd-style';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import type { LucideIcon } from 'lucide-react';

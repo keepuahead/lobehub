@@ -2,7 +2,7 @@
 
 import { Flexbox } from '@lobehub/ui';
 import { useSize } from 'ahooks';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo, useRef } from 'react';
 import { Outlet } from 'react-router';
 

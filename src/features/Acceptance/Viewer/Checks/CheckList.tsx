@@ -2,8 +2,8 @@
 
 import type { AcceptanceGroupFeedback } from '@lobechat/types';
 import { Empty, Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Button, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { ActionIcon, Button, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import {
   BadgeCheck,
   ChevronRight,

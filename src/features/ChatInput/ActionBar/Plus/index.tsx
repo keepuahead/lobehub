@@ -3,9 +3,9 @@
 import { validateVideoFileSize } from '@lobechat/utils/client';
 import type { IconProps } from '@lobehub/ui';
 import { Icon, Popover } from '@lobehub/ui';
-import { toast, Upload } from '@lobehub/ui/base-ui';
+import { toast, Upload } from '@lobehub/ui';
 import { GlobeOffIcon, SkillsIcon } from '@lobehub/ui/icons';
-import { css, cssVar, cx } from 'antd-style';
+import { css, cssVar, cx } from '@lobehub/ui';
 import {
   Brain,
   CheckIcon,

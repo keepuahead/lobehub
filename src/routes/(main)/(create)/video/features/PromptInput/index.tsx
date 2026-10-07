@@ -10,7 +10,7 @@ import {
   Switch,
   Tabs,
   Text,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import { Clock3, Dices } from 'lucide-react';
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';

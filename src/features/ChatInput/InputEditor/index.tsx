@@ -12,7 +12,7 @@ import type { IEditor, ISlashMenuOption, ISlashSectionOption } from '@lobehub/ed
 import { INSERT_MENTION_COMMAND, ReactAutoCompletePlugin } from '@lobehub/editor';
 import { Editor, useEditorState } from '@lobehub/editor/react';
 import { combineKeys } from '@lobehub/ui';
-import { css, cx } from 'antd-style';
+import { css, cx } from '@lobehub/ui';
 import Fuse from 'fuse.js';
 import { KEY_ESCAPE_COMMAND } from 'lexical';
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef } from 'react';

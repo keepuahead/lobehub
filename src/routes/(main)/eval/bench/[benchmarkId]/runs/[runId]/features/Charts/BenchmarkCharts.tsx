@@ -2,7 +2,7 @@
 
 import { BarChart } from '@lobehub/charts';
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cssVar, useTheme } from 'antd-style';
+import { createStaticStyles, cssVar, useTheme } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 

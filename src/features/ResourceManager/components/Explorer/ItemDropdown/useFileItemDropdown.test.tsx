@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   useSendToMessengerMenuItem: vi.fn((_params: SendToMessengerParams) => undefined),
 }));
 
-vi.mock('@lobehub/ui/base-ui', () => ({
+vi.mock('@lobehub/ui', () => ({
   confirmModal: mocks.confirmModal,
   toast: {
     error: vi.fn(),

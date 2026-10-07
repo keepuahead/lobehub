@@ -7,8 +7,8 @@ import type {
   HeteroSessionImportStatus,
 } from '@lobechat/types';
 import { Flexbox, Icon, ScrollShadow, SearchBar } from '@lobehub/ui';
-import { Button, Checkbox, Progress, Spin, Text, useModalContext } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, Checkbox, Progress, Spin, Text, useModalContext } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { Check, FolderSearch, TriangleAlert, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -2,8 +2,8 @@
 
 import type { AcceptanceStatus } from '@lobechat/types';
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Divider, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, Divider, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ChevronDown, ChevronRight, History, ListTodo, Plus } from 'lucide-react';
 import { Fragment, memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

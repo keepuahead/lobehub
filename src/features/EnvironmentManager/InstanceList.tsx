@@ -2,8 +2,8 @@
 
 import { Github } from '@lobehub/icons';
 import { Center, Empty, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { ActionIcon, Button, confirmModal, Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, Button, confirmModal, Tag, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   CircleAlertIcon,
   CircleDashedIcon,

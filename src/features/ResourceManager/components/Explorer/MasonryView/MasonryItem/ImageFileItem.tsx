@@ -1,6 +1,6 @@
 import { Icon, Image, stopPropagation, Tooltip } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx, keyframes } from 'antd-style';
+import { Button } from '@lobehub/ui';
+import { createStaticStyles, cx, keyframes } from '@lobehub/ui';
 import { isNull } from 'es-toolkit/compat';
 import { FileBoxIcon } from 'lucide-react';
 import { memo, useState } from 'react';

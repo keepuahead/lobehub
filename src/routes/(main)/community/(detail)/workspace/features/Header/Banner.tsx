@@ -1,7 +1,7 @@
 'use client';
 
 import { Center } from '@lobehub/ui';
-import { createStaticStyles, responsive } from 'antd-style';
+import { createStaticStyles, responsive } from '@lobehub/ui';
 import { memo } from 'react';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({

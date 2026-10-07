@@ -43,7 +43,7 @@ vi.mock('@/business/client/hooks/useActiveWorkspaceId', () => ({
   useActiveWorkspaceId: () => mocks.activeWorkspaceId,
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Tree: ({
     onRightClick,
@@ -83,7 +83,7 @@ vi.mock('antd', async (importOriginal) => ({
   },
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   cssVar: {
     colorTextDescription: '#999',

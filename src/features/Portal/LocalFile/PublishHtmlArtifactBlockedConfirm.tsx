@@ -8,8 +8,8 @@ import {
   ScrollArea,
   Text,
   useModalContext,
-} from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+} from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { t } from 'i18next';
 import { useTranslation } from 'react-i18next';
 

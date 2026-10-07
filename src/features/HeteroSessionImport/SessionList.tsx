@@ -1,8 +1,8 @@
 import type { HeteroSessionDigest } from '@lobechat/types';
 import { ClaudeCode, Codex } from '@lobehub/icons';
 import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Button, Checkbox, Spin, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Button, Checkbox, Spin, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { Check, RotateCcw, X } from 'lucide-react';
 import { memo } from 'react';

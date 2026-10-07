@@ -19,7 +19,7 @@ import {
   SiYarn,
 } from '@icons-pack/react-simple-icons';
 import { Icon, Tooltip } from '@lobehub/ui';
-import { cssVar } from 'antd-style';
+import { cssVar } from '@lobehub/ui';
 import { memo } from 'react';
 
 import Java from './Java';

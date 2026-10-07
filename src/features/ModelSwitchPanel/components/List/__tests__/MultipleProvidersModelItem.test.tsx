@@ -39,7 +39,7 @@ vi.mock('@lobehub/ui', async (importOriginal) => ({
   ),
 }));
 
-vi.mock('@lobehub/ui/base-ui', () => ({
+vi.mock('@lobehub/ui', () => ({
   Avatar: () => <span />,
   Tag: ({ children }: { children: ReactNode }) => <span>{children}</span>,
   Text: ({ children }: { children: ReactNode }) => <span>{children}</span>,
@@ -54,7 +54,7 @@ vi.mock('@/components/LobeIcons', () => ({
   ProviderIcon: () => <span />,
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   createStaticStyles: () => ({
     container: 'container',

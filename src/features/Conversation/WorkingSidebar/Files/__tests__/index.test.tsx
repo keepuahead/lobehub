@@ -225,7 +225,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   confirmModal: uiSpies.confirmModal,
   toast: { error: uiSpies.toastError, success: uiSpies.toastSuccess },
@@ -276,7 +276,7 @@ vi.mock('@lobehub/ui', () => ({
   stopPropagation: vi.fn(),
 }));
 
-vi.mock('antd-style', async (importOriginal) => {
+vi.mock('@lobehub/ui', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
 
   return {

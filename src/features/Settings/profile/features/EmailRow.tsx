@@ -2,7 +2,7 @@
 
 import { isDesktop } from '@lobechat/const';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Button, Input, Text, toast } from '@lobehub/ui/base-ui';
+import { Button, Input, Text, toast } from '@lobehub/ui';
 import { ExternalLinkIcon } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';

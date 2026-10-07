@@ -1,6 +1,6 @@
 import { Flexbox } from '@lobehub/ui';
-import { type ModalInstance } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { type ModalInstance } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -2,8 +2,8 @@
 
 import type { VerifyCheckTally } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Button, Skeleton, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { ActionIcon, Button, Skeleton, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import {
   BadgeCheck,
   CheckCheck,

@@ -9,8 +9,8 @@ import {
   ActionIcon,
   Spin,
   Text,
-} from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+} from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import {
   ArrowDownIcon,
   ArrowUpIcon,

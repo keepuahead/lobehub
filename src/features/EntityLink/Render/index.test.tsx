@@ -20,7 +20,7 @@ vi.mock('@lobechat/const', async (importOriginal) => ({
   },
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   ActionIcon: ({ icon: _icon, onClick, title, ...rest }: any) => (
     <button {...rest} aria-label={title} type="button" onClick={onClick} />

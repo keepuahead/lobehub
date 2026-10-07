@@ -1,7 +1,7 @@
 import { validateVideoFileSize } from '@lobechat/utils/client';
 import { Icon, Tooltip } from '@lobehub/ui';
-import { toast, Upload } from '@lobehub/ui/base-ui';
-import { css, cx } from 'antd-style';
+import { toast, Upload } from '@lobehub/ui';
+import { css, cx } from '@lobehub/ui';
 import { FileUp, FolderUp, ImageUp, Paperclip } from 'lucide-react';
 import { memo, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';

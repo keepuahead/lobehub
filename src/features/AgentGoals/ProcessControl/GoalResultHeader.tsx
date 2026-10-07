@@ -2,8 +2,8 @@
 
 import type { GoalGraphDecision } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Spin, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Spin, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import { usePermission } from '@/hooks/usePermission';

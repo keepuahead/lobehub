@@ -11,8 +11,8 @@ import {
   RadioGroup,
   Switch,
   Text,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { t as i18nT } from 'i18next';
 import {
   CheckIcon,

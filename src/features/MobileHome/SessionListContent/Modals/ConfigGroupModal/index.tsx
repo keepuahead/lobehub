@@ -1,7 +1,7 @@
 import { type ModalProps } from '@lobehub/ui';
 import { Flexbox, Icon, SortableList } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { Plus } from 'lucide-react';
 import { memo, useState } from 'react';

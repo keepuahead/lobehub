@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Button, createModal } from '@lobehub/ui/base-ui';
+import { Button, createModal } from '@lobehub/ui';
 import { t as i18nT } from 'i18next';
 import { type RefObject } from 'react';
 

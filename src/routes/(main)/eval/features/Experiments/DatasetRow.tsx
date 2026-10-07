@@ -2,8 +2,8 @@
 
 import type { AgentEvalDatasetListItem } from '@lobechat/types';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Button, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, Button, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ChevronRight, Database, Play } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -2,8 +2,8 @@
 
 import { Github } from '@lobehub/icons';
 import { DropdownMenu, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Avatar, Button, confirmModal, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Avatar, Button, confirmModal, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import {
   ContainerIcon,

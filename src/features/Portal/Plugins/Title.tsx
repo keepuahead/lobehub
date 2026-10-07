@@ -1,7 +1,7 @@
 import { getBuiltinPortalTitle } from '@lobechat/builtin-tools/portals';
 import type { BuiltinPortalTitle } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 
 import PluginAvatar from '@/features/PluginAvatar';

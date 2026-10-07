@@ -2,8 +2,8 @@
 
 import { SOCIAL_URL } from '@lobechat/business-const';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Tabs, type TabsItem, Tag } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Tabs, type TabsItem, Tag } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import {
   BookOpenIcon,
   BotIcon,

@@ -256,7 +256,7 @@ describe('Home input banner queue', () => {
       expect(container.querySelector('[data-home-input-banner]')).toHaveTextContent('Second');
       expect(screen.getByTestId('second')).toBeVisible();
     } finally {
-      vi.doUnmock('@lobehub/ui/base-ui');
+      vi.doUnmock('@lobehub/ui');
       useGlobalStore.setState((state) => ({
         isStatusInit: originalStatusInit,
         status: { ...state.status, dismissedBannerIds: originalDismissedIds },

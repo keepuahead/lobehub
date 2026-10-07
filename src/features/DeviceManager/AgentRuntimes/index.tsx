@@ -2,8 +2,8 @@
 
 import type { DeviceListItem } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Button, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import { CONNECTABLE_PROVIDERS } from '@/features/ConnectAgent/providers';

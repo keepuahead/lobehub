@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Form } from '@lobehub/ui/base-ui/form';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Form } from '@lobehub/ui/form';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 
 import SkeletonBar from '../Bar';
 

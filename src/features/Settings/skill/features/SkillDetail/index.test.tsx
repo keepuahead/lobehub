@@ -78,7 +78,7 @@ vi.mock('@lobechat/const', () => ({
       : undefined,
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   confirmModal: mocks.confirmModal,
 }));

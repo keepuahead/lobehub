@@ -1,7 +1,7 @@
 import type { MockCase } from '@lobechat/agent-mock';
 import { Flexbox, Popover, usePopoverContext } from '@lobehub/ui';
-import { Input, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Input, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { ChevronDown } from 'lucide-react';
 import { memo, type ReactNode, useMemo, useState } from 'react';
 

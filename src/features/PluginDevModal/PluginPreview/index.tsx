@@ -1,8 +1,8 @@
 import { type LobeToolCustomPlugin } from '@lobechat/types';
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { type FormInstance, useWatch } from '@lobehub/ui/base-ui/form';
-import { cssVar } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { type FormInstance, useWatch } from '@lobehub/ui/form';
+import { cssVar } from '@lobehub/ui';
 import { FileCode } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

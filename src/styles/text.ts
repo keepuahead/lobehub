@@ -1,5 +1,5 @@
-import { textGroupStyles } from '@lobehub/ui/base-ui';
-import { createStaticStyles, css, cx } from 'antd-style';
+import { textGroupStyles } from '@lobehub/ui';
+import { createStaticStyles, css, cx } from '@lobehub/ui';
 
 export const lineEllipsis = (line: number) =>
   cx(css`

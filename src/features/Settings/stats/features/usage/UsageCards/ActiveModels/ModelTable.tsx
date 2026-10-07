@@ -1,7 +1,7 @@
 import { CategoryBar, useThemeColorRange } from '@lobehub/charts';
 import { Flexbox } from '@lobehub/ui';
-import { Accordion, Avatar, Skeleton, Tag } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Accordion, Avatar, Skeleton, Tag } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 

@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { ActionIcon, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { ActionIcon, toast } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { Copy } from 'lucide-react';
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';

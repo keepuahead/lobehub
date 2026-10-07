@@ -1,7 +1,7 @@
 'use client';
 
 import { copyToClipboard, Flexbox, Popover, usePopoverContext } from '@lobehub/ui';
-import { Button, Checkbox, confirmModal, Divider, Select, Text, toast } from '@lobehub/ui/base-ui';
+import { Button, Checkbox, confirmModal, Divider, Select, Text, toast } from '@lobehub/ui';
 import {
   FileOutputIcon,
   ImageIcon,

@@ -32,7 +32,7 @@ vi.mock('@lobehub/ui', async (importOriginal) => {
   };
 });
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => {
+vi.mock('@lobehub/ui', async (importOriginal) => {
   const React = await import('react');
 
   return {

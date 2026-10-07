@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Input, Spin } from '@lobehub/ui/base-ui';
+import { Input, Spin } from '@lobehub/ui';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

@@ -9,8 +9,8 @@ import {
   Tooltip,
   TooltipGroup,
 } from '@lobehub/ui';
-import { Avatar, Tag as AntTag, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Avatar, Tag as AntTag, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import {
   AlertTriangle,
   ClockIcon,

@@ -11,8 +11,8 @@ import {
   Text,
   TextArea,
   toast,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   AnchorIcon,
   ArrowLeftIcon,

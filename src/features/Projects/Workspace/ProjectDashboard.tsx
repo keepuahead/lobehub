@@ -2,8 +2,8 @@
 
 import type { TaskStatus, WorkSummaryItem } from '@lobechat/types';
 import { Block, Center, Empty, Flexbox, Icon } from '@lobehub/ui';
-import { Button, Progress, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button, Progress, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   BadgeCheckIcon,
   CheckCircle2Icon,

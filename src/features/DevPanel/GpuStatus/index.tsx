@@ -2,7 +2,7 @@
 
 import type { GpuStatus } from '@lobechat/electron-client-ipc';
 import { Flexbox } from '@lobehub/ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { Fragment, memo, useEffect, useState } from 'react';
 
 import { devDockPanelStyles } from '@/features/DevDock/panelStyles';

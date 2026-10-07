@@ -2,8 +2,8 @@
 
 import { AgentIcon } from '@lobehub/icons';
 import { Flexbox, Markdown } from '@lobehub/ui';
-import { Avatar, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, responsive } from 'antd-style';
+import { Avatar, Text } from '@lobehub/ui';
+import { createStaticStyles, responsive } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 

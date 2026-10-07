@@ -1,6 +1,6 @@
 import type { DropdownItem } from '@lobehub/ui';
 import { DropdownMenu } from '@lobehub/ui';
-import { ActionIcon } from '@lobehub/ui/base-ui';
+import { ActionIcon } from '@lobehub/ui';
 import { MoreHorizontalIcon } from 'lucide-react';
 import { memo } from 'react';
 

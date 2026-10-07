@@ -7,8 +7,8 @@ import {
   DropdownMenuPositioner,
   DropdownMenuRoot,
   DropdownMenuTrigger,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import {
   CopyIcon,
   GlobeIcon,

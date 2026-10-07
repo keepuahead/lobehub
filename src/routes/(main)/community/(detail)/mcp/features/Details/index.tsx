@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { useResponsive } from 'antd-style';
+import { useResponsive } from '@lobehub/ui';
 import { memo } from 'react';
 
 import Agents from '@/features/MCPPluginDetail/Agents';

@@ -2,8 +2,8 @@
 
 import { type BlockProps, type GenericItemType, type IconProps } from '@lobehub/ui';
 import { Block, Center, ContextMenuTrigger, Flexbox, Icon } from '@lobehub/ui';
-import { Spin, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Spin, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { type FocusEvent, type PointerEvent, type ReactNode } from 'react';
 import { memo } from 'react';
 

@@ -1,7 +1,7 @@
 'use client';
 
-import { Pagination as Page } from '@lobehub/ui/base-ui';
-import { useResponsive } from 'antd-style';
+import { Pagination as Page } from '@lobehub/ui';
+import { useResponsive } from '@lobehub/ui';
 import { memo } from 'react';
 import { useLocation } from 'react-router';
 

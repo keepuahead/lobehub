@@ -1,6 +1,6 @@
 import { Flexbox } from '@lobehub/ui';
-import { Avatar, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Avatar, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 
 export const PERSONAL_SCOPE = 'personal';
 

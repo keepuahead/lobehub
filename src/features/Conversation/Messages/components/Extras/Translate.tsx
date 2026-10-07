@@ -1,7 +1,7 @@
 import { type ChatTranslate } from '@lobechat/types';
 import { copyToClipboard, Flexbox, Icon, Markdown } from '@lobehub/ui';
-import { ActionIcon, Tag, toast } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { ActionIcon, Tag, toast } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { ChevronDown, ChevronsRight, ChevronUp, CopyIcon, TrashIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

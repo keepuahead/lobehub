@@ -7,7 +7,7 @@ import {
   AccordionPanel,
   AccordionTrigger,
   Text,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import { Database } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

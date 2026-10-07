@@ -10,8 +10,8 @@ import {
   Skeleton,
   Switch,
   toast,
-} from '@lobehub/ui/base-ui';
-import { Form, type FormGroupItem, useForm, useWatch } from '@lobehub/ui/base-ui/form';
+} from '@lobehub/ui';
+import { Form, type FormGroupItem, useForm, useWatch } from '@lobehub/ui/form';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

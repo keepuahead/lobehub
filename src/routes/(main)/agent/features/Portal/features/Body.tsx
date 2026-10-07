@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { css, cx } from 'antd-style';
+import { css, cx } from '@lobehub/ui';
 import { type PropsWithChildren } from 'react';
 
 const body = css`

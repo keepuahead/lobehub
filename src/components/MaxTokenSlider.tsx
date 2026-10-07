@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { InputNumber } from '@lobehub/ui/base-ui';
+import { InputNumber } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import useMergeState from 'use-merge-value';

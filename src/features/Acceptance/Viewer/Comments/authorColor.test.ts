@@ -52,7 +52,7 @@ describe('acceptanceAuthorColor', () => {
   });
 
   it('leaves the verdict colours to verdicts', () => {
-    const { cssVar } = require('antd-style');
+    const { cssVar } = require('@lobehub/ui');
     for (const semantic of [cssVar.volcano, cssVar.green, cssVar.colorError, cssVar.colorSuccess]) {
       expect(ACCEPTANCE_AUTHOR_COLORS).not.toContain(semantic);
     }

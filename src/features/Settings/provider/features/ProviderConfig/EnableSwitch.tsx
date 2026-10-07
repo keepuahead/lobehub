@@ -1,6 +1,6 @@
 import { Tooltip } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Skeleton } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { type FC } from 'react';
 
 import InstantSwitch from '@/components/InstantSwitch';

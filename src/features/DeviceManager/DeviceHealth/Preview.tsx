@@ -2,7 +2,7 @@
 
 import { Tracker } from '@lobehub/charts';
 import { Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
+import { Text } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import { buildHealthTimeline, groupStripBlocks } from './buildHealthTimeline';

@@ -2,8 +2,8 @@
 
 import { type GridProps } from '@lobehub/ui';
 import { Block, Center, Grid } from '@lobehub/ui';
-import { Select, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Select, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo } from 'react';
 import useMergeState from 'use-merge-value';

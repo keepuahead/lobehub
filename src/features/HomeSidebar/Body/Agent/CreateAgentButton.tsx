@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Center, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { ActionIcon, DropdownMenu, Spin, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { ActionIcon, DropdownMenu, Spin, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { ChevronDownIcon, PlusIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,6 +1,6 @@
 import { Block, Icon } from '@lobehub/ui';
-import { Button, InputPassword, Text } from '@lobehub/ui/base-ui';
-import { Form } from '@lobehub/ui/base-ui/form';
+import { Button, InputPassword, Text } from '@lobehub/ui';
+import { Form } from '@lobehub/ui/form';
 import { Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

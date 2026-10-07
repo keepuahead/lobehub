@@ -1,7 +1,7 @@
 'use client';
 
-import { Button } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Button } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import type { ImageVersion } from './context';

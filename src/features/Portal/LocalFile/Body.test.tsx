@@ -13,7 +13,7 @@ vi.mock('@lobechat/const', async (importOriginal) => ({
   isDesktop: true,
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   createStaticStyles: () => ({
     card: 'card',
@@ -48,7 +48,7 @@ vi.mock('@lobehub/ui', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('@lobehub/ui/base-ui', () => ({
+vi.mock('@lobehub/ui', () => ({
   Tabs: () => null,
   Text: ({ children }: { children: ReactNode }) => <span>{children}</span>,
   ToggleGroup: () => null,

@@ -1,5 +1,5 @@
-import { ActionIcon } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { ActionIcon } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { X } from 'lucide-react';
 import type { MouseEvent, MouseEventHandler, ReactNode } from 'react';
 import { useCallback } from 'react';

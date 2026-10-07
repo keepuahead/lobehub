@@ -1,8 +1,8 @@
 'use client';
 
 import { type DropdownItem, DropdownMenu, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { ActionIcon, confirmModal, Tabs, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { ActionIcon, confirmModal, Tabs, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import {
   Archive,
   CalendarRange,

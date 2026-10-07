@@ -1,5 +1,5 @@
-import { List, type ListProps } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { List, type ListProps } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo } from 'react';
 
 export type MenuProps = ListProps;

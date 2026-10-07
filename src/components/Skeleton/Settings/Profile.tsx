@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox } from '@lobehub/ui';
-import { Form } from '@lobehub/ui/base-ui/form';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Form } from '@lobehub/ui/form';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 
 import { useUserStore } from '@/store/user';

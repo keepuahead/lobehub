@@ -1,5 +1,5 @@
 import { Flexbox, Markdown } from '@lobehub/ui';
-import { css, cx } from 'antd-style';
+import { css, cx } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { useEffect } from 'react';
 

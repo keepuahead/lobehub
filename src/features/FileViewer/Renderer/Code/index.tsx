@@ -1,8 +1,8 @@
 'use client';
 
 import { Center, Flexbox, Highlighter } from '@lobehub/ui';
-import { Spin } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Spin } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { memo } from 'react';
 
 import AsyncError from '@/components/AsyncError';

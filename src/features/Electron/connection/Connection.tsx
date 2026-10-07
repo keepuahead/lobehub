@@ -1,6 +1,6 @@
 import { Center, Flexbox } from '@lobehub/ui';
-import { Drawer } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Drawer } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { Suspense, useCallback } from 'react';
 
 import { BrandTextLoading } from '@/components/Loading';

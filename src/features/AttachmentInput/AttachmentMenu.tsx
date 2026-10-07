@@ -1,8 +1,8 @@
 'use client';
 
 import { Icon } from '@lobehub/ui';
-import { ActionIcon, Upload } from '@lobehub/ui/base-ui';
-import { css, cx } from 'antd-style';
+import { ActionIcon, Upload } from '@lobehub/ui';
+import { css, cx } from '@lobehub/ui';
 import { ChevronRight, FileUp, LibraryBig, PlusIcon, TypeIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,8 +1,8 @@
 'use client';
 
 import { Center, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import { FileText } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { memo } from 'react';

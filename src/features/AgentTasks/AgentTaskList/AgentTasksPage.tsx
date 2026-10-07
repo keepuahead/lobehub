@@ -6,7 +6,7 @@ import {
   TabsList,
   TabsRoot,
   TabsTab,
-} from '@lobehub/ui/base-ui';
+} from '@lobehub/ui';
 import { Plus } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

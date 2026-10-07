@@ -2,7 +2,7 @@
 
 import { type AgentGroupMember } from '@lobechat/types';
 import { Flexbox, SortableList } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';

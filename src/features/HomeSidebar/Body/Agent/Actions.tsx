@@ -1,6 +1,6 @@
 import type { MenuProps } from '@lobehub/ui';
 import { DropdownMenu, Flexbox } from '@lobehub/ui';
-import { ActionIcon } from '@lobehub/ui/base-ui';
+import { ActionIcon } from '@lobehub/ui';
 import { MoreHorizontalIcon, PlusIcon } from 'lucide-react';
 import { memo } from 'react';
 

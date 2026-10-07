@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { useRejectReview } from './useRejectReview';
 
-vi.mock('@lobehub/ui/base-ui', () => ({
+vi.mock('@lobehub/ui', () => ({
   useModalContext: () => ({ close: vi.fn(), setCanDismissByClickOutside: vi.fn() }),
 }));
 

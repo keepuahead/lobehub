@@ -1,8 +1,8 @@
 'use client';
 
 import { Flexbox, SearchBar } from '@lobehub/ui';
-import { Button, Text, TextArea, useModalContext } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Button, Text, TextArea, useModalContext } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

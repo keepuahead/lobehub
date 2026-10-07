@@ -1,5 +1,5 @@
-import { Accordion } from '@lobehub/ui/base-ui';
-import { createStaticStyles, responsive } from 'antd-style';
+import { Accordion } from '@lobehub/ui';
+import { createStaticStyles, responsive } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo } from 'react';
 

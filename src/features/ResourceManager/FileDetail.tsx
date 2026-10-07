@@ -1,7 +1,7 @@
 'use client';
 
 import { Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Descriptions, Divider, Tag } from '@lobehub/ui/base-ui';
+import { ActionIcon, Descriptions, Divider, Tag } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { BoltIcon, DownloadIcon } from 'lucide-react';
 import { memo } from 'react';

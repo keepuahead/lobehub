@@ -4,7 +4,7 @@ import { isServerDefaultHeterogeneousAgentType } from '@lobechat/heterogeneous-a
 import type { HeterogeneousApiConfig } from '@lobechat/types';
 import { applyTopicModelToHeterogeneousProvider } from '@lobechat/types';
 import { TooltipGroup } from '@lobehub/ui';
-import { Select } from '@lobehub/ui/base-ui';
+import { Select } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { memo, useMemo } from 'react';
 

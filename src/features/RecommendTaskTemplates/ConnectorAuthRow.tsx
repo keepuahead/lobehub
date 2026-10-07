@@ -1,7 +1,7 @@
 import type { TaskTemplateConnectorReference } from '@lobechat/const';
 import { Flexbox, Icon, Image } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 

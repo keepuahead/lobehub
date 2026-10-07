@@ -1,7 +1,7 @@
 import { formatUsageValue } from '@lobechat/utils';
 import { Flexbox } from '@lobehub/ui';
-import { Divider } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Divider } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { memo } from 'react';
 
 interface TokenProgressItem {

@@ -1,6 +1,6 @@
 import type { AcceptanceCommentItem } from '@lobechat/types';
 import { Empty, Flexbox } from '@lobehub/ui';
-import { Avatar, Button, Spin, Text } from '@lobehub/ui/base-ui';
+import { Avatar, Button, Spin, Text } from '@lobehub/ui';
 import { BadgeCheck, GitCommitHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

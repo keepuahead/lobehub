@@ -1,5 +1,5 @@
-import { Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   title: css`

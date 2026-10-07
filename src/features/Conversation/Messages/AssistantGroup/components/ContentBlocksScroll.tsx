@@ -2,7 +2,7 @@
 
 import type { UIChatMessage } from '@lobechat/types';
 import { Flexbox, ScrollArea } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import type { RefObject } from 'react';
 import { memo, useMemo } from 'react';
 

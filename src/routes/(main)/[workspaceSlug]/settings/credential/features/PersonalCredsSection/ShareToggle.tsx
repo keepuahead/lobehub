@@ -2,7 +2,7 @@
 
 import { type UserCredSummary } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { Segmented, Switch, Text, toast } from '@lobehub/ui/base-ui';
+import { Segmented, Switch, Text, toast } from '@lobehub/ui';
 import { useMutation } from '@tanstack/react-query';
 import { type FC, useState } from 'react';
 import { useTranslation } from 'react-i18next';

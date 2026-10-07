@@ -1,6 +1,6 @@
 import type { GoalGraphSnapshot } from '@lobechat/types';
 import { Flexbox, Markdown } from '@lobehub/ui';
-import { Accordion, Button, Tag, Text } from '@lobehub/ui/base-ui';
+import { Accordion, Button, Tag, Text } from '@lobehub/ui';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 

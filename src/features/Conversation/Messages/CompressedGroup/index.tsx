@@ -2,8 +2,8 @@
 
 import type { CompressionGroupMetadata, UIChatMessage } from '@lobechat/types';
 import { Flexbox, Icon, Markdown, ScrollShadow } from '@lobehub/ui';
-import { ActionIcon, confirmModal, Tabs, type TabsItem } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { ActionIcon, confirmModal, Tabs, type TabsItem } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { ChevronDown, ChevronUp, History, Sparkles, Undo2 } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';

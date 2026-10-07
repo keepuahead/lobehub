@@ -3,9 +3,9 @@
 import '@xyflow/react/dist/style.css';
 
 import { Empty, Flexbox, useAppElement } from '@lobehub/ui';
-import { ActionIcon, Button, Select, Text } from '@lobehub/ui/base-ui';
+import { ActionIcon, Button, Select, Text } from '@lobehub/ui';
 import { MarkerType, ReactFlowProvider } from '@xyflow/react';
-import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
+import { createStaticStyles, cssVar, useResponsive } from '@lobehub/ui';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { use, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';

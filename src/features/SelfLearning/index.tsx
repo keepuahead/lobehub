@@ -1,9 +1,9 @@
 'use client';
 
 import { Block, Center, Empty, Flexbox, Icon } from '@lobehub/ui';
-import type { DropdownItem } from '@lobehub/ui/base-ui';
-import { ActionIcon, Button, confirmModal, DropdownMenu, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import type { DropdownItem } from '@lobehub/ui';
+import { ActionIcon, Button, confirmModal, DropdownMenu, Text, toast } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { DnaIcon, HistoryIcon, MoreHorizontalIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -2,8 +2,8 @@
 
 import { type LobehubSkillProviderType } from '@lobechat/const';
 import { Center, DropdownMenu, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Avatar, Button, Button as LobeButton, confirmModal } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Avatar, Button, Button as LobeButton, confirmModal } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { CircleCheck, MoreHorizontalIcon, SquareArrowOutUpRight, Unplug } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

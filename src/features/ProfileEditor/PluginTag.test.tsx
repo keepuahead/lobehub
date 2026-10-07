@@ -32,7 +32,7 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('@/hooks/useIsDark', () => ({ useIsDark: () => false }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createStaticStyles: () => ({}),
   cssVar: new Proxy({}, { get: () => 'var(--x)' }),
@@ -40,7 +40,7 @@ vi.mock('antd-style', async (importOriginal) => ({
 vi.mock('@lobechat/const', () => ({ resolveConnectorCatalogItem: () => undefined }));
 vi.mock('@lobehub/ui/icons', () => ({ McpIcon: () => null }));
 vi.mock('@/components/Plugins/PluginAvatar', () => ({ default: () => null }));
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Avatar: ({ title }: { title?: string }) => <span data-testid="author-avatar">{title}</span>,
 }));

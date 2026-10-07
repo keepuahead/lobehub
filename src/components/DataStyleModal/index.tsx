@@ -1,5 +1,5 @@
 import { Flexbox, Icon } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles } from '@lobehub/ui';
 import { type LucideIcon } from 'lucide-react';
 import { type ReactNode } from 'react';
 import { memo } from 'react';

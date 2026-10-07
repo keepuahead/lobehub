@@ -2,7 +2,7 @@
 
 import { type UserCredSummary } from '@lobechat/types';
 import { DropdownMenu, Flexbox, Icon, stopPropagation } from '@lobehub/ui';
-import { Avatar, Button, confirmModal, Tag } from '@lobehub/ui/base-ui';
+import { Avatar, Button, confirmModal, Tag } from '@lobehub/ui';
 import {
   Eye,
   File,

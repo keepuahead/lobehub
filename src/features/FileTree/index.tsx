@@ -3,8 +3,8 @@
 import type { SkillResourceTreeNode } from '@lobechat/types';
 import type { MenuProps } from '@lobehub/ui';
 import { ContextMenuTrigger, Icon } from '@lobehub/ui';
-import { Input } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Input } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { ChevronDown, ChevronRight, File, FolderIcon, FolderOpenIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 

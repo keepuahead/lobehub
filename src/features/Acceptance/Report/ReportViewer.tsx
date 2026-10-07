@@ -10,8 +10,8 @@ import type {
   VerifyVerdict,
 } from '@lobechat/types';
 import { Block, Center, Empty, Flexbox, Icon, Image, Markdown } from '@lobehub/ui';
-import { Button, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Button, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import type { TFunction } from 'i18next';
 import {
   AlertTriangle,

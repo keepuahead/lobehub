@@ -1,6 +1,6 @@
 import { imageUrl, OFFICIAL_URL } from '@lobechat/const';
 import { Center, Flexbox, Grid, lobeStaticStylish } from '@lobehub/ui';
-import { createStaticStyles, cx, responsive } from 'antd-style';
+import { createStaticStyles, cx, responsive } from '@lobehub/ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 

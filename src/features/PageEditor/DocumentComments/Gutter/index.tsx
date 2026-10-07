@@ -1,8 +1,8 @@
 'use client';
 
 import { Empty, Flexbox } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { MessageSquareTextIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

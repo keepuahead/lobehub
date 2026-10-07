@@ -1,7 +1,7 @@
 'use client';
 
 import { Center, Flexbox } from '@lobehub/ui';
-import { Spin } from '@lobehub/ui/base-ui';
+import { Spin } from '@lobehub/ui';
 import { lazy, memo, Suspense } from 'react';
 
 import AsyncError from '@/components/AsyncError';

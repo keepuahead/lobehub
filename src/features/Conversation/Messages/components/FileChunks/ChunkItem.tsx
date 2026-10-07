@@ -1,7 +1,7 @@
 import { type ChatFileChunk } from '@lobechat/types';
 import { Center, Flexbox, Tooltip } from '@lobehub/ui';
-import { Text } from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+import { Text } from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import FileIcon from '@/components/FileIcon';

@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { Tag } from '@lobehub/ui/base-ui';
+import { Tag } from '@lobehub/ui';
 import { type ReactNode } from 'react';
 import { memo } from 'react';
 

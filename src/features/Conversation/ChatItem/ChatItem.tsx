@@ -2,7 +2,7 @@
 
 import { agentDisplayName } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
-import { cx } from 'antd-style';
+import { cx } from '@lobehub/ui';
 import { memo } from 'react';
 
 import FollowUpChips from '../FollowUp/FollowUpChips';

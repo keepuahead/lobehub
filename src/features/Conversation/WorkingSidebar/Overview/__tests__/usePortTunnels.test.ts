@@ -49,7 +49,7 @@ vi.mock('@lobechat/const', () => ({
 }));
 
 vi.mock('@lobehub/ui', () => ({ copyToClipboard }));
-vi.mock('@lobehub/ui/base-ui', () => ({
+vi.mock('@lobehub/ui', () => ({
   toast: { error: toastError, success: toastSuccess },
 }));
 

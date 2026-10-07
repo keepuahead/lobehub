@@ -1,6 +1,6 @@
 import { isDesktop } from '@lobechat/const';
-import { type Theme } from 'antd-style';
-import { css } from 'antd-style';
+import { type Theme } from '@lobehub/ui';
+import { css } from '@lobehub/ui';
 import { rgba } from 'polished';
 
 const antdOverride = ({ token }: { prefixCls: string; token: Theme }) => css`

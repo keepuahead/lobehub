@@ -1,6 +1,6 @@
 import { Flexbox } from '@lobehub/ui';
-import { Button, Switch, Tabs } from '@lobehub/ui/base-ui';
-import { Form, type FormFieldProps, useForm } from '@lobehub/ui/base-ui/form';
+import { Button, Switch, Tabs } from '@lobehub/ui';
+import { Form, type FormFieldProps, useForm } from '@lobehub/ui/form';
 import { CopyIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

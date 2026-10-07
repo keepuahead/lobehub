@@ -3,8 +3,8 @@
 import type { GitFileDiffStatus } from '@lobechat/electron-client-ipc';
 import { nanoid } from '@lobechat/utils';
 import { copyToClipboard, Flexbox, PatchDiff } from '@lobehub/ui';
-import { ActionIcon, confirmModal, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar as themeCssVar } from 'antd-style';
+import { ActionIcon, confirmModal, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar as themeCssVar } from '@lobehub/ui';
 import { CopyIcon, LocateFixedIcon, Undo2Icon } from 'lucide-react';
 import path from 'path-browserify-esm';
 import { memo, type MouseEvent, useCallback, useMemo } from 'react';

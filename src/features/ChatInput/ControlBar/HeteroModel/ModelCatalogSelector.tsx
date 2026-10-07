@@ -26,8 +26,8 @@ import {
   DropdownMenuSubmenuTrigger,
   DropdownMenuTrigger,
   Input,
-} from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+} from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import {
   CheckIcon,
   ChevronDownIcon,

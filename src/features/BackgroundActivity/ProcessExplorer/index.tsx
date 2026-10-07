@@ -7,8 +7,8 @@ import {
   toast,
   Tree,
   type TreeDataNode,
-} from '@lobehub/ui/base-ui';
-import { cx } from 'antd-style';
+} from '@lobehub/ui';
+import { cx } from '@lobehub/ui';
 import {
   AppWindowIcon,
   BoxIcon,

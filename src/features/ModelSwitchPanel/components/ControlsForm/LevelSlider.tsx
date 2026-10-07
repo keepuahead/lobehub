@@ -1,6 +1,6 @@
 import { Flexbox } from '@lobehub/ui';
-import { Slider } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cx } from 'antd-style';
+import { Slider } from '@lobehub/ui';
+import { createStaticStyles, cx } from '@lobehub/ui';
 import type { CSSProperties, ReactNode } from 'react';
 import { memo, useMemo } from 'react';
 import useMergeState from 'use-merge-value';

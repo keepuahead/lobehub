@@ -2,7 +2,7 @@
 
 import { Icon, Tooltip } from '@lobehub/ui';
 import { type MenuProps } from '@lobehub/ui';
-import { confirmModal, toast } from '@lobehub/ui/base-ui';
+import { confirmModal, toast } from '@lobehub/ui';
 import { EyeOffIcon, Trash, UsersIcon } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { memo, useState } from 'react';

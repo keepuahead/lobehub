@@ -7,8 +7,8 @@ import type {
 } from '@lobechat/electron-client-ipc';
 import { uuid } from '@lobechat/utils';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Accordion, Button, confirmModal, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { Accordion, Button, confirmModal, Text, toast } from '@lobehub/ui';
+import { createStaticStyles, cssVar } from '@lobehub/ui';
 import { RotateCcwIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

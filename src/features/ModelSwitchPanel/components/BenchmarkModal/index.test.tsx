@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import BenchmarkModalContent from './index';
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createStaticStyles: () =>
     new Proxy({}, { get: (_target, prop: string) => prop }) as Record<string, string>,
@@ -46,7 +46,7 @@ interface MockMenuItem {
   onClick: () => void;
 }
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createModal: vi.fn(),
   DropdownMenu: ({ children, items }: { children: ReactNode; items: MockMenuItem[] }) => (

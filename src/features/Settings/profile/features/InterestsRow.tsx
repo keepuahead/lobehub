@@ -3,8 +3,8 @@
 import type { InterestAreaKey } from '@lobechat/const';
 import { normalizeInterestsForStorage, resolveInterestAreaKey } from '@lobechat/const';
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Input, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Input, Text } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import { BriefcaseIcon } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

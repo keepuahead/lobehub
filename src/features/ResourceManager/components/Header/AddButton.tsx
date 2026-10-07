@@ -8,7 +8,7 @@ import {
 import { Notion } from '@lobehub/icons';
 import { type DropdownItem } from '@lobehub/ui';
 import { DropdownMenu, Icon, Tooltip } from '@lobehub/ui';
-import { Button, toast, Upload } from '@lobehub/ui/base-ui';
+import { Button, toast, Upload } from '@lobehub/ui';
 import { FilePenLine, FileUp, FolderIcon, FolderUp, Link, Plus } from 'lucide-react';
 import { type ChangeEvent } from 'react';
 import { useCallback, useId, useMemo, useState } from 'react';

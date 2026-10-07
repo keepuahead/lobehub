@@ -1,7 +1,7 @@
 import { type ToolIntervention } from '@lobechat/types';
 import { Block, Icon, Tooltip } from '@lobehub/ui';
-import { Spin } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
+import { Spin } from '@lobehub/ui';
+import { cssVar } from '@lobehub/ui';
 import {
   AlertTriangle,
   Ban,

@@ -2,9 +2,9 @@
 
 import type { DeviceListItem } from '@lobechat/types';
 import { DropdownMenu, Flexbox, Icon, Tooltip } from '@lobehub/ui';
-import { Avatar, Button, confirmModal, Tag, Text } from '@lobehub/ui/base-ui';
+import { Avatar, Button, confirmModal, Tag, Text } from '@lobehub/ui';
 import { useInViewport } from 'ahooks';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import {
   EyeOffIcon,

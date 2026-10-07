@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { AccordionRoot } from '@lobehub/ui/base-ui';
+import { AccordionRoot } from '@lobehub/ui';
 
 import Members from './Members';
 import Topic from './Topic';

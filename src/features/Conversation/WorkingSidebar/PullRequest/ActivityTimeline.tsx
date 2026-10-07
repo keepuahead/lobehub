@@ -4,8 +4,8 @@ import type {
   DeviceGitPullRequestReview,
 } from '@lobechat/types';
 import { Flexbox, Icon, Markdown } from '@lobehub/ui';
-import { Avatar, Button, TextArea } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Avatar, Button, TextArea } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import type { LucideIcon } from 'lucide-react';
 import { CheckIcon, CircleSlashIcon, EyeIcon, GitCommitHorizontalIcon, XIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';

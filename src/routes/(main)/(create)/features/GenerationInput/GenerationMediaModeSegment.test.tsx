@@ -20,7 +20,7 @@ const componentMocks = vi.hoisted(() => ({
   segmented: undefined as SegmentedCapture | undefined,
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   ActionIcon: ({ title }: { title?: ReactNode }) => (
     <button aria-label={typeof title === 'string' ? title : 'action'} type="button" />
@@ -38,7 +38,7 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
   Select: () => <div data-testid="mode-select" />,
 }));
 
-vi.mock('antd-style', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   createStaticStyles: () => ({
     heroSelect: 'hero-select',

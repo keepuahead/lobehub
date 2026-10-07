@@ -1,5 +1,5 @@
 import { Flexbox } from '@lobehub/ui';
-import { Skeleton } from '@lobehub/ui/base-ui';
+import { Skeleton } from '@lobehub/ui';
 import dayjs from 'dayjs';
 import { Clock3Icon, UsersIcon } from 'lucide-react';
 import { memo } from 'react';

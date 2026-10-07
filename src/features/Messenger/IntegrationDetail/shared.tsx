@@ -1,8 +1,8 @@
 'use client';
 
 import { Block, Flexbox, Icon } from '@lobehub/ui';
-import { Button, confirmModal, Select, Skeleton, Tag, Text, toast } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Button, confirmModal, Select, Skeleton, Tag, Text, toast } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { ArrowLeftIcon, CheckCircle2Icon, Trash2Icon, UserIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { memo, useEffect, useMemo, useState } from 'react';

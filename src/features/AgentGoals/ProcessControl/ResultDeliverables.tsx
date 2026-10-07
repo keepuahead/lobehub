@@ -1,8 +1,8 @@
 'use client';
 
 import { Center, Flexbox, Icon } from '@lobehub/ui';
-import { ActionIcon, Button, Input, Segmented, Skeleton, Tag, Text } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { ActionIcon, Button, Input, Segmented, Skeleton, Tag, Text } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import { ArrowRight, PackageOpen, SearchIcon, SearchX, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

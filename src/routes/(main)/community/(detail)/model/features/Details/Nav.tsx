@@ -2,8 +2,8 @@
 
 import { SOCIAL_URL } from '@lobechat/business-const';
 import { Flexbox, Icon } from '@lobehub/ui';
-import { Tabs } from '@lobehub/ui/base-ui';
-import { createStaticStyles } from 'antd-style';
+import { Tabs } from '@lobehub/ui';
+import { createStaticStyles } from '@lobehub/ui';
 import { BookOpenIcon, ListIcon, Settings2Icon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
