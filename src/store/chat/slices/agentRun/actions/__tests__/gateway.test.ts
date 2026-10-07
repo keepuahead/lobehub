@@ -2213,6 +2213,7 @@ describe('GatewayActionImpl', () => {
       // Before: interruptTask(...).catch(log) always resolved the cancel hook.
       // After: an explicit false confirmation rejects the cancel hook.
       const onOperationCancel = vi.fn();
+      const onStopConfirmed = vi.fn().mockResolvedValue(undefined);
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-local' }));
 
       const mockClient = createMockClient();
@@ -2264,6 +2265,7 @@ describe('GatewayActionImpl', () => {
       await action.executeGatewayAgent({
         context: { agentId: 'agent-1', topicId: 'topic-1', threadId: null, scope: 'main' },
         message: 'Hello',
+        onStopConfirmed,
       });
 
       // Handler was registered against the local operation id...
@@ -2277,6 +2279,10 @@ describe('GatewayActionImpl', () => {
         topicId: 'topic-1',
       });
 
+      /** @example Branch recovery runs only after confirmed physical shutdown. */
+      expect(onStopConfirmed).toHaveBeenCalledWith('ast-1');
+      onStopConfirmed.mockClear();
+
       interruptTaskSpy.mockResolvedValueOnce({
         deviceCancellationConfirmed: false,
         operationId: 'server-op-xyz',
@@ -2285,6 +2291,11 @@ describe('GatewayActionImpl', () => {
       await expect(handler()).rejects.toThrow(
         'Gateway operation server-op-xyz cancellation unconfirmed',
       );
+      /** @example An uncertain stop must not hide a potentially live reply. */
+      expect(onStopConfirmed).not.toHaveBeenCalled();
+      onStopConfirmed.mockRejectedValueOnce(new Error('Message refresh offline'));
+      /** @example UI recovery failure does not turn confirmed shutdown into an uncertain stop. */
+      await expect(handler()).resolves.toBeUndefined();
     });
 
     /**

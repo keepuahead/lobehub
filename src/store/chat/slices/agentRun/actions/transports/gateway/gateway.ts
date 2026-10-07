@@ -952,6 +952,12 @@ export class GatewayActionImpl {
     onMessageAccepted?: () => void;
     /** Called when a new topic is persisted, before UI hydration and stream setup. */
     onTopicCreated?: (topicId: string) => void | Promise<void>;
+    /**
+     * Called after the server confirms physical shutdown, with the persisted
+     * assistant root. Use for caller-owned recovery; never called for an
+     * unconfirmed interrupt. The cancel handler waits for recovery to finish.
+     */
+    onStopConfirmed?: (assistantMessageId: string) => Promise<void>;
     /** Called when the gateway session completes (agent finished running) */
     onComplete?: () => void;
     /** Temporary sidebar topic inserted by sendMessage before the server creates the real topic. */
@@ -1033,6 +1039,7 @@ export class GatewayActionImpl {
       metadata,
       onComplete,
       onMessageAccepted,
+      onStopConfirmed,
       onTopicCreated,
       optimisticTopic,
       parentMessageId,
@@ -1602,6 +1609,11 @@ export class GatewayActionImpl {
           topicId: result.topicId,
         });
       }
+
+      // A failed UI refresh cannot undo the device's confirmed shutdown.
+      await onStopConfirmed?.(result.assistantMessageId).catch((error) =>
+        console.error('[Gateway] post-stop recovery failed:', error),
+      );
     });
 
     const eventHandler = createGatewayEventHandler(this.#get, {
