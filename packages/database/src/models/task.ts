@@ -298,9 +298,10 @@ interface TaskListOptions extends TaskListFilterOptions {
    * Keyset cursor: only rows that sort strictly after this `(orderBy, seq)`
    * position in the list's newest-first order. Unlike `offset`, a cursor is
    * unaffected by rows inserted or deleted ahead of it, so a client walking
-   * the whole list page by page never repeats or skips a row.
+   * the whole list page by page never repeats or skips a row. Grouped
+   * automation queries also require the switch state captured with the row.
    */
-  after?: { at: Date; seq: number };
+  after?: { at: Date; automationEnabled?: boolean; seq: number };
   limit?: number;
   offset?: number;
   orderBy?: 'createdAt' | 'updatedAt';
@@ -1301,14 +1302,11 @@ export class TaskModel {
       if (groupAutomation) {
         // Management pages order by the switch first, so the timestamp cursor
         // must advance within its group before crossing into disabled tasks.
-        const [cursor] = await this.db
-          .select({ enabled: automationEnabled })
-          .from(tasks)
-          .where(and(eq(tasks.seq, after.seq), this.ownership()))
-          .limit(1);
-        if (!cursor) throw new Error('Automation pagination cursor task no longer exists');
+        if (after.automationEnabled === undefined) {
+          throw new Error('Grouped automation cursors require automationEnabled');
+        }
         conditions.push(
-          cursor.enabled
+          after.automationEnabled
             ? or(isNull(tasks.automationMode), and(automationEnabled, afterTimestamp))!
             : and(isNull(tasks.automationMode), afterTimestamp)!,
         );

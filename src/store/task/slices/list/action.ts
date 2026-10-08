@@ -241,7 +241,13 @@ export class TaskListSliceActionImpl {
       if (!last || page.data.length < limit || byId.size >= COMPLETE_TASK_LIST_MAX_ITEMS) break;
       page = await this.fetchTaskList({
         ...params,
-        after: { at: last[orderBy], seq: last.seq },
+        after: {
+          at: last[orderBy],
+          ...(params.automated && params.includeDisabledAutomation
+            ? { automationEnabled: !!last.automationMode }
+            : {}),
+          seq: last.seq,
+        },
         limit,
       });
     }

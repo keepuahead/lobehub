@@ -542,6 +542,35 @@ describe('TaskModel', () => {
       expect(rest.map((t) => t.id)).toEqual([c.id, b.id]);
     });
 
+    it.each([true, false])(
+      'continues grouped pagination after deleting a cursor in the enabled=%s group',
+      async (enabled) => {
+        const model = new TaskModel(serverDB, userId);
+        for (const mode of ['schedule', 'schedule', null, null] as const) {
+          await model.create({
+            automationMode: mode,
+            instruction: 'Grouped cursor',
+            schedulePattern: '0 9 * * *',
+          });
+        }
+        const options = {
+          automated: true,
+          includeDisabledAutomation: true,
+          limit: 1,
+          orderBy: 'updatedAt' as const,
+        };
+        const full = await model.list({ ...options, limit: 10 });
+        const index = enabled ? 0 : 2;
+        const row = full.tasks[index];
+        const cursor = { at: row.updatedAt, seq: row.seq, automationEnabled: enabled };
+        await model.delete(row.id);
+        const rest = await model.list({ ...options, limit: 10, after: cursor });
+        expect(rest.tasks.map((task) => task.id)).toEqual(
+          full.tasks.slice(index + 1).map((task) => task.id),
+        );
+      },
+    );
+
     it('orders enabled automation before disabled automation across page boundaries', async () => {
       const model = new TaskModel(serverDB, userId);
       const enabled = [];
@@ -576,12 +605,20 @@ describe('TaskModel', () => {
       const second = await model.list({ ...options, offset: 50 });
       const cursorPage = await model.list({
         ...options,
-        after: { at: first.tasks[49].updatedAt, seq: first.tasks[49].seq },
+        after: {
+          at: first.tasks[49].updatedAt,
+          automationEnabled: !!first.tasks[49].automationMode,
+          seq: first.tasks[49].seq,
+        },
       });
       expect(cursorPage.tasks.map((task) => task.id)).toEqual(second.tasks.map((task) => task.id));
       const enabledCursorPage = await model.list({
         ...options,
-        after: { at: first.tasks[1].updatedAt, seq: first.tasks[1].seq },
+        after: {
+          at: first.tasks[1].updatedAt,
+          automationEnabled: !!first.tasks[1].automationMode,
+          seq: first.tasks[1].seq,
+        },
       });
       expect(enabledCursorPage.tasks[0].id).toBe(first.tasks[2].id);
       expect(enabledCursorPage.tasks.slice(1).every((task) => task.automationMode === null)).toBe(
