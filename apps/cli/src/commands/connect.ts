@@ -20,6 +20,8 @@ import type {
 } from '@lobechat/device-gateway-client';
 import { GatewayClient } from '@lobechat/device-gateway-client';
 import { listHeterogeneousAgentModels } from '@lobechat/heterogeneous-agents/models';
+import { resolveHeteroSpawnCommand } from '@lobechat/heterogeneous-agents/resolveCliCommand';
+import { CodexAppServerClient } from '@lobechat/heterogeneous-agents/spawn';
 import { getShellInfo } from '@lobechat/local-file-shell';
 import type { Command } from 'commander';
 
@@ -53,6 +55,7 @@ import {
   resolveDeviceIdentity,
   resolveWorkspaceDeviceIdentity,
 } from '../device/register';
+import { cliVersion } from '../pkg';
 import {
   installConnectService,
   readConnectServiceStatus,
@@ -891,9 +894,9 @@ function bindGatewayClientHandlers(
   const { deps, error, getServerUrl, info, isDaemonChild } = ctx;
 
   // Handle system info requests
-  client.on('system_info_request', (request: SystemInfoRequestMessage) => {
+  client.on('system_info_request', async (request: SystemInfoRequestMessage) => {
     info(`Received system_info_request: requestId=${request.requestId}`);
-    const systemInfo = collectSystemInfo();
+    const systemInfo = await collectSystemInfo();
     client.sendSystemInfoResponse({
       requestId: request.requestId,
       result: { success: true, systemInfo },
@@ -1083,7 +1086,72 @@ function scheduleProactiveRefresh(
   }
 }
 
-function collectSystemInfo(): DeviceSystemInfo {
+/**
+ * Checks the currently resolved Codex binary without creating a conversation.
+ *
+ * Use when:
+ * - Reporting native runtime support to a connected gateway.
+ * Expects:
+ * - The same binary resolution and PATH as ordinary CLI dispatch.
+ * Returns:
+ * - False for missing, incompatible, malformed, or stalled native handshakes.
+ *
+ * Call stack:
+ * bindGatewayClientHandlers
+ *   -> {@link collectSystemInfo}
+ *     -> {@link supportsNativeCodex}
+ *       -> {@link resolveHeteroSpawnCommand}
+ *       -> {@link CodexAppServerClient.connect}
+ */
+async function supportsNativeCodex(): Promise<boolean> {
+  let client: CodexAppServerClient | undefined;
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Device discovery has a 10-second budget. Bound binary resolution and handshake
+  // together so a broken installation cannot block unrelated device tools.
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => {
+      expired = true;
+      resolve(false);
+    }, 3000);
+  });
+  const probe = async () => {
+    try {
+      const resolved = await resolveHeteroSpawnCommand('codex');
+      // A late resolver must not create a subprocess after the caller has timed out.
+      if (expired) return false;
+      client = new CodexAppServerClient({
+        clientVersion: cliVersion,
+        commandPath: resolved.command,
+        cwd: process.cwd(),
+        env: { ...process.env, ...(resolved.pathEnv ? { PATH: resolved.pathEnv } : {}) },
+      });
+      const response = await client.connect();
+      return typeof response?.userAgent === 'string' && response.userAgent.length > 0;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    return await Promise.race([probe(), deadline]);
+  } finally {
+    clearTimeout(timer);
+    // The probe owns only its handshake process, never a user's native session.
+    client?.close();
+  }
+}
+
+/**
+ * Reports host paths and live native capabilities to the gateway.
+ *
+ * Use when: a gateway requests this connection's current system information.
+ * Expects: local paths and binary resolution belong to this connect process.
+ * Returns: system information even when Codex is unavailable.
+ *
+ * Call stack:
+ * bindGatewayClientHandlers -> {@link collectSystemInfo} -> {@link supportsNativeCodex}
+ */
+async function collectSystemInfo(): Promise<DeviceSystemInfo> {
   const home = os.homedir();
   const platform = process.platform;
   const videosDir = platform === 'linux' ? 'Videos' : 'Movies';
@@ -1098,7 +1166,7 @@ function collectSystemInfo(): DeviceSystemInfo {
     homePath: home,
     musicPath: path.join(home, 'Music'),
     picturesPath: path.join(home, 'Pictures'),
-    supportedAgentRuntimes: ['codex-app-server-v1'],
+    supportedAgentRuntimes: (await supportsNativeCodex()) ? ['codex-app-server-v1'] : [],
     userDataPath: path.join(home, CLI_CONFIG_DIR_NAME),
     videosPath: path.join(home, videosDir),
     workingDirectory: process.cwd(),
