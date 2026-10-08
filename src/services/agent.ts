@@ -243,7 +243,11 @@ class AgentService {
     signal?: AbortSignal,
   ) => {
     return lambdaClient.agent.updateAgentConfig.mutate(
-      { agentId, value: config },
+      {
+        agentId,
+        replaceWorkingDirDeviceIds: Object.keys(config.agencyConfig?.workingDirByDevice ?? {}),
+        value: config,
+      },
       { context: { showNotification: false }, signal },
     );
   };

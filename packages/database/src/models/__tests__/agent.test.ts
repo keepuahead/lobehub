@@ -3374,9 +3374,13 @@ describe('AgentModel', () => {
         })
         .returning();
 
-      await agentModel.updateConfig(agent.id, {
-        agencyConfig: { workingDirByDevice: { 'device-a': { path: '/repos/lobehub' } } },
-      });
+      await agentModel.updateConfig(
+        agent.id,
+        {
+          agencyConfig: { workingDirByDevice: { 'device-a': { path: '/repos/lobehub' } } },
+        },
+        ['device-a'],
+      );
 
       const result = await serverDB.query.agents.findFirst({ where: eq(agents.id, agent.id) });
       expect(result?.agencyConfig).toEqual({
@@ -3387,6 +3391,48 @@ describe('AgentModel', () => {
         },
       });
     });
+
+    it.each([undefined, ['device-a']])(
+      'preserves newer Git fields on unmarked devices in a cached complete map (%j)',
+      async (replaceWorkingDirDeviceIds) => {
+        const newerDeviceB = {
+          git: { activeWorktree: '/repos/b-worktree', branch: 'feature-b' },
+          path: '/repos/b',
+          repoType: 'github' as const,
+        };
+        const [agent] = await serverDB
+          .insert(agents)
+          .values({
+            userId,
+            agencyConfig: {
+              workingDirByDevice: {
+                'device-a': { path: '/repos/a' },
+                'device-b': newerDeviceB,
+              },
+            },
+          })
+          .returning();
+
+        await agentModel.updateConfig(
+          agent.id,
+          {
+            agencyConfig: {
+              workingDirByDevice: {
+                'device-a': { path: '/repos/a-new' },
+                'device-b': { path: '/repos/b' },
+              },
+            },
+          },
+          replaceWorkingDirDeviceIds,
+        );
+
+        const result = await serverDB.query.agents.findFirst({ where: eq(agents.id, agent.id) });
+        expect(result?.agencyConfig?.workingDirByDevice).toEqual({
+          'device-a': { path: '/repos/a-new' },
+          'device-b': newerDeviceB,
+        });
+      },
+    );
 
     it('should still upsert a workingDirByDevice entry when value is a path', async () => {
       const [agent] = await serverDB
