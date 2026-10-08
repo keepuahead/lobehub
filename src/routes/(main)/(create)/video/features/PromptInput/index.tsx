@@ -1,9 +1,9 @@
 'use client';
 
-import { Flexbox } from '@lobehub/ui';
 import {
   ActionIcon,
   Divider,
+  Flexbox,
   InputNumber,
   Segmented,
   SliderWithInput,
@@ -262,7 +262,11 @@ const PromptExtendItem = memo(() => {
   const { value, setValue, enumValues } = useVideoGenerationConfigParam('promptExtend');
 
   const options =
-    enumValues?.map((item) => ({ disabled: !canCreate, key: item, label: item })) ?? [];
+    enumValues?.map((item) => ({
+      disabled: !canCreate,
+      key: item,
+      label: t(`config.promptExtend.options.${item}`, { defaultValue: item }),
+    })) ?? [];
 
   if (options.length > 0) {
     return (

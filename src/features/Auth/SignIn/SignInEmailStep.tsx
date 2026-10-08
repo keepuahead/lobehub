@@ -1,8 +1,16 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
-import { Flexbox, Icon } from '@lobehub/ui';
-import { Alert, Badge, Button, Divider, Input, Text } from '@lobehub/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  createStaticStyles,
+  Divider,
+  Flexbox,
+  Icon,
+  Input,
+  Text,
+} from '@lobehub/ui';
 import { Form, type FormInstance } from '@lobehub/ui/form';
-import { createStaticStyles } from '@lobehub/ui';
 import { Mail } from 'lucide-react';
 import { type CSSProperties, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -115,6 +123,7 @@ export const SignInEmailStep = ({
             const button = (
               <Button
                 block
+                htmlType="button"
                 icon={<Icon icon={AuthIcons(provider, 18)} />}
                 key={provider}
                 loading={socialLoading === provider}
@@ -158,6 +167,7 @@ export const SignInEmailStep = ({
           <Form.Field
             name="email"
             style={{ gap: 0, paddingBlock: '0 24px' }}
+            validateOn="submit"
             validate={(value: string) => {
               if (!value) return t('betterAuth.errors.emailRequired');
               const trimmedValue = value.trim();

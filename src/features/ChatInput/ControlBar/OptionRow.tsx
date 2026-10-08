@@ -1,7 +1,6 @@
 'use client';
 
-import { Flexbox, Icon } from '@lobehub/ui';
-import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
+import { createStaticStyles, cssVar, cx, Flexbox, Icon } from '@lobehub/ui';
 import { CheckIcon } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 
@@ -116,6 +115,7 @@ const styles = createStaticStyles(({ css }) => ({
 
 export interface OptionRowProps {
   active?: boolean;
+  className?: string;
   desc?: ReactNode;
   disabled?: boolean;
   /** Trailing action, kept live while the row itself is disabled. */
@@ -130,12 +130,13 @@ export interface OptionRowProps {
 }
 
 const OptionRow = memo<OptionRowProps>(
-  ({ active, desc, disabled, extra, icon, label, onClick, tag, tags }) => (
+  ({ active, className, desc, disabled, extra, icon, label, onClick, tag, tags }) => (
     <div
       className={cx(
         styles.option,
         active && styles.optionActive,
         disabled && styles.optionDisabled,
+        className,
       )}
       onClick={() => {
         if (!disabled) onClick();

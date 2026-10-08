@@ -1,18 +1,21 @@
 import { deriveWorktreePath, type DeviceGitWorktreeListItem } from '@lobechat/types';
-import { Icon, Tooltip } from '@lobehub/ui';
 import {
   confirmModal,
+  createStaticStyles,
+  cssVar,
+  cx,
   DropdownMenuItem,
   DropdownMenuPopup,
   DropdownMenuPortal,
   DropdownMenuPositioner,
   DropdownMenuRoot,
   DropdownMenuTrigger,
+  Icon,
   Input,
   Spin,
   toast,
+  Tooltip,
 } from '@lobehub/ui';
-import { createStaticStyles, cssVar, cx } from '@lobehub/ui';
 import {
   CheckIcon,
   FolderPlusIcon,
@@ -37,6 +40,7 @@ import { useTranslation } from 'react-i18next';
 import { gitService } from '@/services/git';
 
 import { openCreateWorktreeModal } from './CreateWorktreeModal';
+import { gitMenuTriggerStyles } from './gitMenuTriggerStyles';
 import { useSwitchWorktree } from './useSwitchWorktree';
 import { getPathName, isDisabled, normalizeDisplayPath } from './worktreeHelpers';
 
@@ -317,20 +321,6 @@ const styles = createStaticStyles(({ css }) => ({
 
     &:hover {
       background: ${cssVar.colorFillTertiary};
-    }
-  `,
-  triggerAnchor: css`
-    display: inline-flex;
-    flex: none;
-  `,
-  /* Custom row triggers (overview panel) must fill the stretched trigger, or the
-     popup-open background paints wider than the row's own hover background. */
-  triggerFill: css`
-    display: flex;
-    width: 100%;
-
-    > * {
-      flex: 1;
     }
   `,
 }));
@@ -646,8 +636,8 @@ const WorktreeSwitcher = memo<WorktreeSwitcherProps>(
 
     return (
       <DropdownMenuRoot open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger className={styles.triggerAnchor}>
-          <div className={children ? styles.triggerFill : undefined}>
+        <DropdownMenuTrigger>
+          <div className={gitMenuTriggerStyles.trigger}>
             {open ? trigger : <Tooltip title={triggerTitle}>{trigger}</Tooltip>}
           </div>
         </DropdownMenuTrigger>
