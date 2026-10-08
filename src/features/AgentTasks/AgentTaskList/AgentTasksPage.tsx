@@ -119,14 +119,16 @@ export const clampCollectionPage = (page: number, total: number): number =>
 /**
  * View options every paginated (server-sliced) collection pins, because a
  * client-side reorder or cut would only ever apply to the fetched page:
- * - ordering follows the server's updatedAt DESC page order. `compareTaskItems`
+ * - ordering within each group follows updatedAt DESC. `compareTaskItems`
  *   inverts `orderDirection` for the date columns (see
  *   `effectiveOrderDirection`), so the token that renders newest-first is 'asc';
  * - every fetched row renders. With `showSubTasks: false` `TaskList` folds a
  *   child away whenever its parent shares the page, which would leave the page
  *   sparse while `total` still counts the hidden rows. Nesting (when enabled)
  *   still tucks a child under a parent that is on the same page.
- * Grouping stays client-side — it only arranges the rows of the current page.
+ * Group headers stay client-side. Scheduled management queries order enabled
+ * automation first on the server, before slicing a page; client grouping then
+ * arranges the rows without letting newer disabled tasks displace enabled ones.
  */
 const PAGINATED_COLLECTION_VIEW = {
   orderBy: 'updatedAt',

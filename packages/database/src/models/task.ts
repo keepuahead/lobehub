@@ -1285,18 +1285,36 @@ export class TaskModel {
   async list(options: TaskListOptions = {}): Promise<{ tasks: TaskItem[]; total: number }> {
     const { after, statuses, priorities, limit = 50, offset = 0, orderBy = 'createdAt' } = options;
     const orderColumn = orderBy === 'updatedAt' ? tasks.updatedAt : tasks.createdAt;
+    const groupAutomation =
+      options.automated === true && options.includeDisabledAutomation === true;
+    const automationEnabled = isNotNull(tasks.automationMode);
 
     const conditions = this.buildListConditions(options);
 
     if (statuses?.length) conditions.push(inArray(tasks.status, statuses));
     if (priorities?.length) conditions.push(inArray(tasks.priority, priorities));
     if (after) {
-      conditions.push(
-        or(
-          lt(orderColumn, after.at),
-          and(eq(orderColumn, after.at), lt(tasks.seq, after.seq)),
-        ) as SQL,
-      );
+      const afterTimestamp = or(
+        lt(orderColumn, after.at),
+        and(eq(orderColumn, after.at), lt(tasks.seq, after.seq)),
+      )!;
+      if (groupAutomation) {
+        // Management pages order by the switch first, so the timestamp cursor
+        // must advance within its group before crossing into disabled tasks.
+        const [cursor] = await this.db
+          .select({ enabled: automationEnabled })
+          .from(tasks)
+          .where(and(eq(tasks.seq, after.seq), this.ownership()))
+          .limit(1);
+        if (!cursor) throw new Error('Automation pagination cursor task no longer exists');
+        conditions.push(
+          cursor.enabled
+            ? or(isNull(tasks.automationMode), and(automationEnabled, afterTimestamp))!
+            : and(isNull(tasks.automationMode), afterTimestamp)!,
+        );
+      } else {
+        conditions.push(afterTimestamp);
+      }
     }
 
     const where = and(...conditions);
@@ -1312,7 +1330,11 @@ export class TaskModel {
       .where(where)
       // `seq` breaks timestamp ties so the order is total — required for the
       // keyset cursor above and for offset pages to never repeat or skip a row.
-      .orderBy(desc(orderColumn), desc(tasks.seq))
+      .orderBy(
+        ...(groupAutomation ? [desc(automationEnabled)] : []),
+        desc(orderColumn),
+        desc(tasks.seq),
+      )
       .limit(limit)
       .offset(offset);
     const [countResult, taskList] = await Promise.all([countQuery, taskListQuery]);

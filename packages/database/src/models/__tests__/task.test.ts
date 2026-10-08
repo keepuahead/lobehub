@@ -542,6 +542,66 @@ describe('TaskModel', () => {
       expect(rest.map((t) => t.id)).toEqual([c.id, b.id]);
     });
 
+    it('orders enabled automation before disabled automation across page boundaries', async () => {
+      const model = new TaskModel(serverDB, userId);
+      const enabled = [];
+      for (let index = 0; index < 3; index += 1) {
+        enabled.push(
+          await model.create({
+            automationMode: 'schedule',
+            instruction: `Enabled ${index}`,
+            schedulePattern: '0 9 * * *',
+          }),
+        );
+      }
+      const disabled = [];
+      for (let index = 0; index < 51; index += 1) {
+        disabled.push(
+          await model.create({ instruction: `Disabled ${index}`, schedulePattern: '0 9 * * *' }),
+        );
+      }
+      await serverDB.execute(
+        sql`update tasks set updated_at = '2026-01-01' where automation_mode is not null and created_by_user_id = ${userId}`,
+      );
+      await serverDB.execute(
+        sql`update tasks set updated_at = '2026-02-01' where automation_mode is null and created_by_user_id = ${userId}`,
+      );
+      const options = {
+        automated: true,
+        includeDisabledAutomation: true,
+        limit: 50,
+        orderBy: 'updatedAt' as const,
+      };
+      const first = await model.list(options);
+      const second = await model.list({ ...options, offset: 50 });
+      const cursorPage = await model.list({
+        ...options,
+        after: { at: first.tasks[49].updatedAt, seq: first.tasks[49].seq },
+      });
+      expect(cursorPage.tasks.map((task) => task.id)).toEqual(second.tasks.map((task) => task.id));
+      const enabledCursorPage = await model.list({
+        ...options,
+        after: { at: first.tasks[1].updatedAt, seq: first.tasks[1].seq },
+      });
+      expect(enabledCursorPage.tasks[0].id).toBe(first.tasks[2].id);
+      expect(enabledCursorPage.tasks.slice(1).every((task) => task.automationMode === null)).toBe(
+        true,
+      );
+      expect(first.total).toBe(54);
+      expect(first.tasks.slice(0, 3).map((task) => task.id)).toEqual(
+        enabled.map((task) => task.id).reverse(),
+      );
+      expect(first.tasks.slice(3).every((task) => task.automationMode === null)).toBe(true);
+      expect(second.tasks.every((task) => task.automationMode === null)).toBe(true);
+      expect(new Set([...first.tasks, ...second.tasks].map((task) => task.id)).size).toBe(54);
+      expect(second.tasks.map((task) => task.id)).toEqual(
+        disabled
+          .slice(0, 4)
+          .map((task) => task.id)
+          .reverse(),
+      );
+    });
+
     it('keeps switched-off configured automation in the management list but out of the runnable roll-up', async () => {
       const model = new TaskModel(serverDB, userId);
       const cron = await model.create({
