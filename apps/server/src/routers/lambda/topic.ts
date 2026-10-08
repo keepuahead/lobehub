@@ -28,6 +28,7 @@ import { TopicShareModel } from '@/database/models/topicShare';
 import { WorkspaceAuditLogModel } from '@/database/models/workspaceAuditLog';
 import { AgentMigrationRepo } from '@/database/repositories/agentMigration';
 import { HeteroSessionImporterRepo } from '@/database/repositories/heteroSessionImporter';
+import { TopicRepository } from '@/database/repositories/topic';
 import { TopicImporterRepo } from '@/database/repositories/topicImporter';
 import { chatGroups } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
@@ -83,6 +84,7 @@ const topicProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) =>
       messageModel: new MessageModel(ctx.serverDB, ctx.userId, wsId),
       topicImporterRepo: new TopicImporterRepo(ctx.serverDB, ctx.userId, wsId),
       topicModel: new TopicModel(ctx.serverDB, ctx.userId, wsId),
+      topicRepo: new TopicRepository(ctx.serverDB, ctx.userId, wsId),
       topicShareModel: new TopicShareModel(ctx.serverDB, ctx.userId, wsId),
       trashService: new TrashService(ctx.serverDB, ctx.userId, wsId),
     },
@@ -481,7 +483,7 @@ export const topicRouter = router({
       await assertCanUseTopicTargets(guardCtx(ctx), [topicId]);
       // Same visitor guard as `cloneTopic` above.
       await assertCreatorTopicTargets(guardCtx(ctx), [topicId]);
-      const branch = await ctx.topicModel.branchAtMessage(topicId, messageId, edit);
+      const branch = await ctx.topicRepo.branchAtMessage(topicId, messageId, edit);
       if (!branch) throw new TRPCError({ code: 'NOT_FOUND', message: 'User message not found' });
 
       return { messageId: branch.messageId, topicId: branch.topic.id };
