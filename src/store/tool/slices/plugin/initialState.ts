@@ -1,22 +1,31 @@
 import { type LobeTool } from '@lobechat/types';
 
+import { createReplicaState, type ReplicaState } from '@/libs/replica';
 import { type PluginInstallError } from '@/types/tool/plugin';
 
-export type PluginsSettings = Record<string, any>;
-
 export interface PluginState {
+  /** Installed plugins — the view of the `installedPlugins` replica. */
   installedPlugins: LobeTool[];
-  loadingInstallPlugins: boolean;
+  /** Replica bookkeeping for `installedPlugins`. */
+  installedPluginsReplica: ReplicaState<LobeTool[]>;
+  /**
+   * Whether the installed-plugins view has been filled (from storage or the
+   * server). Gates the replica lens: an un-loaded list must read `undefined`,
+   * otherwise hydration would treat the empty default as a real value.
+   */
+  isInstalledPluginsInit: boolean;
+  /** Install errors by plugin id (local UI state; never persisted). */
   pluginInstallErrors: Record<string, PluginInstallError | undefined>;
+  /** In-flight install flags by plugin id (local UI state; never persisted). */
   pluginInstallLoading: Record<string, boolean | undefined>;
-  pluginsSettings: PluginsSettings;
+  /** Lets a newer settings write abort the one already in flight. */
   updatePluginSettingsSignal?: AbortController;
 }
 
 export const initialPluginState: PluginState = {
   installedPlugins: [],
-  loadingInstallPlugins: true,
+  installedPluginsReplica: createReplicaState(),
+  isInstalledPluginsInit: false,
   pluginInstallErrors: {},
   pluginInstallLoading: {},
-  pluginsSettings: {},
 };

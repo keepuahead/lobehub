@@ -3,19 +3,44 @@ import { type LobeTool } from '@lobechat/types';
 import { type SWRResponse } from 'swr';
 
 import { MESSAGE_CANCEL_FLAT } from '@/const/message';
+import {
+  createReplicaSlice,
+  linkReplicaEntity,
+  type ReplicaLens,
+  type ReplicaSyncResult,
+} from '@/libs/replica';
 import { useClientDataSWR } from '@/libs/swr';
-import { toolKeys } from '@/libs/swr/keys';
 import { pluginService } from '@/services/plugin';
 import { type StoreSetter } from '@/store/types';
 import { type PluginInstallError } from '@/types/tool/plugin';
 import { merge } from '@/utils/merge';
 
 import { type ToolStore } from '../../store';
+import {
+  INSTALLED_PLUGINS_KEY,
+  installedPluginsEntity,
+  installedPluginsResource,
+} from './projection';
 import { pluginSelectors } from './selectors';
 
+/** The installed-plugins list is one entry, so every sync shares these params. */
+const LIST_PARAMS = {} as Record<string, never>;
+
 /**
- * Plugin interface
+ * The installed plugins keep their long-standing flat `installedPlugins` field
+ * as the replica view, so every selector keeps reading what it did. The init
+ * flag gates `get`: before the first hydrate/replace the view must read
+ * `undefined`, otherwise the empty default would block hydration from storage.
  */
+const installedPluginsLens: ReplicaLens<ToolStore, LobeTool[]> = {
+  clear: () => ({ installedPlugins: [], isInstalledPluginsInit: false }),
+  get: (state) => (state.isInstalledPluginsInit ? state.installedPlugins : undefined),
+  keys: (state) => (state.isInstalledPluginsInit ? [INSTALLED_PLUGINS_KEY] : []),
+  set: (_state, _key, data) =>
+    data
+      ? { installedPlugins: data, isInstalledPluginsInit: true }
+      : { installedPlugins: [], isInstalledPluginsInit: false },
+};
 
 type Setter = StoreSetter<ToolStore>;
 export const createPluginSlice = (set: Setter, get: () => ToolStore, _api?: unknown) =>
@@ -24,11 +49,23 @@ export const createPluginSlice = (set: Setter, get: () => ToolStore, _api?: unkn
 export class PluginActionImpl {
   readonly #get: () => ToolStore;
   readonly #set: Setter;
+  readonly #installedPlugins;
+  readonly #plugins;
 
   constructor(set: Setter, get: () => ToolStore, _api?: unknown) {
     void _api;
     this.#set = set;
     this.#get = get;
+    this.#installedPlugins = createReplicaSlice(installedPluginsResource, {
+      actionPrefix: 'plugin',
+      entity: installedPluginsEntity,
+      fetcher: () => pluginService.getInstalledPlugins(),
+      get,
+      set,
+      stateKey: 'installedPluginsReplica',
+      view: installedPluginsLens,
+    });
+    this.#plugins = linkReplicaEntity<LobeTool>([this.#installedPlugins]);
   }
 
   checkPluginsIsInstalled = async (_plugins: string[]): Promise<void> => {
@@ -36,11 +73,11 @@ export class PluginActionImpl {
   };
 
   /**
-   * Refresh installed plugins from the server and update store state.
+   * Refresh the replica: the persisted list stays on screen while the network
+   * answers, instead of blanking to an empty array first.
    */
   refreshPlugins = async (): Promise<void> => {
-    const data = await pluginService.getInstalledPlugins();
-    this.#set({ installedPlugins: data }, false, 'refreshPlugins');
+    await this.#installedPlugins.revalidate(INSTALLED_PLUGINS_KEY);
   };
 
   updateInstallLoadingState = (id: string, loading: boolean | undefined): void => {
@@ -64,9 +101,13 @@ export class PluginActionImpl {
 
     if (!installedPlugin) return;
 
-    await pluginService.updatePlugin(id, {
-      customParams: { mcp: merge(installedPlugin.customParams?.mcp, value) },
-    });
+    const nextMcp = merge(installedPlugin.customParams?.mcp, value);
+
+    await this.#plugins.optimistic(
+      id,
+      (plugin) => ({ ...plugin, customParams: { ...plugin.customParams, mcp: nextMcp } }),
+      () => pluginService.updatePlugin(id, { customParams: { mcp: nextMcp } }),
+    );
 
     await this.#get().refreshPlugins();
   };
@@ -86,26 +127,20 @@ export class PluginActionImpl {
     const nextSettings = override ? settings : merge(previousSettings, settings);
 
     this.#set({ updatePluginSettingsSignal: newSignal }, false, 'create new Signal');
-    await pluginService.updatePluginSettings(id, nextSettings, newSignal.signal);
+
+    // The row shows the new settings immediately; a failed write rolls it back.
+    await this.#plugins.optimistic(
+      id,
+      (plugin) => ({ ...plugin, settings: nextSettings }),
+      () => pluginService.updatePluginSettings(id, nextSettings, newSignal.signal),
+    );
 
     await this.#get().refreshPlugins();
   };
 
-  useFetchInstalledPlugins = (enable: boolean): SWRResponse => {
-    return useClientDataSWR(
-      enable ? toolKeys.installedPlugins() : null,
-      () => pluginService.getInstalledPlugins(),
-      {
-        onSuccess: (data: LobeTool[]) => {
-          this.#set(
-            { installedPlugins: data, loadingInstallPlugins: false },
-            false,
-            'useFetchInstalledPlugins/onSuccess',
-          );
-        },
-      },
-    );
-  };
+  /** Fetch orchestration only; read the list through `pluginSelectors.installedPlugins`. */
+  useFetchInstalledPlugins = (enable: boolean): ReplicaSyncResult =>
+    this.#installedPlugins.useSync(LIST_PARAMS, { enabled: enable });
 
   useCheckPluginsIsInstalled = (enable: boolean, plugins: string[]): SWRResponse => {
     return useClientDataSWR(enable ? plugins : null, this.#get().checkPluginsIsInstalled);
