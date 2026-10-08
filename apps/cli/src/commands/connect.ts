@@ -128,6 +128,19 @@ export function registerConnectCommand(program: Command) {
       await runConnect(options, isDaemonChild);
     });
 
+  // Capability discovery runs without login or opening a gateway connection. Desktop
+  // invokes its bundled CLI here so the probe and subsequent dispatch share a runtime.
+  connectCmd
+    .command('capabilities')
+    .description('Report native agent runtimes supported by this CLI and installed binaries')
+    .action(async () => {
+      console.log(
+        JSON.stringify({
+          supportedAgentRuntimes: (await supportsNativeCodex()) ? ['codex-app-server-v1'] : [],
+        }),
+      );
+    });
+
   // Subcommands
   connectCmd.command('stop').description('Stop the background daemon process').action(handleStop);
 
@@ -1097,6 +1110,7 @@ function scheduleProactiveRefresh(
  * - False for missing, incompatible, malformed, or stalled native handshakes.
  *
  * Call stack:
+ * registerConnectCommand -> connect capabilities
  * bindGatewayClientHandlers
  *   -> {@link collectSystemInfo}
  *     -> {@link supportsNativeCodex}
@@ -1109,11 +1123,12 @@ async function supportsNativeCodex(): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Device discovery has a 10-second budget. Bound binary resolution and handshake
   // together so a broken installation cannot block unrelated device tools.
+  // Cold Codex startup can exceed 3 seconds; reserve 6 seconds below the gateway budget.
   const deadline = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => {
       expired = true;
       resolve(false);
-    }, 3000);
+    }, 6000);
   });
   const probe = async () => {
     try {

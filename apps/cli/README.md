@@ -126,7 +126,12 @@ network budget explicitly; this does not change unit-test timeouts or enable ret
 
 ### Native Codex Fork on a connected device
 
-A current source CLI can advertise `codex-app-server-v1` through its live system info.
+A current CLI advertises `codex-app-server-v1` only after its resolved Codex binary
+completes a native app-server handshake. `lh connect capabilities` reports that same
+capability as JSON without logging in, connecting a device, or creating a conversation.
+Desktop gateway connections invoke this command through their bundled CLI, so an
+unrelated global CLI cannot determine support. Missing, incompatible, or timed-out
+binaries do not advertise native support.
 The server then runs native Codex turns through app-server and persists each message's
 native session and turn IDs. Older connected CLIs keep the ordinary `codex exec` path;
 Fork requires a capable connection and never silently replays history as text.

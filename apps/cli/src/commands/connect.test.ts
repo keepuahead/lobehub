@@ -327,6 +327,20 @@ describe('connect command', () => {
     ]);
   });
 
+  /** @example Desktop can inspect its bundled runtime without registering a device. */
+  it('reports native capabilities without authenticating or connecting', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createProgram().parseAsync(['node', 'test', 'connect', 'capabilities']);
+    /** @example Only a successful native handshake is advertised in machine-readable output. */
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ supportedAgentRuntimes: ['codex-app-server-v1'] }),
+    );
+    /** @example Capability discovery does not consume a user login or gateway connection. */
+    expect(resolveToken).not.toHaveBeenCalled();
+    expect(GatewayClient).not.toHaveBeenCalled();
+    expect(codexProbe.close).toHaveBeenCalledOnce();
+  });
+
   /** @example Unsupported Codex keeps ordinary device sends on the existing exec runtime. */
   it('does not advertise native Codex when the binary rejects initialization', async () => {
     // ROOT CAUSE:
@@ -358,7 +372,7 @@ describe('connect command', () => {
         requestId: 'probe-stall',
         type: 'system_info_request',
       });
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
       await response;
       /** @example A stalled app-server falls back to the existing capability set. */
       expect(lastSentSystemInfoResponse.result.systemInfo.supportedAgentRuntimes).toEqual([]);
