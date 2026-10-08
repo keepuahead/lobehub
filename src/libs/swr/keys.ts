@@ -894,11 +894,6 @@ export const userMemoryKeys = {
 export const toolKeys = {
   agentSkillDetail: def('tool:agentSkillDetail', (id: string) => ['tool:agentSkillDetail', id]),
   agentSkills: def('tool:agentSkills', () => ['tool:agentSkills']),
-  composioAppTools: def('tool:composioAppTools', (appSlug: string) => [
-    'tool:composioAppTools',
-    appSlug,
-  ]),
-  composioConnections: def('tool:composioConnections', () => ['tool:composioConnections']),
   installedPlugins: def('tool:installedPlugins', () => ['tool:installedPlugins']),
   lobehubSkillConnections: def('tool:lobehubSkillConnections', () => [
     'tool:lobehubSkillConnections',
