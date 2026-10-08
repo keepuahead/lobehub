@@ -27,8 +27,7 @@ const uploadSizeSchema = z
   .number()
   .int()
   .min(0)
-  .max(MAX_UPLOAD_FILE_SIZE, UPLOAD_FILE_SIZE_LIMIT_ERROR_MESSAGE)
-  .optional();
+  .max(MAX_UPLOAD_FILE_SIZE, UPLOAD_FILE_SIZE_LIMIT_ERROR_MESSAGE);
 
 const uploadProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
@@ -50,7 +49,16 @@ const getMultipartPartSize = (size: number) =>
 const getActiveSession = async (
   service: FileUploadService,
   pathname: string,
-): Promise<FileUploadItem | undefined> => service.assertActiveOrLegacy(pathname);
+): Promise<FileUploadItem> => {
+  const active = await service.touchActive(pathname);
+  if (active) return active;
+
+  if (await service.hasAnyLiveSession(pathname)) {
+    throw uploadConflict('Upload pathname belongs to another session');
+  }
+
+  throw uploadConflict('Upload session is not active');
+};
 
 const validateMultipartSession = (upload: FileUploadItem, input: { uploadId: string }): number => {
   if (upload.multipartUploadId !== input.uploadId || !upload.multipartPartSize) {
@@ -71,23 +79,17 @@ export const uploadRouter = router({
     .use(withScopedPermission('file:upload'))
     .input(multipartUploadSchema)
     .mutation(async ({ ctx, input }) => {
-      const upload = await ctx.fileUploadService.findLatest(input.pathname);
+      const upload = await ctx.fileUploadService.touchActive(input.pathname);
 
       if (!upload) {
         if (await ctx.fileUploadService.hasAnyLiveSession(input.pathname)) {
           throw uploadConflict('Upload pathname belongs to another session');
         }
-        const s3 = new FileS3();
-        await s3.abortMultipartUpload(input.pathname, input.uploadId);
         return { success: true };
       }
       if (upload.multipartUploadId !== input.uploadId) {
         throw uploadConflict('Multipart upload does not match the upload session');
       }
-      if (upload.status === 'settled') {
-        throw uploadConflict('A settled upload cannot be aborted');
-      }
-      if (upload.status !== 'active') return { success: true };
 
       await ctx.fileUploadService.release(input.pathname);
       return { success: true };
@@ -118,17 +120,6 @@ export const uploadRouter = router({
     .mutation(async ({ ctx, input }) => {
       const s3 = new FileS3();
       const upload = await getActiveSession(ctx.fileUploadService, input.pathname);
-
-      if (!upload) {
-        await s3.completeMultipartUpload(
-          input.pathname,
-          input.uploadId,
-          input.partCount,
-          input.parts?.map(({ etag, partNumber }) => ({ ETag: etag, PartNumber: partNumber })),
-        );
-        return { success: true };
-      }
-
       const partSize = validateMultipartSession(upload, input);
       const expectedPartCount = Math.ceil(upload.size / partSize);
       if (input.partCount !== expectedPartCount) {
@@ -165,11 +156,6 @@ export const uploadRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const s3 = new FileS3();
-      if (input.size === undefined) {
-        const uploadId = await s3.createMultipartUpload(input.pathname, input.contentType);
-        return { uploadId };
-      }
-
       const partSize = getMultipartPartSize(input.size);
       const upload = await reserveUpload({
         clientIp: ctx.clientIp ?? undefined,
@@ -214,10 +200,6 @@ export const uploadRouter = router({
     .mutation(async ({ ctx, input }) => {
       const s3 = new FileS3();
       const upload = await getActiveSession(ctx.fileUploadService, input.pathname);
-      if (!upload) {
-        return s3.createPreSignedUploadPartUrl(input.pathname, input.uploadId, input.partNumber);
-      }
-
       const partSize = validateMultipartSession(upload, input);
       const partCount = Math.ceil(upload.size / partSize);
       if (input.partNumber > partCount) {
@@ -240,7 +222,6 @@ export const uploadRouter = router({
     .input(z.object({ pathname: z.string().min(1), size: uploadSizeSchema }))
     .mutation(async ({ ctx, input }) => {
       const s3 = new FileS3();
-      if (input.size === undefined) return s3.createPreSignedUrl(input.pathname);
 
       await reserveUpload({
         clientIp: ctx.clientIp ?? undefined,
