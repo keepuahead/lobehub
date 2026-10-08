@@ -20,11 +20,17 @@ CREATE TABLE IF NOT EXISTS "goal_subscriptions" (
 --> statement-breakpoint
 DROP INDEX IF EXISTS "agent_accounts_agent_kind_provider_identifier_unique";--> statement-breakpoint
 DROP INDEX IF EXISTS "agent_accounts_provider_identifier_unique";--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_goal_id_goals_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_goal_id_goals_id_fk" FOREIGN KEY ("goal_id") REFERENCES "public"."goals"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_widget_id_widgets_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_widget_id_widgets_id_fk" FOREIGN KEY ("widget_id") REFERENCES "public"."widgets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_metric_id_metrics_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_metric_id_metrics_id_fk" FOREIGN KEY ("metric_id") REFERENCES "public"."metrics"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_user_id_users_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_workspace_id_workspaces_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goal_subscriptions" DROP CONSTRAINT IF EXISTS "goal_subscriptions_confirmed_version_id_widget_versions_id_fk";--> statement-breakpoint
 ALTER TABLE "goal_subscriptions" ADD CONSTRAINT "goal_subscriptions_confirmed_version_id_widget_versions_id_fk" FOREIGN KEY ("confirmed_version_id") REFERENCES "public"."widget_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "goal_subscriptions_goal_widget_metric_unique" ON "goal_subscriptions" USING btree ("goal_id","widget_id","metric_id") WHERE "goal_subscriptions"."metric_id" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "goal_subscriptions_goal_widget_result_unique" ON "goal_subscriptions" USING btree ("goal_id","widget_id") WHERE "goal_subscriptions"."metric_id" IS NULL;--> statement-breakpoint
