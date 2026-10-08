@@ -1,6 +1,6 @@
 ---
 name: zustand
-description: 'Use for Zustand stores: list/detail splits, state type sources, slices, actions, reducers, selectors, optimistic updates and class-action composition.'
+description: 'Use for Zustand stores: replica-backed stores, list/detail splits, state type sources, slices, actions, reducers, selectors, optimistic updates and class-action composition.'
 user-invocable: false
 ---
 
@@ -12,6 +12,52 @@ user-invocable: false
 - Keep lightweight list-item types separate from full detail types; list types must not extend heavy detail types.
 - Use arrays for whole-list display and id-keyed maps for cached details, with per-item loading state where needed.
 - Before choosing list/detail shapes, normalized maps or state type sources, read [Data structures](references/data-structures.md). Its worked examples load only when relevant.
+
+## Replica-Backed Stores
+
+A domain the client reads through `@lobechat/replica` (see
+[data fetching](../data-fetching-architecture/SKILL.md)) is laid out as a resource file
+plus a plain-object store — not a class:
+
+- `projection.ts` — the resources (`defineReplica` / `definePagedReplica`): `key`, `name`,
+  `storage`, `version`, and any `query`.
+- `initialState.ts` — the `<domain>Map` views **and** the matching `<domain>Replica`
+  bookkeeping fields (`createReplicaState()`). Selectors keep reading the maps, so their
+  shape does not change.
+- `store.ts` — binds each resource with `createReplicaSlice`, links the entities, and
+  returns `{ ...initialState, ...hooks, ...actions }`.
+
+```ts
+export const useDashboardStore = createWithEqualityFn<DashboardStore>()(
+  devtools((set, get): DashboardStore => {
+    const detail = createReplicaSlice(dashboardDetailResource, {
+      actionPrefix: 'dashboard/detail',
+      entity: singleEntity<DashboardDetail, DashboardListItem>((board) => board.id, {
+        get: ({ items, ...board }) => board,
+        set: (current, board) => ({ ...current, ...board }),
+      }),
+      get,
+      set,
+      stateKey: 'dashboardDetailReplica',
+      view: recordLens<DashboardStore, DashboardDetail>('dashboardDetailMap'),
+    });
+
+    return { ...initialState /* hooks + actions */ };
+  }),
+  shallow,
+);
+```
+
+- Write through an entity (`update` / `remove` / `optimistic`) when the same entity lives
+  in several resources; `linkReplicaEntity([a, b])` fans one edit out to every loaded copy
+  instead of one hand-written cache matcher per view.
+- `recordLens(field)` covers the common `Record<key, TData>` view; `splitPagedLens` splits a
+  paged view across a rows field and a meta field.
+- A hook that returns request state and also needs the value reads it from the view
+  (`useDashboardStore((s) => s.dashboardDetailMap[id])`), never from `useSync`'s return.
+- Keep these stores class-free: the replica engine owns every transition of the view, so a
+  `#set`-based action class would fight it. The class-based actions below remain for domains
+  that own their state outright.
 
 ## Action Type Hierarchy
 
