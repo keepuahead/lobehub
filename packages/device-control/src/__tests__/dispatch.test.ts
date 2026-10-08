@@ -8,6 +8,7 @@ import {
   APP_UPDATE_UNSUPPORTED_MESSAGE,
   CLI_UPDATE_UNSUPPORTED_MESSAGE,
   DEVICE_RPC_METHODS,
+  deviceRpcClients,
   executeDeviceRpc,
   TRASH_UNSUPPORTED_MESSAGE,
 } from '../dispatch';
@@ -621,5 +622,26 @@ describe('executeDeviceRpc', () => {
       makeDeps(),
     )) as { success: boolean };
     expect(result.success).toBe(false);
+  });
+});
+
+describe('deviceRpcClients', () => {
+  const desktopOnly = ['trashLocalFiles', 'getAppUpdateState', 'checkAppUpdate', 'installAppUpdate'];
+  const cliOnly = ['getCliUpdateState', 'checkCliUpdate', 'restartCli'];
+
+  it.each(desktopOnly)('routes %s, which the CLI rejects, to the desktop', (method) => {
+    expect(deviceRpcClients(method)).toEqual(['desktop']);
+  });
+
+  it.each(cliOnly)('routes %s, which the desktop rejects, to the CLI', (method) => {
+    expect(deviceRpcClients(method)).toEqual(['cli']);
+  });
+
+  it('lets any client serve the other methods', () => {
+    const shared = DEVICE_RPC_METHODS.filter(
+      (method) => !desktopOnly.includes(method) && !cliOnly.includes(method),
+    );
+    for (const method of shared) expect(deviceRpcClients(method)).toBeUndefined();
+    expect(deviceRpcClients('unknownMethod')).toBeUndefined();
   });
 });
