@@ -2177,7 +2177,7 @@ export const executeHeterogeneousAgent = async (
 
     // Start session (pass resumeSessionId for multi-turn --resume)
     const result = await heterogeneousAgentService.startSession({
-      agentType: adapterType,
+      agentType: isLocalHeterogeneousType(adapterType) ? adapterType : undefined,
       args: spawnArgs,
       command: resolveHeterogeneousAgentCommand(adapterType, heterogeneousProvider.command),
       codexForkTarget,

@@ -858,7 +858,16 @@ const exec = async (options: ExecOptions): Promise<void> => {
     };
     const applyCancellation = (signal: NodeJS.Signals) => {
       cancellationSignal = signal;
-      if (!ownsSignalDelivery()) return;
+      if (!ownsSignalDelivery()) {
+        // The process group already delivered the OS signal, so a second one
+        // would be a duplicate — but session transports (ACP, RPC) carry a
+        // protocol-level cancel the signal cannot express. Notify it so the
+        // session classifies the agent's resulting exit as host-driven
+        // cancellation rather than reporting a transport crash.
+        if (startupControl) cancelStartup(startupControl, signal);
+        else handle?.interrupt?.(signal);
+        return;
+      }
       signalAgent(signal);
     };
     const onSigint = () => {
@@ -899,14 +908,19 @@ const exec = async (options: ExecOptions): Promise<void> => {
         dumpAttempt?.writeStdout,
         (control) => {
           startupControl = control;
-          if (cancellationSignal && ownsSignalDelivery()) {
-            cancelStartup(control, cancellationSignal);
-          }
+          // `control.cancel` is protocol-level (session abort), not an OS signal
+          // — replay any cancellation received before the control bound, even
+          // when the process group already delivered the signal itself.
+          if (cancellationSignal) cancelStartup(control, cancellationSignal);
         },
         options.codexAppServer ? { forkTarget: codexForkTarget } : undefined,
       );
-      if (cancellationSignal && !startupControl && ownsSignalDelivery()) {
-        handle.kill(cancellationSignal);
+      if (cancellationSignal && !startupControl) {
+        // Same split as `applyCancellation`: when the wrapper does not own
+        // signal delivery the process group already signaled the agent, but
+        // session transports still need the protocol-level cancel.
+        if (ownsSignalDelivery()) handle.kill(cancellationSignal);
+        else handle.interrupt?.(cancellationSignal);
       }
     } catch (err) {
       try {
