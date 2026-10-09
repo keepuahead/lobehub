@@ -1136,6 +1136,49 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     expect(history).not.toContain('AFTER-BOUNDARY-647');
   });
 
+  /** @example A scoped device prompt retains its selected text and prior tool output. */
+  it('reads device replay from the persisted prompt group and thread', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    // ROOT CAUSE:
+    // Omitted group/thread scopes query NULL rows, excluding the persisted prompt.
+    // The ancestry builder then returns empty context without throwing.
+    // Use the same scopes as turn setup so fresh device runs retain their context.
+    mockMessageQuery.mockImplementation(async (params) =>
+      params.groupId === 'group-1' && params.threadId === 'thread-1'
+        ? [
+            { id: 'scoped-tool', role: 'tool', content: 'SCOPED-TOOL-647' },
+            {
+              id: 'scoped-prompt',
+              parentId: 'scoped-tool',
+              role: 'user',
+              content: 'Use my selection',
+              metadata: {
+                contextSelections: [
+                  { id: 'selection', source: 'text', content: 'SCOPED-SELECTION-647' },
+                ],
+              },
+            },
+          ]
+        : [],
+    );
+    await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { groupId: 'group-1', threadId: 'thread-1', topicId: 'topic-1' },
+      parentMessageId: 'scoped-prompt',
+      prompt: 'Use my selection',
+      resume: true,
+    });
+    const context = mockBuildRemoteDeviceHeteroContext.mock.calls[0][0];
+    /** @example The scoped selection reaches device runtime independently of the prompt. */
+    expect(context.agentSystemContext).toContain('SCOPED-SELECTION-647');
+    /** @example The selected ancestry retains the scoped historical tool result. */
+    expect(JSON.stringify(context.conversationHistory)).toContain('SCOPED-TOOL-647');
+  });
+
   /** @example An unreadable edited history fails safely and the same persisted user can retry. */
   it('does not dispatch Codex with silently missing durable context', async () => {
     Object.assign(heteroAgentConfig.agencyConfig, {

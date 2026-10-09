@@ -464,7 +464,13 @@ export const dispatchHeteroAgent = async (
       // creator-facing default would hand the agent an empty history.
       const fileService = new FileService(deps.db, deps.userId, deps.workspaceId);
       const recentMsgs = await deps.messageModel.query(
-        { topicId, pageSize: 200, skipWorks: true },
+        {
+          groupId: appContext?.groupId ?? undefined,
+          pageSize: 200,
+          skipWorks: true,
+          threadId: appContext?.threadId ?? undefined,
+          topicId,
+        },
         {
           allowShareVisitor: true,
           // Native parent IDs can lead into compressed or parallel message groups.
