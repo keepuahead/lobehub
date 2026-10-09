@@ -141,6 +141,7 @@ const ProjectDashboard = memo<ProjectDashboardProps>(({ detail, projectId }) => 
   const workspaceId = useActiveWorkspaceId();
   const goalScope = `project:${projectId}`;
   const goals = useGoalStore(goalSelectors.goalList(goalScope));
+  const goalListView = useGoalStore(goalSelectors.goalListView(goalScope));
   const goalSWR = useGoalStore((s) => s.useFetchGoals)(undefined, projectId);
   const coordinatorAgentId = detail.project.coordinatorAgentId;
   const projectReference = detail.project.slug ?? projectId;
@@ -168,7 +169,7 @@ const ProjectDashboard = memo<ProjectDashboardProps>(({ detail, projectId }) => 
       <Flexbox className={styles.main} gap={24}>
         <Flexbox gap={12}>
           <SectionTitle title={t('overview.goalProgress')} />
-          {goalSWR.error ? (
+          {goalSWR.error && goalListView === undefined ? (
             <AsyncError
               error={goalSWR.error}
               variant={'inline'}

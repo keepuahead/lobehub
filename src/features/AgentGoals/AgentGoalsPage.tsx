@@ -203,7 +203,11 @@ const AgentGoalsPage = memo<AgentGoalsPageProps>(({ agentId, projectId }) => {
       >
         {isLoading ? (
           <GoalSkeleton chrome={'body'} />
-        ) : error ? (
+        ) : error && listView === undefined ? (
+          // Only a read that left nothing to show becomes the page: a failed
+          // revalidation keeps the hydrated rows on screen (the same guard the
+          // home rail, the goal portal and the detail page use), so a network
+          // blip no longer hides goals the user already has locally.
           <GoalLoadError onRetry={() => void refreshGoals(scopeId)} />
         ) : goals.length === 0 ? (
           <GoalEmptyState onCreate={openCreateGoal} />
