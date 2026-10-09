@@ -1,4 +1,5 @@
 import { PAGE_DOCUMENT_FILE_TYPES, PAGE_DOCUMENT_SOURCE_TYPES } from '@lobechat/const';
+import type { DocumentItem } from '@lobechat/database/schemas';
 
 import { definePagedReplica, defineReplica, type ReplicaPagedData } from '@/libs/replica';
 import { documentService } from '@/services/document';
