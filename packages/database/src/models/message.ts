@@ -104,7 +104,6 @@ import { documentOriginalCharCount } from '../utils/originalCharCount';
 import { searchableMessage } from '../utils/searchableMessage';
 import { notShareVisitorMessage, notShareVisitorTopicRef } from '../utils/shareVisitor';
 import { isTrashed, restoreStamp, type SoftDeleteOptions, trashStamp } from '../utils/softDelete';
-import { preserveToolResultControl, projectToolResultControl } from '../utils/toolResultControl';
 import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 import { recomputeTopicUsage } from './topicUsage';
 import { WorkModel } from './work';
@@ -1537,14 +1536,12 @@ export class MessageModel {
     ]);
 
     return {
-      items: items.map(({ tools, ...message }) =>
-        projectToolResultControl({
-          ...message,
-          error: message.error as ChatMessageError | null,
-          metadata: message.metadata as MessageMetadata | null,
-          tools: Array.isArray(tools) ? (tools as ChatToolPayload[]) : null,
-        }),
-      ),
+      items: items.map(({ tools, ...message }) => ({
+        ...message,
+        error: message.error as ChatMessageError | null,
+        metadata: message.metadata as MessageMetadata | null,
+        tools: Array.isArray(tools) ? (tools as ChatToolPayload[]) : null,
+      })),
       total: totalResult[0]?.count ?? 0,
     };
   };
@@ -1922,7 +1919,7 @@ export class MessageModel {
       stageMs: getDurationMs(totalStartedAt),
     });
 
-    return allItems.map(projectToolResultControl);
+    return allItems;
   };
 
   /**
@@ -2726,7 +2723,7 @@ export class MessageModel {
         ...item
       }) => {
         const messageQuery = messageQueriesList.find((relation) => relation.messageId === item.id);
-        return projectToolResultControl({
+        return {
           ...item,
           // Same presence contract as queryWithWhere: collapse a null-id sender
           // (deleted account) to `null` so clients can rely on `sender?.id`.
@@ -2791,7 +2788,7 @@ export class MessageModel {
           audioList: audioList
             .filter((relation) => relation.messageId === item.id)
             .map<ChatAudioItem>(materializeChatAudioItem),
-        } as unknown as UIChatMessage);
+        } as unknown as UIChatMessage;
       },
     );
   };
@@ -3215,7 +3212,7 @@ export class MessageModel {
       )
       .orderBy(asc(messages.createdAt));
 
-    return result.map(projectToolResultControl) as DBMessageItem[];
+    return result as DBMessageItem[];
   };
 
   findMessageQueriesById = async (messageId: string) => {
@@ -3260,7 +3257,7 @@ export class MessageModel {
       .limit(pageSize)
       .offset(offset);
 
-    return result.map(projectToolResultControl) as (DBMessageItem & {
+    return result as (DBMessageItem & {
       agentName: string | null;
       agentTitle: string | null;
     })[];
@@ -3278,7 +3275,7 @@ export class MessageModel {
       .where(and(this.ownership(), this.matchSession(sessionId), notShareVisitorMessage()))
       .orderBy(asc(messages.createdAt));
 
-    return result.map(projectToolResultControl) as DBMessageItem[];
+    return result as DBMessageItem[];
   };
 
   queryByKeyword = async (keyword: string) => {
@@ -3309,7 +3306,7 @@ export class MessageModel {
       )
       .orderBy(desc(messages.createdAt));
 
-    return result.map(projectToolResultControl) as DBMessageItem[];
+    return result as DBMessageItem[];
   };
 
   /**
@@ -4037,7 +4034,7 @@ export class MessageModel {
                   .set({
                     ...message,
                     ...(metadataToWrite && {
-                      metadata: preserveToolResultControl(messages.metadata, metadataToWrite),
+                      metadata: metadataToWrite,
                     }),
                     ...(usageToWrite && { usage: usageToWrite }),
                   })
@@ -4096,25 +4093,10 @@ export class MessageModel {
     return this.db
       .update(messages)
       .set({
-        metadata: preserveToolResultControl(messages.metadata, mergedMetadata),
+        metadata: mergedMetadata,
         ...(usageToWrite && { usage: usageToWrite }),
       })
       .where(and(eq(messages.id, id), this.ownership()));
-  };
-
-  /** Runtime-only initialization/rebinding; never exposed by message update APIs. */
-  updateToolResultReview = async (
-    id: string,
-    review: NonNullable<MessageMetadata['toolResultControl']>,
-  ): Promise<void> => {
-    const [updated] = await this.db
-      .update(messages)
-      .set({
-        metadata: sql`coalesce(${messages.metadata}, '{}'::jsonb) || jsonb_build_object('toolResultControl', ${JSON.stringify(review)}::jsonb)`,
-      })
-      .where(and(eq(messages.id, id), this.ownership()))
-      .returning({ id: messages.id });
-    if (!updated) throw new Error('Cannot persist pending tool result review');
   };
 
   updatePluginState = async (id: string, state: Record<string, any>): Promise<void> => {
@@ -4150,10 +4132,13 @@ export class MessageModel {
   /**
    * Resolve an approval batch at one row-locking boundary. Every target is
    * checked before any write, so Web, Mobile, Stop, and notification actions
-   * cannot each win a subset of the same assistant turn.
+   * cannot each win a subset of the same assistant turn. Source adapters claim
+   * only; content/state remain in their private resolution until the runtime
+   * passes publishResult after afterToolCall. Stop may publish its fixed receipt.
    */
   resolveHumanApproval = async (
     resolutions: HumanApprovalResolution[],
+    options: { publishResult?: boolean } = {},
   ): Promise<'applied' | 'idempotent'> => {
     if (resolutions.length === 0) return 'idempotent';
 
@@ -4163,6 +4148,14 @@ export class MessageModel {
     }
 
     return this.db.transaction(async (trx) => {
+      // Match deferred completion's lock order (message before plugin).
+      const lockedMessages = await trx
+        .select({ id: messages.id, content: messages.content })
+        .from(messages)
+        .where(and(inArray(messages.id, ids), this.ownership()))
+        .orderBy(messages.id)
+        .for('update');
+      const messagesById = new Map(lockedMessages.map((row) => [row.id, row]));
       const lockedRows = await trx
         .select({
           id: messagePlugins.id,
@@ -4191,14 +4184,26 @@ export class MessageModel {
         throw new HumanApprovalAlreadyResolvedError(resolution.id);
       });
       const pendingCount = rowStates.filter((state) => state === 'pending').length;
-      if (pendingCount === 0) return 'idempotent';
-      if (pendingCount !== resolutions.length) {
+      if (pendingCount === 0 && !options.publishResult) return 'idempotent';
+      if (pendingCount !== 0 && pendingCount !== resolutions.length) {
         throw new Error('Human approval batch contains a partial idempotent claim');
       }
 
+      let published = false;
       for (const resolution of resolutions) {
+        // An already claimed source answer can publish exactly once. A replay
+        // retains the first final content, including a hook denial.
+        if (
+          pendingCount === 0 &&
+          (messagesById.get(resolution.id)?.content ||
+            (resolution.content === undefined &&
+              resolution.pluginState === undefined &&
+              resolution.pluginError === undefined))
+        )
+          continue;
+        published = true;
         const row = lockedById.get(resolution.id)!;
-        if (resolution.content !== undefined) {
+        if (options.publishResult && resolution.content !== undefined) {
           const [updatedMessage] = await trx
             .update(messages)
             .set({ content: resolution.content })
@@ -4215,18 +4220,21 @@ export class MessageModel {
             // parked tool row was created so subsequent source reads, Stop,
             // and rollback still address the same sealed batch.
             intervention: merge(row.intervention || {}, resolution.intervention),
-            ...(resolution.pluginState !== undefined && {
-              state: resolution.replacePluginState
-                ? resolution.pluginState
-                : merge(row.state || {}, resolution.pluginState || {}),
-            }),
+            ...(options.publishResult &&
+              resolution.pluginError !== undefined && { error: resolution.pluginError }),
+            ...(options.publishResult &&
+              resolution.pluginState !== undefined && {
+                state: resolution.replacePluginState
+                  ? resolution.pluginState
+                  : merge(row.state || {}, resolution.pluginState || {}),
+              }),
           })
           .where(and(eq(messagePlugins.id, resolution.id), this.pluginsOwnership()))
           .returning({ id: messagePlugins.id });
         if (!updatedPlugin) throw new Error(`Plugin not found: ${resolution.id}`);
       }
 
-      return 'applied';
+      return published ? 'applied' : 'idempotent';
     });
   };
 
@@ -4236,6 +4244,12 @@ export class MessageModel {
 
     await this.db.transaction(async (trx) => {
       const ids = resolutions.map(({ id }) => id);
+      await trx
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(inArray(messages.id, ids), this.ownership()))
+        .orderBy(messages.id)
+        .for('update');
       const lockedRows = await trx
         .select({ id: messagePlugins.id, intervention: messagePlugins.intervention })
         .from(messagePlugins)
@@ -4257,7 +4271,6 @@ export class MessageModel {
             .update(messages)
             .set({
               content: resolution.content,
-              metadata: sql`case when coalesce(${messages.metadata}, '{}'::jsonb) ? 'toolResultControl' then jsonb_set(${messages.metadata}, '{toolResultControl,status}', '"pending"'::jsonb) else ${messages.metadata} end`,
             })
             .where(and(eq(messages.id, resolution.id), this.ownership()))
             .returning({ id: messages.id });
@@ -4641,10 +4654,8 @@ export class MessageModel {
       pluginState?: Record<string, any>;
       /** Replace rather than merge when withholding a complete tool result. */
       replacePluginState?: boolean;
-      /** Completion replay may not overwrite an already withheld result. */
-      preserveBlockedResult?: boolean;
-      /** Authoritative runtime verdict; never derive it from tool-owned pluginState. */
-      toolResultReview?: NonNullable<MessageMetadata['toolResultControl']>;
+      /** Finalize a deferred placeholder once; later callbacks cannot replace its result. */
+      onlyIfEmpty?: boolean;
     },
   ): Promise<{ applied: boolean; snapshotSeq?: number; success: boolean }> => {
     const {
@@ -4664,18 +4675,15 @@ export class MessageModel {
 
     try {
       await this.db.transaction(async (trx) => {
-        if (params.preserveBlockedResult) {
-          const [plugin] = await trx
-            .select({ metadata: messages.metadata })
-            .from(messagePlugins)
-            .innerJoin(messages, eq(messagePlugins.id, messages.id))
-            .where(and(eq(messagePlugins.id, id), this.pluginsOwnership(), this.ownership()))
+        if (params.onlyIfEmpty) {
+          const [message] = await trx
+            .select({ content: messages.content })
+            .from(messages)
+            .where(and(eq(messages.id, id), this.ownership()))
             .for('update');
-          if (
-            plugin?.metadata?.toolResultControl?.status === 'blocked' &&
-            params.toolResultReview?.status !== 'blocked'
-          ) {
-            matchedRow = true;
+          matchedRow = !!message;
+          if (!message) return;
+          if (message.content) {
             applied = false;
             return;
           }
@@ -4683,20 +4691,15 @@ export class MessageModel {
 
         let existingMetadata: Record<string, any> | undefined;
 
-        if (
-          metadata !== undefined ||
-          heterogeneousToolState !== undefined ||
-          params.toolResultReview
-        ) {
+        if (metadata !== undefined || heterogeneousToolState !== undefined) {
           const baseQuery = trx
             .select({ metadata: messages.metadata })
             .from(messages)
             .where(and(eq(messages.id, id), this.ownership()))
             .limit(1);
-          const [existingMessage] =
-            heterogeneousToolState || params.toolResultReview
-              ? await baseQuery.for('update')
-              : await baseQuery;
+          const [existingMessage] = heterogeneousToolState
+            ? await baseQuery.for('update')
+            : await baseQuery;
 
           matchedRow = !!existingMessage;
           if (!existingMessage) return;
@@ -4726,7 +4729,6 @@ export class MessageModel {
         // Update messages table (content, metadata)
         if (
           content !== undefined ||
-          params.toolResultReview ||
           metadata !== undefined ||
           heterogeneousToolState !== undefined
         ) {
@@ -4736,27 +4738,14 @@ export class MessageModel {
             messageUpdateData.content = content;
           }
 
-          if (
-            metadata !== undefined ||
-            heterogeneousToolState !== undefined ||
-            params.toolResultReview
-          ) {
+          if (metadata !== undefined || heterogeneousToolState !== undefined) {
             const mergedMetadata = merge(existingMetadata || {}, metadata || {});
-            if (params.toolResultReview) {
-              mergedMetadata.toolResultControl = params.toolResultReview;
-            }
             messageUpdateData.metadata = heterogeneousToolState
               ? merge(mergedMetadata, {
                   heterogeneousToolStateOperationId: heterogeneousToolState.operationId,
                   heterogeneousToolStateSeq: heterogeneousToolState.snapshotSeq,
                 })
               : mergedMetadata;
-            if (!params.toolResultReview) {
-              messageUpdateData.metadata = preserveToolResultControl(
-                messages.metadata,
-                messageUpdateData.metadata,
-              );
-            }
           }
 
           if (Object.keys(messageUpdateData).length > 0) {
@@ -5207,7 +5196,7 @@ export class MessageModel {
 
       await tx
         .update(messages)
-        .set({ metadata: preserveToolResultControl(messages.metadata, metadata) })
+        .set({ metadata })
         .where(and(eq(messages.id, snapshot.parentId), this.ownership()));
     }
   };
