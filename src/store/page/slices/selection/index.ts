@@ -1,2 +1,2 @@
 export { createSelectionSlice, type SelectionAction } from './action';
-export { initialSelectionState, type SelectionState } from './initialState';
+export { initialPageSelectionState, type PageSelectionSliceState } from './initialState';

@@ -1,3 +1,3 @@
 export { createListSlice, type ListAction } from './action';
-export { initialListState, type ListState } from './initialState';
+export { initialPageListState, type PageListSliceState } from './initialState';
 export { listSelectors } from './selectors';

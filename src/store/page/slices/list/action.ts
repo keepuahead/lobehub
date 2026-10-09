@@ -1,146 +1,141 @@
-import { PAGE_DOCUMENT_FILE_TYPES, PAGE_DOCUMENT_SOURCE_TYPES } from '@lobechat/const';
-import { type DocumentItem } from '@lobechat/database/schemas';
-import { type SWRResponse } from 'swr';
+import type { DocumentItem } from '@lobechat/database/schemas';
 
-import { useClientDataSWRWithSync } from '@/libs/swr';
+import {
+  createReplicaSlice,
+  linkReplicaEntity,
+  recordLens,
+  type ReplicaSyncResult,
+  singleEntity,
+} from '@/libs/replica';
 import { documentService } from '@/services/document';
-import { documentSWRKeys } from '@/services/document/swrKeys';
 import { useGlobalStore } from '@/store/global';
-import { type StoreSetter } from '@/store/types';
-import { DocumentSourceType, type LobeDocument } from '@/types/document';
+import { systemStatusSelectors } from '@/store/global/selectors';
+import type { StoreSetter } from '@/store/types';
+import { type LobeDocument } from '@/types/document';
 import { setNamespace } from '@/utils/storeDebug';
 
-import { type PageStore } from '../../store';
-
-const documentItemToLobeDocument = (document: DocumentItem): LobeDocument => ({
-  content: document.content || null,
-  createdAt: document.createdAt ? new Date(document.createdAt) : new Date(),
-  editorData:
-    typeof document.editorData === 'string'
-      ? JSON.parse(document.editorData)
-      : document.editorData || null,
-  fileType: document.fileType,
-  filename: document.title || document.filename || 'Untitled',
-  id: document.id,
-  metadata: document.metadata || {},
-  source: 'document',
-  sourceType: DocumentSourceType.EDITOR,
-  title: document.title || '',
-  totalCharCount: document.content?.length || 0,
-  totalLineCount: 0,
-  updatedAt: document.updatedAt ? new Date(document.updatedAt) : new Date(),
-  userId: document.userId,
-  visibility: document.visibility ?? null,
-  workspaceId: document.workspaceId ?? null,
-});
+import {
+  documentItemToLobeDocument,
+  isTempPageId,
+  PAGE_LIST_KEY,
+  pageDetailResource,
+  pageListResource,
+  type PageListValue,
+} from '../../projection';
+import type { PageStore } from '../../store';
 
 const n = setNamespace('page/list');
 
-// EDITOR is a client-only stamp on in-memory drafts; DB rows never carry it.
-const ALLOWED_PAGE_SOURCE_TYPES = new Set([
-  DocumentSourceType.EDITOR as string,
-  ...PAGE_DOCUMENT_SOURCE_TYPES,
-]);
-const ALLOWED_PAGE_FILE_TYPES = new Set(PAGE_DOCUMENT_FILE_TYPES);
+const DEFAULT_PAGE_SIZE = 20;
 
-/**
- * Check if a page should be displayed in the page list
- */
-const isAllowedPage = (page: { fileType: string; sourceType: string }) => {
-  return (
-    ALLOWED_PAGE_SOURCE_TYPES.has(page.sourceType) && ALLOWED_PAGE_FILE_TYPES.has(page.fileType)
-  );
-};
+/** The sidebar's page size; part of the list query's identity. */
+const currentPageSize = (): number =>
+  useGlobalStore.getState().status.pagePageSize || DEFAULT_PAGE_SIZE;
 
 type Setter = StoreSetter<PageStore>;
+
+/**
+ * The page domain's read slice: it owns both replicas of the domain and the
+ * fetch orchestration around them.
+ *
+ * - `pageList` is the one paged list the Pages sidebar renders
+ *   (`pageListMap.all`). It hydrates from IndexedDB, revalidates the head over
+ *   the network and pages forward with `loadMoreDocuments`.
+ * - `pageDetail` is the by-id projection (`pageDetailMap[id]`) for a page the
+ *   loaded list does not hold (mobile mounts no sidebar; a modal deeplinks a
+ *   page). `pageSelectors.getDocumentById` reads the list first, then this.
+ *
+ * Both hold copies of the same entity, so they are linked: a rename or a delete
+ * fans out to every loaded copy and to the persisted rows of entries that are
+ * not loaded. The crud slice issues those commands through the `internal_*`
+ * seam handed out here — one direction only, so no cycle.
+ */
 export const createListSlice = (set: Setter, get: () => PageStore, _api?: unknown) =>
   new ListActionImpl(set, get, _api);
 
 export class ListActionImpl {
   readonly #get: () => PageStore;
   readonly #set: Setter;
+  readonly #pageDetail;
+  readonly #pageEntity;
+  readonly #pageList;
 
   constructor(set: Setter, get: () => PageStore, _api?: unknown) {
     void _api;
     this.#set = set;
     this.#get = get;
+
+    this.#pageList = createReplicaSlice(pageListResource, {
+      actionPrefix: 'pageList',
+      get,
+      // A page the user just created shows before its server row exists and
+      // survives a head refresh until `replaceTempPageWithReal` swaps the id.
+      isClientOnly: (doc) => isTempPageId(doc.id),
+      set,
+      stateKey: 'pageListReplica',
+      view: recordLens<PageStore, PageListValue>('pageListMap'),
+    });
+    this.#pageDetail = createReplicaSlice(pageDetailResource, {
+      actionPrefix: 'pageDetail',
+      // The value IS the page, so entity-level writes (rename, delete) and the
+      // link with the list find and map it through this adapter.
+      entity: singleEntity<LobeDocument>((doc) => doc.id),
+      fetcher: async (pageId) => {
+        const document = await documentService.getDocumentById(pageId);
+        return document ? documentItemToLobeDocument(document) : undefined;
+      },
+      get,
+      // A miss keeps whatever is cached — the list may still hold the row.
+      merge: (incoming) => incoming,
+      set,
+      stateKey: 'pageDetailReplica',
+      view: recordLens<PageStore, LobeDocument>('pageDetailMap'),
+    });
+    this.#pageEntity = linkReplicaEntity<LobeDocument>([this.#pageList, this.#pageDetail]);
   }
 
-  fetchDocuments = async (): Promise<void> => {
-    try {
-      const pageSize = useGlobalStore.getState().status.pagePageSize || 20;
+  // ---- reads -------------------------------------------------------------
 
-      const documents = (await documentService.getPageDocuments(pageSize)) as LobeDocument[];
-      const hasMore = documents.length >= pageSize;
-
-      // Use internal dispatch to set documents
-      this.#get().internal_dispatchDocuments({ documents, type: 'setDocuments' });
-
-      this.#set(
-        {
-          currentPage: 0,
-          documentsTotal: documents.length,
-          hasMoreDocuments: hasMore,
-          queryFilter: {
-            fileTypes: Array.from(ALLOWED_PAGE_FILE_TYPES),
-            sourceTypes: Array.from(ALLOWED_PAGE_SOURCE_TYPES),
-          },
-        },
-        false,
-        n('fetchDocuments/success'),
-      );
-    } catch (error) {
-      console.error('Failed to fetch documents:', error);
-      throw error;
-    }
+  /**
+   * Fetch orchestration for the sidebar's page list. Hydrates the persisted
+   * projection, then revalidates; the rows land in `pageListMap.all` — read
+   * them through `pageSelectors`, never from this hook's result.
+   */
+  useFetchDocuments = (): ReplicaSyncResult => {
+    // Subscribed, so changing the page size re-keys the list query.
+    const pageSize = useGlobalStore(systemStatusSelectors.pagePageSize);
+    return this.#pageList.useSync({ pageSize });
   };
 
+  /**
+   * By-id fetch for a page outside the loaded list (mobile route, deep link).
+   * The result lands in `pageDetailMap`, which `getDocumentById` falls back to.
+   */
+  useFetchPageDetail = (pageId?: string | null): ReplicaSyncResult =>
+    this.#pageDetail.useSync(pageId || null);
+
+  // ---- list writes -------------------------------------------------------
+
   loadMoreDocuments = async (): Promise<void> => {
-    const { currentPage, isLoadingMoreDocuments, hasMoreDocuments, queryFilter, documents } =
-      this.#get();
-
-    if (isLoadingMoreDocuments || !hasMoreDocuments || !documents) return;
-
-    const nextPage = currentPage + 1;
-
-    this.#set({ isLoadingMoreDocuments: true }, false, n('loadMoreDocuments/start'));
-
-    try {
-      const pageSize = useGlobalStore.getState().status.pagePageSize || 20;
-      const queryParams = queryFilter
-        ? { current: nextPage, pageSize, ...queryFilter }
-        : { current: nextPage, pageSize };
-
-      const result = await documentService.queryDocuments(queryParams);
-
-      const newDocuments = result.items.filter(isAllowedPage).map((doc) => ({
-        ...doc,
-        filename: doc.filename ?? doc.title ?? 'Untitled',
-      })) as LobeDocument[];
-
-      const hasMore = result.items.length >= pageSize;
-
-      // Use internal dispatch to append documents
-      this.#get().internal_dispatchDocuments({ documents: newDocuments, type: 'appendDocuments' });
-
-      this.#set(
-        {
-          currentPage: nextPage,
-          documentsTotal: result.total,
-          hasMoreDocuments: hasMore,
-          isLoadingMoreDocuments: false,
-        },
-        false,
-        n('loadMoreDocuments/success'),
-      );
-    } catch (error) {
-      console.error('Failed to load more documents:', error);
-      this.#set({ isLoadingMoreDocuments: false }, false, n('loadMoreDocuments/error'));
-    }
+    await this.#pageList.loadMore(PAGE_LIST_KEY, { pageSize: currentPageSize() });
   };
 
   refreshDocuments = async (): Promise<void> => {
-    await this.#get().fetchDocuments();
+    await this.#pageList.revalidate(PAGE_LIST_KEY);
+  };
+
+  /**
+   * Imperative refresh, kept for callers that treat it as a generic
+   * "refetch resources" callback (Notion import, the empty-state placeholder).
+   */
+  fetchDocuments = async (): Promise<void> => this.refreshDocuments();
+
+  setSearchKeywords = (keywords: string): void => {
+    this.#set({ searchKeywords: keywords }, false, n('setSearchKeywords'));
+  };
+
+  setShowOnlyPagesNotInLibrary = (show: boolean): void => {
+    this.#set({ showOnlyPagesNotInLibrary: show }, false, n('setShowOnlyPagesNotInLibrary'));
   };
 
   /**
@@ -151,7 +146,7 @@ export class ListActionImpl {
    */
   publishPageToWorkspace = async (pageId: string): Promise<{ documentIds: string[] }> => {
     const result = await documentService.publishDocumentToWorkspace(pageId);
-    await this.#get().refreshDocuments();
+    await this.refreshDocuments();
     return result;
   };
 
@@ -165,64 +160,80 @@ export class ListActionImpl {
     visibility: 'private' | 'public',
   ): Promise<{ documentIds: string[] }> => {
     const result = await documentService.setDocumentVisibility(pageId, visibility);
-    await this.#get().refreshDocuments();
+    await this.refreshDocuments();
     return result;
   };
 
-  setSearchKeywords = (keywords: string): void => {
-    this.#set({ searchKeywords: keywords }, false, n('setSearchKeywords'));
-  };
-
-  setShowOnlyPagesNotInLibrary = (show: boolean): void => {
-    this.#set({ showOnlyPagesNotInLibrary: show }, false, n('setShowOnlyPagesNotInLibrary'));
-  };
-
+  /**
+   * Mirror a page document the editor just loaded / saved into the page domain,
+   * so title, emoji and workspace lock state resolve even when no list is
+   * mounted. Written to the by-id projection always, and to the sidebar row
+   * when the list already holds it.
+   */
   upsertDocument = (document: DocumentItem): void => {
     const lobeDoc = documentItemToLobeDocument(document);
-    const { documents } = this.#get();
-    const exists = documents?.some((doc) => doc.id === document.id);
-    this.#get().internal_dispatchDocuments(
-      exists
-        ? { document: lobeDoc, id: document.id, type: 'updateDocument' }
-        : { document: lobeDoc, type: 'addDocument' },
+    this.#pageDetail.update(lobeDoc.id, () => lobeDoc);
+    if (this.#get().pageListMap[PAGE_LIST_KEY]?.items.some((doc) => doc.id === lobeDoc.id)) {
+      this.#pageList.updateEntity(lobeDoc.id, () => lobeDoc);
+    }
+  };
+
+  // ---- internal seam for the crud slice ---------------------------------
+
+  /** Insert a freshly created / duplicated page at the head of the list view. */
+  internal_insertPageListRow = (doc: LobeDocument): void => {
+    const current = this.#get().pageListMap[PAGE_LIST_KEY];
+    if (current) {
+      this.#pageList.insertHead(PAGE_LIST_KEY, [doc]);
+      return;
+    }
+
+    // No list loaded yet (mobile, or before the first page arrives): seed a
+    // single-row head page so the new page renders immediately. The next sync
+    // replaces the head page with the server's for every other row.
+    this.#pageList.update(
+      PAGE_LIST_KEY,
+      () => ({
+        currentPage: 0,
+        hasMore: false,
+        items: [doc],
+        pageSize: currentPageSize(),
+        total: 1,
+      }),
+      { persist: false },
     );
   };
 
-  useFetchDocuments = (): SWRResponse<LobeDocument[]> => {
-    return useClientDataSWRWithSync<LobeDocument[]>(
-      documentSWRKeys.pageDocuments(),
-      async () => {
-        const pageSize = useGlobalStore.getState().status.pagePageSize || 20;
-        return (await documentService.getPageDocuments(pageSize)) as LobeDocument[];
-      },
-      {
-        onData: (documents) => {
-          if (!documents) return;
-
-          const pageSize = useGlobalStore.getState().status.pagePageSize || 20;
-          const hasMore = documents.length >= pageSize;
-
-          // Use internal dispatch to set documents
-          this.#get().internal_dispatchDocuments({ documents, type: 'setDocuments' });
-
-          this.#set(
-            {
-              currentPage: 0,
-              documentsTotal: documents.length,
-              hasMoreDocuments: hasMore,
-              queryFilter: {
-                fileTypes: Array.from(ALLOWED_PAGE_FILE_TYPES),
-                sourceTypes: Array.from(ALLOWED_PAGE_SOURCE_TYPES),
-              },
-            },
-            false,
-            n('useFetchDocuments/onData'),
-          );
-        },
-        revalidateOnFocus: true,
-      },
+  /** Swap an optimistic page row for the server's row (id and all). */
+  internal_replacePageListRow = (tempId: string, doc: LobeDocument): void => {
+    this.#pageList.update(PAGE_LIST_KEY, (data) =>
+      data ? { ...data, items: data.items.map((item) => (item.id === tempId ? doc : item)) } : data,
     );
   };
+
+  /** Drop a page row (and every other loaded copy of it) everywhere it is held. */
+  internal_removePageRow = (id: string): void => {
+    this.#pageEntity.remove(id);
+  };
+
+  /**
+   * Optimistic patch of one page in every loaded list and detail copy — one
+   * server call settles them all together, or all roll back. Pass `'remove'`
+   * for an optimistic delete.
+   */
+  internal_optimisticPage = <TResult>(
+    id: string,
+    fn: ((doc: LobeDocument) => LobeDocument) | 'remove',
+    serverCall: () => Promise<TResult>,
+  ): Promise<TResult> => this.#pageEntity.optimistic(id, fn, serverCall);
+
+  /** Patch one page everywhere it is loaded, without a server call. */
+  internal_updatePage = (id: string, fn: (doc: LobeDocument) => LobeDocument): void => {
+    this.#pageEntity.update(id, fn);
+  };
+
+  /** Re-run the network sync of the page list (the sidebar's refresh). */
+  internal_revalidatePageList = (): Promise<unknown> => this.#pageList.revalidate(PAGE_LIST_KEY);
 }
 
 export type ListAction = Pick<ListActionImpl, keyof ListActionImpl>;

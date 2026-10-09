@@ -46,16 +46,16 @@ export enum GroupKey {
 const Body = memo(() => {
   const { t } = useTranslation('file');
 
-  // Initialize documents list via SWR; keep `isValidating` so the accordion
-  // header can show a subtle in-flight indicator (mirrors the Private Agent
-  // pattern in `home/_layout/Body/Private`).
+  // Drive the list's replica sync; keep `isValidating` so the accordion header
+  // can show a subtle in-flight indicator (mirrors the Private Agent pattern in
+  // `home/_layout/Body/Private`).
   const useFetchDocuments = usePageStore((s) => s.useFetchDocuments);
-  // Use the SWR result as the settled signal: `data` is `undefined` until the
-  // first fetch succeeds, so a failed load surfaces error + Retry instead of a
-  // permanent skeleton. The store's `documents` field can't be the signal — it
-  // initializes to `[]` (a settled-looking empty), so a failed fetch would fall
-  // through to the "no pages" empty rather than the error.
-  const { data, error, isLoading, isValidating, mutate } = useFetchDocuments();
+  // The sync hook only returns flags — the rows live in the store. Use the list
+  // entry itself as the settled signal: it is `undefined` until IndexedDB
+  // hydration or the first server page lands, so a failed load surfaces error +
+  // Retry instead of a permanent skeleton.
+  const { error, isValidating, revalidate } = useFetchDocuments();
+  const isPageListInit = usePageStore(pageSelectors.isPageListInit);
 
   const filteredDocumentsCount = usePageStore(pageSelectors.filteredDocumentsCount);
   const privateCount = usePageStore(pageSelectors.privateFilteredDocumentsCount);
@@ -147,12 +147,12 @@ const Body = memo(() => {
       </ContextMenuTrigger>
       <AccordionPanel>
         <AsyncBoundary
-          data={data}
+          data={isPageListInit || undefined}
           error={error}
           errorVariant={'inline'}
-          isLoading={isLoading}
+          isLoading={!isPageListInit && !error}
           loading={<SkeletonList />}
-          onRetry={() => mutate()}
+          onRetry={() => revalidate()}
         >
           <Flexbox gap={1} paddingBlock={1}>
             {section.children}
