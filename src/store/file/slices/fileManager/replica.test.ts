@@ -193,6 +193,77 @@ describe('fileManager replicas', () => {
     );
   });
 
+  it('keeps the loaded tail when the head revalidates', async () => {
+    // 55 rows on the server: a full head page (`hasMore`) plus a 5-row terminal page.
+    const head = Array.from({ length: 50 }, (_, i) => file(`file-${i}`));
+    const tail = Array.from({ length: 5 }, (_, i) => file(`file-${50 + i}`));
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockImplementation(
+      async (params: any) =>
+        ((params?.offset ?? 0) === 0
+          ? { hasMore: true, items: head }
+          : { hasMore: false, items: tail }) as any,
+    );
+
+    renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(useFileStore.getState().fileList).toHaveLength(50));
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+    expect(useFileStore.getState().fileList).toHaveLength(55);
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(false);
+
+    // A refresh re-fetches only the head page, which reports `hasMore` and no
+    // total. The rows the user already loaded must survive it.
+    await act(async () => {
+      await useFileStore.getState().refreshFileList({ revalidateResources: false });
+    });
+
+    expect(useFileStore.getState().fileList.map((f) => f.id)).toEqual(
+      [...head, ...tail].map((f) => f.id),
+    );
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(false);
+  });
+
+  it('keeps paging open when a revalidated head still has rows beyond the loaded depth', async () => {
+    // 150 rows on the server: two full pages (`hasMore`) plus a terminal page.
+    const page = (start: number) => Array.from({ length: 50 }, (_, i) => file(`a-${start + i}`));
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockImplementation(async (params: any) => {
+      const offset = params?.offset ?? 0;
+      if (offset === 0) return { hasMore: true, items: page(0) } as any;
+      if (offset === 50) return { hasMore: true, items: page(50) } as any;
+      return { hasMore: false, items: page(100) } as any;
+    });
+
+    renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(useFileStore.getState().fileList).toHaveLength(50));
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+    expect(useFileStore.getState().fileList).toHaveLength(100);
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(true);
+
+    // The head page says nothing about rows 101+, so the refresh must neither
+    // drop the loaded depth nor close paging.
+    await act(async () => {
+      await useFileStore.getState().refreshFileList({ revalidateResources: false });
+    });
+    expect(useFileStore.getState().fileList).toHaveLength(100);
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(true);
+
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+    expect(useFileStore.getState().fileList).toHaveLength(150);
+    expect(useFileStore.getState().fileList[149].id).toBe('a-149');
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(false);
+  });
+
   describe('confirmed missing detail', () => {
     it('drops the persisted projection on NOT_FOUND so a reload cannot paint the stale file', async () => {
       // A previous visit persisted this file's detail.

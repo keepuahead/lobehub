@@ -223,13 +223,24 @@ export class FileManageActionImpl {
       offset,
     });
 
+    // The endpoint reports `hasMore`, not a total: offset paging derives `hasMore`
+    // from `total`, so encode it — the final page pins the exact count (paging
+    // stops even on a full page), any other page counts one extra row (paging
+    // continues even on a short page, which happens because the server computes
+    // `hasMore` on the raw window *before* the Inbox folder filter).
+    //
+    // The one page that must assert nothing is a head page returning fewer rows
+    // than the client already holds: it re-validates a view the user scrolled past
+    // page 1, and the engine bounds the tail it keeps by `total`. Pinning
+    // `offset + length + 1` there would override the merged view's known count
+    // with a smaller one and drop every row below it — a refresh would shrink the
+    // list back to one page. Deferring (`undefined`) leaves the loaded depth and
+    // the exhaustion state intact.
+    const isDeeperView = offset === 0 && response.items.length < this.#get().fileList.length;
+
     return {
       items: response.items,
-      // The endpoint reports `hasMore`, not a total. Offset paging derives
-      // "more" from `total`, so encode both facts faithfully: the final page
-      // pins the exact count (paging stops even on a full page), a non-final
-      // page counts one extra row (paging continues even on a short page).
-      total: offset + response.items.length + (response.hasMore ? 1 : 0),
+      total: isDeeperView ? undefined : offset + response.items.length + (response.hasMore ? 1 : 0),
     };
   };
 
