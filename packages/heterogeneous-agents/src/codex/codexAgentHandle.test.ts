@@ -1,8 +1,10 @@
 import type { AgentStreamEvent } from '@lobechat/agent-gateway-client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { lobeHubCliGuide } from '../protocol';
 import { createCodexAgentHandle } from './codexAgentHandle';
 import type { CodexThreadSessionOptions, CodexThreadTurnOptions } from './CodexThreadSession';
+import type { UserInput } from './protocol';
 
 const mocks = vi.hoisted(() => ({
   clientClose: vi.fn(),
@@ -99,6 +101,62 @@ describe('createCodexAgentHandle', () => {
     expect(await handle.exit).toEqual({ code: 0, signal: null });
     /** @example A completed device operation leaves no app-server process alive. */
     expect(mocks.clientClose).toHaveBeenCalledOnce();
+  });
+
+  /** @example A before-first-turn child gets its own introduction and keeps its image. */
+  it('introduces a fresh empty fork after native boundary resolution', async () => {
+    // ROOT CAUSE:
+    // Gateway input is prepared as a resume of the source. Before its first turn,
+    // native Fork starts an empty thread, so static input loses the CLI guide forever.
+    // Resolve session-scoped context from the native callback instead.
+    let received: UserInput[] = [];
+    mocks.run.mockImplementation(async (turn) => {
+      received = typeof turn.input === 'function' ? await turn.input(true) : turn.input;
+    });
+    const handle = await createCodexAgentHandle({
+      ...options,
+      forkTarget: { position: 'before', threadId: 'source-native', turnId: 'first-turn' },
+      prompt: [
+        { text: 'replayed user prompt', type: 'text' },
+        {
+          source: { data: 'iVBORw0KGgoAEA==', mediaType: 'image/png', type: 'base64' },
+          type: 'image',
+        },
+      ],
+      resumeSessionId: 'source-native',
+    });
+    /** @example Native start completes without replacing the source history with text. */
+    expect(await handle.exit).toEqual({ code: 0, signal: null });
+    /** @example The fresh thread receives exactly one session introduction. */
+    expect(
+      received
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('\n'),
+    ).toContain(lobeHubCliGuide);
+    /** @example The actual user prompt survives the session introduction. */
+    expect(received).toContainEqual(
+      expect.objectContaining({ text: 'replayed user prompt', type: 'text' }),
+    );
+    /** @example Materialized image attachment remains in the native request. */
+    expect(received).toContainEqual({ path: expect.stringContaining('.png'), type: 'localImage' });
+  });
+
+  /** @example A retained native boundary already contains its introduction. */
+  it('does not repeat the guide when a fork retains native history', async () => {
+    let received: UserInput[] = [];
+    mocks.run.mockImplementation(async (turn) => {
+      received = typeof turn.input === 'function' ? await turn.input(false) : turn.input;
+    });
+    const handle = await createCodexAgentHandle({
+      ...options,
+      forkTarget: { position: 'after', threadId: 'source-native', turnId: 'first-turn' },
+      resumeSessionId: 'source-native',
+    });
+    /** @example Retained history completes normally. */
+    expect(await handle.exit).toEqual({ code: 0, signal: null });
+    /** @example Resumed input is unchanged and does not accumulate guides. */
+    expect(received).toEqual([{ text: 'one prompt', text_elements: [], type: 'text' }]);
   });
 
   /** @example A missing native child produces a clear terminal error without a new session. */

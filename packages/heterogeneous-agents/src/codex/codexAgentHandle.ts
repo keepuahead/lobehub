@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 
 import type { CodexForkTarget } from '@lobechat/types';
 
-import type { AgentPromptInput } from '../protocol';
+import { type AgentPromptInput, buildHeterogeneousPrompt } from '../protocol';
 import { createEventQueue } from '../spawn/agentEventQueue';
 import { buildAgentInput } from '../spawn/input';
 import type { SpawnAgentHandle } from '../spawn/spawnAgent';
@@ -120,7 +120,21 @@ export const createCodexAgentHandle = async (
   };
   options.onStartupControl?.({ cancel });
   const turnOptions = {
-    input: buildCodexAppServerInput(input),
+    // Gateway prompts are prepared as source resumes. Only native boundary resolution
+    // knows whether before-first-turn Fork produced an empty session needing its guide.
+    input: async (isNewSession: boolean) => {
+      const sessionIntroduction =
+        isNewSession && options.forkTarget
+          ? buildCodexAppServerInput(
+              await buildAgentInput(
+                'codex',
+                buildHeterogeneousPrompt({ isNewSession, prompt: '' }),
+              ),
+            )
+          : [];
+      // Keep the already materialized user input and attachment paths unchanged.
+      return [...sessionIntroduction, ...buildCodexAppServerInput(input)];
+    },
     onRawMessage: (line: string) => options.onRawStdout?.(Buffer.from(line)),
     operationId: options.operationId,
     provenance,
