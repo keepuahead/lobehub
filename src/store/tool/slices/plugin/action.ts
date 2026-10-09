@@ -68,6 +68,15 @@ export class PluginActionImpl {
     this.#plugins = linkReplicaEntity<LobeTool>([this.#installedPlugins]);
   }
 
+  /**
+   * Whether the installed-plugins entry holds a server-confirmed value. A value
+   * hydrated from the persisted display projection is *partial*: it matches the
+   * list's identity and manifest, but its `settings` and connection parameters
+   * were redacted before they reached IndexedDB.
+   */
+  #isConfirmed = (): boolean =>
+    this.#get().installedPluginsReplica.entries[INSTALLED_PLUGINS_KEY]?.source === 'server';
+
   checkPluginsIsInstalled = async (_plugins: string[]): Promise<void> => {
     // Old plugin system has been deprecated, skip auto-installation
   };
@@ -75,9 +84,15 @@ export class PluginActionImpl {
   /**
    * Refresh the replica: the persisted list stays on screen while the network
    * answers, instead of blanking to an empty array first.
+   *
+   * This is the imperative refresh behind install / uninstall, which run on
+   * routes (e.g. the protocol-install popup) where the sync hook is not mounted
+   * — so it must fetch and confirm the replica itself, not merely revalidate the
+   * queries already in the cache.
    */
   refreshPlugins = async (): Promise<void> => {
-    await this.#installedPlugins.revalidate(INSTALLED_PLUGINS_KEY);
+    const plugins = await pluginService.getInstalledPlugins();
+    this.#installedPlugins.replace(LIST_PARAMS, plugins);
   };
 
   updateInstallLoadingState = (id: string, loading: boolean | undefined): void => {
@@ -97,6 +112,11 @@ export class PluginActionImpl {
   };
 
   updateInstallMcpPlugin = async (id: string, value: any): Promise<void> => {
+    // Read the merged `customParams` off the full record, never the projection.
+    // The guarded fetch rejects on failure: an unreachable server must not turn
+    // into a write that drops the connection parameters the projection hid.
+    if (!this.#isConfirmed()) await this.refreshPlugins();
+
     const installedPlugin = pluginSelectors.getInstalledPluginById(id)(this.#get());
 
     if (!installedPlugin) return;
@@ -122,6 +142,13 @@ export class PluginActionImpl {
     if (signal) signal.abort(MESSAGE_CANCEL_FLAT);
 
     const newSignal = new AbortController();
+
+    // Merge against the server's settings, never the redacted projection: the
+    // server replaces the whole settings object, so a merge over missing
+    // settings would erase every field the user did not just edit. Still
+    // synchronous on the confirmed path, so the optimistic write below lands in
+    // the same tick as the click.
+    if (!this.#isConfirmed()) await this.refreshPlugins();
 
     const previousSettings = pluginSelectors.getPluginSettingsById(id)(this.#get());
     const nextSettings = override ? settings : merge(previousSettings, settings);

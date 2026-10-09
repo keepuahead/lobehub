@@ -14,7 +14,8 @@ import { createElement, useEffect } from 'react';
 import { SWRConfig, useSWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { cacheScope } from '@/libs/replica';
+import { isInstalledPluginAvailableInCurrentEnv } from '@/helpers/toolAvailability';
+import { cacheScope, REPLICA_INDEX_KEY } from '@/libs/replica';
 import { setScopedMutate } from '@/libs/swr/mutate';
 import { pluginService } from '@/services/plugin';
 
@@ -44,8 +45,12 @@ const wrapper = ({ children }: PropsWithChildren) =>
     children,
   );
 
-const plugin = (identifier: string, settings: Record<string, unknown> = {}): LobeTool =>
-  ({ identifier, settings, type: 'plugin' }) as unknown as LobeTool;
+const plugin = (
+  identifier: string,
+  settings: Record<string, unknown> = {},
+  customParams?: unknown,
+): LobeTool =>
+  ({ customParams, identifier, settings, type: 'plugin' }) as unknown as LobeTool;
 
 /** Never-resolving fetch: the first frame can only come from storage. */
 const pending = () => new Promise<never>(() => {});
@@ -71,8 +76,10 @@ describe('installed plugins replica', () => {
   afterEach(async () => {
     cleanup();
     await Promise.all(
-      [...scopes].map((value) =>
-        installedPluginsResource.storage!.remove({ queryKey: STORAGE_KEY, scope: value }),
+      [...scopes].flatMap((value) =>
+        [STORAGE_KEY, REPLICA_INDEX_KEY].map((queryKey) =>
+          installedPluginsResource.storage!.remove({ queryKey, scope: value }),
+        ),
       ),
     );
     scopes.clear();
@@ -144,13 +151,49 @@ describe('installed plugins replica', () => {
     // The view shows the full server record (credentials included, in memory)…
     expect(useToolStore.getState().installedPlugins[0].customParams).toBeTruthy();
 
-    // …but nothing credential-bearing ever reaches storage.
+    // …but nothing credential-bearing ever reaches storage. The only surviving
+    // `customParams` field is the non-secret MCP runtime discriminator.
     const persisted = (
       await installedPluginsResource.storage!.get({ queryKey: STORAGE_KEY, scope })
     )?.data;
 
-    expect(persisted).toEqual([{ identifier: 'mcp-1', type: 'customPlugin' }]);
+    expect(persisted).toEqual([
+      { customParams: { mcp: { type: 'http' } }, identifier: 'mcp-1', type: 'customPlugin' },
+    ]);
     expect(JSON.stringify(persisted)).not.toContain(secret);
+  });
+
+  it('keeps the MCP runtime discriminator so a stdio plugin stays unavailable offline', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([
+      plugin('mcp-http', {}, { mcp: { env: { TOKEN: 'secret' }, type: 'http' } }),
+      plugin('mcp-stdio', {}, { command: 'node', mcp: { command: 'node', type: 'stdio' } }),
+    ]);
+
+    renderHook(() => useToolStore((s) => s.useFetchInstalledPlugins)(true), { wrapper });
+    await waitFor(() => expect(useToolStore.getState().installedPlugins).toHaveLength(2));
+
+    const persisted = (
+      await installedPluginsResource.storage!.get({ queryKey: STORAGE_KEY, scope })
+    )?.data;
+
+    expect(persisted).toEqual([
+      { customParams: { mcp: { type: 'http' } }, identifier: 'mcp-http', type: 'plugin' },
+      { customParams: { mcp: { type: 'stdio' } }, identifier: 'mcp-stdio', type: 'plugin' },
+    ]);
+    expect(JSON.stringify(persisted)).not.toContain('secret');
+    // The web tool set still excludes the cached stdio plugin before any revalidation.
+    expect(isInstalledPluginAvailableInCurrentEnv(persisted![1], { isDesktop: false })).toBe(false);
+    expect(isInstalledPluginAvailableInCurrentEnv(persisted![0], { isDesktop: false })).toBe(true);
+  });
+
+  it('leaves the replica row index untouched', async () => {
+    const indexRow = { data: [STORAGE_KEY], updatedAt: 1 };
+    const indexKey = { queryKey: REPLICA_INDEX_KEY, scope };
+    await installedPluginsResource.storage!.set(indexKey, indexRow);
+
+    // The index row is a list of storage keys, not plugins — projecting it would
+    // turn every key into a plugin-shaped object and break unloaded-row patches.
+    expect(await installedPluginsResource.storage!.get(indexKey)).toEqual(indexRow);
   });
 
   it('drops the previous identity’s plugins before the next one paints', async () => {
@@ -231,5 +274,93 @@ describe('installed plugins replica', () => {
     });
     // The list survived the revalidation round-trip.
     expect(useToolStore.getState().installedPlugins).toHaveLength(1);
+  });
+
+  it('refreshes imperatively when no sync hook is mounted', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([plugin('p1')]);
+
+    // The protocol-install popup: nothing mounts `useFetchInstalledPlugins`, so a
+    // mounted-query-only revalidation would silently leave the list empty.
+    await act(async () => {
+      await useToolStore.getState().refreshPlugins();
+    });
+
+    expect(pluginService.getInstalledPlugins).toHaveBeenCalledTimes(1);
+    expect(useToolStore.getState().installedPlugins.map((p) => p.identifier)).toEqual(['p1']);
+  });
+
+  it('rebuilds a settings write from the server record, not the redacted projection', async () => {
+    // Only the projection is on screen: the background sync has not answered yet.
+    await installedPluginsResource.storage!.set(
+      { queryKey: STORAGE_KEY, scope },
+      { data: [plugin('p1', { setting1: 'old', setting2: 'keep' })], updatedAt: 1 },
+    );
+    vi.mocked(pluginService.getInstalledPlugins).mockImplementation(pending);
+
+    renderHook(() => useToolStore((s) => s.useFetchInstalledPlugins)(true), { wrapper });
+    await waitFor(() => expect(useToolStore.getState().installedPlugins).toHaveLength(1));
+    // Hydrated from the projection: its settings never reached IndexedDB.
+    expect(useToolStore.getState().installedPlugins[0].settings).toBeUndefined();
+
+    // The forced fetch answers with the full record…
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([
+      plugin('p1', { setting1: 'old', setting2: 'keep' }),
+    ]);
+    vi.mocked(pluginService.updatePluginSettings).mockResolvedValue(undefined);
+
+    await act(async () => {
+      await useToolStore.getState().updatePluginSettings('p1', { setting1: 'new' });
+    });
+
+    // …so the replacement write still carries the sibling field the projection dropped.
+    expect(pluginService.updatePluginSettings).toHaveBeenCalledWith(
+      'p1',
+      { setting1: 'new', setting2: 'keep' },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('keeps the connection parameters the projection hid when writing an MCP delta', async () => {
+    const full = {
+      customParams: {
+        mcp: {
+          env: { A: '1' },
+          headers: { 'X-Key': 'v' },
+          type: 'http',
+          url: 'https://mcp.example.com',
+        },
+      },
+      identifier: 'mcp-1',
+      type: 'customPlugin',
+    } as unknown as LobeTool;
+
+    await installedPluginsResource.storage!.set(
+      { queryKey: STORAGE_KEY, scope },
+      { data: [full], updatedAt: 1 },
+    );
+    vi.mocked(pluginService.getInstalledPlugins).mockImplementation(pending);
+
+    renderHook(() => useToolStore((s) => s.useFetchInstalledPlugins)(true), { wrapper });
+    await waitFor(() => expect(useToolStore.getState().installedPlugins).toHaveLength(1));
+    expect(useToolStore.getState().installedPlugins[0].customParams).toEqual({
+      mcp: { type: 'http' },
+    });
+
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([full]);
+    vi.mocked(pluginService.updatePlugin).mockResolvedValue(undefined);
+
+    await act(async () => {
+      await useToolStore.getState().updateInstallMcpPlugin('mcp-1', { env: { B: '2' } });
+    });
+
+    expect(pluginService.updatePlugin).toHaveBeenCalledWith('mcp-1', {
+      customParams: {
+        mcp: expect.objectContaining({
+          env: { A: '1', B: '2' },
+          headers: { 'X-Key': 'v' },
+          type: 'http',
+        }),
+      },
+    });
   });
 });
