@@ -1,3 +1,6 @@
 import { generateServerI18n } from './generate';
 
-await generateServerI18n(process.cwd());
+generateServerI18n(process.cwd()).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

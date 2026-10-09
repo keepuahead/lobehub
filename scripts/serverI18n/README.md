@@ -46,3 +46,9 @@ After a Next build, `bun run i18n:server:audit` checks seven backend route trace
 for raw dictionaries and a 250 MiB local byte budget (the byte budget is skipped
 for Docker). Source maps, when present, also detect embedded raw dictionaries.
 Local NFT sizes do not replace verification of the final Vercel deployment bundle.
+
+Extraction runs in a separate Node process with a 6 GiB heap limit. It validates
+the complete runtime import graph and preserves full translation analysis while
+avoiding redundant type queries for expressions without a contextual type. CI
+generates one artifact per workflow run for all test shards, rather than extracting
+per shard.

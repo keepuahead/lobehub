@@ -96,11 +96,28 @@ export const extractTranslationUses = (program: ts.Program, files: string[]): Tr
     const source = program.getSourceFile(file);
     if (!source) throw new Error(`Missing source file in translation program: ${file}`);
     const visit = (node: ts.Node) => {
+      const parent = node.parent;
+      if (!parent) {
+        ts.forEachChild(node, visit);
+        return;
+      }
+      const isIndirectCall =
+        ts.isPropertyAccessExpression(parent) &&
+        ['bind', 'call', 'apply'].includes(parent.name.text);
+      // Namespace erasure only happens when a value receives a contextual type.
+      // Ordinary property reads and inferred bindings do not need semantic queries.
+      const canHaveContext =
+        !ts.isPropertyAccessExpression(parent) &&
+        !ts.isExpressionStatement(parent) &&
+        !(ts.isVariableDeclaration(parent) && (!parent.type || parent.name === node)) &&
+        !(ts.isParameter(parent) && parent.name === node) &&
+        !(ts.isCallExpression(parent) && parent.expression === node);
       if (
-        ts.isIdentifier(node) ||
-        ts.isPropertyAccessExpression(node) ||
-        ts.isCallExpression(node) ||
-        ts.isAwaitExpression(node)
+        (canHaveContext || isIndirectCall) &&
+        (ts.isIdentifier(node) ||
+          ts.isPropertyAccessExpression(node) ||
+          ts.isCallExpression(node) ||
+          ts.isAwaitExpression(node))
       ) {
         const valueType = checker.getTypeAtLocation(node);
         const marker = valueType.getProperty('__serverNamespace');

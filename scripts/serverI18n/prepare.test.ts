@@ -45,8 +45,8 @@ it('regenerates with the wrapper config after an embedded repository source chan
     listener?.('change', 'translation.ts');
     await vi.waitFor(() =>
       expect(execFile).toHaveBeenCalledWith(
-        'bun',
-        expect.any(Array),
+        'node',
+        expect.arrayContaining(['--max-old-space-size=6144', '--import', 'tsx']),
         expect.objectContaining({ cwd: root }),
         expect.any(Function),
       ),

@@ -98,7 +98,7 @@
     "fts-search:sync": "cross-env MIGRATION_DB=1 bun run scripts/elasticsearchSync/cli.ts",
     "hotfix:branch": "tsx ./scripts/hotfixWorkflow/index.ts",
     "i18n": "npm run workflow:i18n && lobe-i18n && prettier -c --write \"locales/**\"",
-    "i18n:server": "bun scripts/serverI18n/index.ts",
+    "i18n:server": "node --max-old-space-size=6144 --import tsx scripts/serverI18n/index.ts",
     "i18n:server:audit": "bun scripts/serverI18n/audit.ts",
     "i18n:unused": "tsx ./scripts/i18nWorkflow/analyzeUnusedKeys.ts",
     "i18n:unused-clean": "tsx ./scripts/i18nWorkflow/cleanUnusedKeys.ts",

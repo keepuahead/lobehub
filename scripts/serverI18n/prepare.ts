@@ -10,10 +10,19 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 /** Run outside the bundler process so the compiler's graph memory is released before bundling. */
 export const prepareServerI18n = async (root: string) => {
-  const { stdout } = await execute('bun', [path.join(repoRoot, 'scripts/serverI18n/index.ts')], {
-    cwd: root,
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  const { stdout } = await execute(
+    'node',
+    [
+      '--max-old-space-size=6144',
+      '--import',
+      'tsx',
+      path.join(repoRoot, 'scripts/serverI18n/index.ts'),
+    ],
+    {
+      cwd: root,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
   if (stdout) console.info(stdout.trim());
 };
 
