@@ -14,11 +14,13 @@ import type {
   UserToolConfig,
 } from '@lobechat/types';
 import {
+  ContextSelectionSchema,
   CreateThreadWithMessageSchema,
   entityIdPattern,
   initialTopicMetadataSchema,
   isServerDefaultHeterogeneousRelayInvocation,
   LocalHeterogeneousAgentTypeSchema,
+  PageSelectionSchema,
   RequestTrigger,
   ThreadStatus,
   ThreadType,
@@ -1249,6 +1251,7 @@ const ExecAgentSchema = z
     heterogeneousFreshSession: z
       .object({
         historyBoundaryMessageId: z.string().min(1),
+        usePersistedHistory: z.boolean().optional(),
         startupRequestId: z.string().min(8).max(128).optional(),
         systemContext: z.string().optional(),
       })
@@ -1257,6 +1260,9 @@ const ExecAgentSchema = z
     localDeviceId: z.string().optional(),
     /** Optional existing message IDs to include in context */
     existingMessageIds: z.array(z.string()).optional().default([]),
+    /** User-selected context remains durable across fresh device sessions. */
+    contextSelections: z.array(ContextSelectionSchema).optional(),
+    pageSelections: z.array(PageSelectionSchema).optional(),
     /** File IDs of already-uploaded attachments to attach to the new user message */
     fileIds: z.array(z.string()).optional(),
     /** Parent message ID for regeneration/continue (skip user message creation, branch from this message) */
@@ -2574,6 +2580,8 @@ export const aiAgentRouter = router({
         deviceId,
         localDeviceId,
         existingMessageIds,
+        contextSelections: input.contextSelections,
+        pageSelections: input.pageSelections,
         fileIds,
         mentionedAgents,
         parentMessageId,

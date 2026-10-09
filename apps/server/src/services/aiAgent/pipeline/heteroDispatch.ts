@@ -1,5 +1,4 @@
 import { stripGoalCommand, withConversationGoalPrompt } from '@lobechat/builtin-tool-goal';
-import { LOADING_FLAT } from '@lobechat/const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import type { HeterogeneousAgentType } from '@lobechat/heterogeneous-agents';
 import {
@@ -7,6 +6,7 @@ import {
   isLocalHeterogeneousType,
   isRemoteHeterogeneousType,
 } from '@lobechat/heterogeneous-agents';
+import { buildHeterogeneousConversationContext } from '@lobechat/prompts';
 import type {
   DeviceUnavailableErrorData,
   ErrorType,
@@ -27,6 +27,7 @@ import debug from 'debug';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { DeviceModel } from '@/database/models/device';
 import type { MessageModel } from '@/database/models/message';
+import { ThreadModel } from '@/database/models/thread';
 import type { TopicModel } from '@/database/models/topic';
 import { resolveExecutionPlan, resolveWorkspaceScoped } from '@/helpers/executionTarget';
 import { signHeteroOperationJWT, signUserJWT } from '@/libs/trpc/utils/internalJwt';
@@ -39,10 +40,12 @@ import { hookDispatcher } from '@/server/services/agentRuntime/hooks';
 import type { AgentHook } from '@/server/services/agentRuntime/hooks/types';
 import { deviceGateway } from '@/server/services/deviceGateway';
 import { resolveDeviceDispatchAuthorizationFailure } from '@/server/services/deviceGateway/dispatchAuthorization';
+import { FileService } from '@/server/services/file';
 import { HeterogeneousAgentService } from '@/server/services/heterogeneousAgent';
 import type { ConversationHistoryEntry } from '@/server/services/heterogeneousAgent/cloudHeteroContext';
 import { buildCloudHeteroContext } from '@/server/services/heterogeneousAgent/cloudHeteroContext';
 import { buildRemoteDeviceHeteroContext } from '@/server/services/heterogeneousAgent/remoteDeviceHeteroContext';
+import { spawnHeteroSandbox } from '@/server/services/heterogeneousAgent/sandboxRunner';
 import type { MarketService } from '@/server/services/market';
 import {
   resolveSandboxSessionConfig,
@@ -354,7 +357,6 @@ export const dispatchHeteroAgent = async (
     requestTrigger,
     requestedDeviceId,
     runAttachments,
-    selfMessageIds,
     topicStartOwnerOperationId,
   } = input;
 
@@ -495,7 +497,10 @@ export const dispatchHeteroAgent = async (
   // native transcript, including when its selected replay is empty.
   const resumeSessionId = input.heterogeneousFreshSession
     ? undefined
-    : await heteroService.getHeterogeneousResumeSessionId(topicId);
+    : await heteroService.getHeterogeneousResumeSessionId(
+        topicId,
+        appContext?.threadId ?? undefined,
+      );
   // Sign an operation-scoped JWT so the CLI can authenticate against
   // heteroIngest / heteroFinish without full user credentials.
   let operationJwt: string;
@@ -548,33 +553,74 @@ export const dispatchHeteroAgent = async (
   // a serialized duplicate. Amp threads are server-backed, so they rely on
   // native continuation exclusively and never need this local-file fallback.
   let conversationHistory: ConversationHistoryEntry[] | undefined;
-  if (heteroType !== 'amp' && !input.heterogeneousFreshSession) {
+  let persistedPromptContext: string | undefined;
+  let persistedImages: Array<{ id: string; url: string }> = [];
+  // A copied edit topic needs durable context even though native resume is disabled.
+  // Ordinary regeneration and native Fork keep their explicitly selected history.
+  if (
+    heteroType !== 'amp' &&
+    (!input.heterogeneousFreshSession || input.heterogeneousFreshSession.usePersistedHistory)
+  ) {
     try {
       // `allowShareVisitor`: this is the RUN's own topic, already resolved
       // and authorized upstream. An agent-share visitor run executes under
       // the creator's identity, so without the opt-in `query()`'s
       // creator-facing default would hand the agent an empty history.
+      const fileService = new FileService(deps.db, deps.userId, deps.workspaceId);
       const recentMsgs = await deps.messageModel.query(
         { topicId, pageSize: 200 },
-        { allowShareVisitor: true },
+        {
+          allowShareVisitor: true,
+          // Database rows carry storage keys; a device CLI needs freshly signed URLs.
+          // MessageModel still enforces attachment ownership before invoking this callback.
+          postProcessUrl: (path) => fileService.getFullFileUrl(path),
+        },
       );
-      const turns = recentMsgs
-        .filter(
-          (m) =>
-            (m.role === 'user' || m.role === 'assistant') &&
-            !m.threadId &&
-            !selfMessageIds.has(m.id) &&
-            m.content &&
-            m.content !== LOADING_FLAT,
-        )
-        .slice(-30)
-        .map((m) => ({
-          content: m.content ?? '',
-          role: m.role as 'assistant' | 'user',
-        }));
-      if (turns.length > 0) conversationHistory = turns;
+      const promptMessageId = userMessageId ?? parentMessageId;
+      if (
+        input.heterogeneousFreshSession?.usePersistedHistory &&
+        !recentMsgs.some((message) => message.id === promptMessageId)
+      ) {
+        throw new Error('The persisted conversation boundary is unavailable');
+      }
+      const replay = buildHeterogeneousConversationContext(recentMsgs, promptMessageId);
+      if (replay.history.length > 0) conversationHistory = replay.history;
+      persistedPromptContext = replay.currentContext;
+      // The CLI reuses imageList if native resume fails and starts a fresh session.
+      // Keep the bounded ancestor images for both attempts so that fallback has
+      // the same vision inputs as its recovered conversation text.
+      persistedImages = replay.imageList;
     } catch (err) {
       log('execAgent: failed to load conversation history for hetero context: %O', err);
+      if (heteroType === 'codex') {
+        // A fresh edited run cannot safely execute without its persisted context.
+        // Settle the already-created operation through the existing failure path
+        // and retain the user message so the UI can retry after recovery.
+        const message = 'Failed to load conversation context';
+        const terminalReported = await finalizeHeteroDispatchError(deps, {
+          agentId: resolvedAgentId,
+          assistantMessageId,
+          detail: err instanceof Error ? err.message : message,
+          message,
+          operationId,
+          topicId,
+        });
+        return {
+          agentId: resolvedAgentId,
+          assistantMessageId,
+          autoStarted: false,
+          createdAt: new Date().toISOString(),
+          error: message,
+          message,
+          operationId,
+          status: 'error',
+          success: false,
+          terminalReported,
+          timestamp: new Date().toISOString(),
+          topicId,
+          userMessageId: userMessageId ?? parentMessageId ?? '',
+        };
+      }
     }
   }
 
@@ -602,7 +648,10 @@ export const dispatchHeteroAgent = async (
   const agentSystemContext = withConversationGoalPrompt(
     [
       agentConfig.agencyConfig?.heterogeneousProvider?.systemContext,
-      input.heterogeneousFreshSession?.systemContext,
+      input.heterogeneousFreshSession?.usePersistedHistory
+        ? undefined
+        : input.heterogeneousFreshSession?.systemContext,
+      persistedPromptContext,
     ]
       .filter(Boolean)
       .join('\n\n') || undefined,
@@ -630,10 +679,13 @@ export const dispatchHeteroAgent = async (
   // mirrors the local-mode path, where the client feeds the persisted
   // message's imageList into `sendPrompt`. Reuses the shared resolution above
   // so bot/IM and SPA gateway attachments are handled identically.
-  const heteroImageList =
-    runAttachments.imageList && runAttachments.imageList.length > 0
-      ? runAttachments.imageList.map((image) => ({ id: image.id, url: image.url }))
-      : undefined;
+  const images = new Map(
+    [...persistedImages, ...(runAttachments.imageList ?? [])].map((image) => [
+      image.id,
+      { id: image.id, url: image.url },
+    ]),
+  );
+  const heteroImageList = images.size > 0 ? [...images.values()] : undefined;
   const heteroExecArgs = isLocalHeterogeneousType(heteroType)
     ? buildHeteroExecArgs(
         heterogeneousProvider?.type === heteroType
@@ -1076,278 +1128,368 @@ export const dispatchHeteroAgent = async (
       log('execAgent: failed to init stream for local hetero: %O', err);
     }
 
-    const heteroPlan = deviceHeteroPlan!;
+    try {
+      const heteroPlan = deviceHeteroPlan!;
 
-    if (heteroPlan.kind !== 'sandbox') {
-      const dispatchDeviceId = heteroPlan.kind === 'device' ? heteroPlan.deviceId : undefined;
-      if (!dispatchDeviceId) {
-        log('execAgent: hetero executionTarget=device but no boundDeviceId set');
-        const terminalReported = await finalizeHeteroDispatchError(deps, {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          detail: !supportsCloudHeterogeneousSandbox(heteroType)
-            ? 'No device bound. Pick a local or connected device in the Execution Device switcher.'
-            : 'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
-          message: 'No bound device for hetero agent',
-          operationId,
-          topicId,
+      if (heteroPlan.kind !== 'sandbox') {
+        const dispatchDeviceId = heteroPlan.kind === 'device' ? heteroPlan.deviceId : undefined;
+        if (!dispatchDeviceId) {
+          log('execAgent: hetero executionTarget=device but no boundDeviceId set');
+          const terminalReported = await finalizeHeteroDispatchError(deps, {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            detail: !supportsCloudHeterogeneousSandbox(heteroType)
+              ? 'No device bound. Pick a local or connected device in the Execution Device switcher.'
+              : 'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
+            message: 'No bound device for hetero agent',
+            operationId,
+            topicId,
+          });
+          return {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            autoStarted: false,
+            createdAt: new Date().toISOString(),
+            error: 'No bound device',
+            message: 'Hetero agent requires a bound device',
+            operationId,
+            status: 'error',
+            success: false,
+            terminalReported,
+            timestamp: new Date().toISOString(),
+            topicId,
+            userMessageId: userMessageId ?? parentMessageId ?? '',
+          };
+        }
+        const runThread = appContext?.threadId
+          ? await new ThreadModel(deps.db, deps.userId, deps.workspaceId).findById(
+              appContext.threadId,
+            )
+          : undefined;
+        const nativeFork = Boolean(runThread?.metadata?.codexForkTarget);
+        const nativeCodexAuth = heteroType === 'codex' && heterogeneousProvider?.authMode !== 'api';
+        // Query the live connection, not merged DB metadata: downgrade/reconnect must revoke capabilities.
+        const deviceInfo = nativeCodexAuth
+          ? await deviceGateway.queryDeviceSystemInfo(
+              deps.userId,
+              dispatchDeviceId,
+              cliDeviceWorkspaceId,
+            )
+          : undefined;
+        const nativeCodex =
+          nativeCodexAuth &&
+          Boolean(deviceInfo?.supportedAgentRuntimes?.includes('codex-app-server-v1'));
+        if (nativeFork && !nativeCodex) {
+          throw new Error(
+            'Native Codex Fork requires native authentication and a connected CLI supporting codex-app-server-v1. Update and reconnect that device.',
+          );
+        }
+        const freshSession = Boolean(input.heterogeneousFreshSession);
+        const branchRun =
+          nativeCodex && (!freshSession || nativeFork)
+            ? await heteroService.getCodexBranchRun(
+                topicId,
+                userMessageId ?? parentMessageId ?? '',
+                appContext?.threadId ?? undefined,
+                freshSession,
+              )
+            : { resumeSessionId };
+        if (branchRun.codexBranchError) throw new Error(branchRun.codexBranchError);
+        const workingDirectoryMetadata = runThread?.metadata ?? topic?.metadata;
+        // Resolve the working directory for the run: a topic-level override
+        // wins, else the device's user-configured defaultCwd. The device row
+        // lives in the DB (the gateway only knows live connections), so read
+        // it directly rather than via deviceGateway.
+        // The bound device may be personal (userId-scoped) or a workspace
+        // device (workspace-scoped) — look up both so its defaultCwd resolves.
+        const deviceModelForCwd = new DeviceModel(deps.db, deps.userId, deps.workspaceId);
+        const boundDevice =
+          (await deviceModelForCwd.findByDeviceId(dispatchDeviceId)) ??
+          (await deviceModelForCwd.findWorkspaceDeviceById(dispatchDeviceId));
+        const dispatchWorkspaceId = cliDeviceWorkspaceId;
+        // Resolve via the shared precedence helper so dispatch, workspace-init,
+        // and the new-topic backfill below all agree on the cwd.
+        const deviceCwdConfig = resolveDeviceWorkingDirectoryConfig({
+          deviceDefaultCwd: boundDevice?.defaultCwd,
+          deviceId: dispatchDeviceId,
+          devicePlatform: boundDevice?.platform,
+          initialWorkingDirectory: appContext?.initialTopicMetadata?.workingDirectory,
+          initialWorkingDirectoryConfig: appContext?.initialTopicMetadata?.workingDirectoryConfig,
+          // The run's repos, so a directory that IS one of them is skipped: this
+          // device cannot have it (`owner/repo` is a cloud repo identifier).
+          repos: topicRepos,
+          topicDeviceId: topic?.metadata?.boundDeviceId,
+          topicWorkingDirectory: workingDirectoryMetadata?.workingDirectory,
+          topicWorkingDirectoryConfig: workingDirectoryMetadata?.workingDirectoryConfig,
+          workingDirByDevice: agentConfig.agencyConfig?.workingDirByDevice,
         });
-        return {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          autoStarted: false,
-          createdAt: new Date().toISOString(),
-          error: 'No bound device',
-          message: 'Hetero agent requires a bound device',
-          operationId,
-          status: 'error',
-          success: false,
-          terminalReported,
-          timestamp: new Date().toISOString(),
-          topicId,
-          userMessageId: userMessageId ?? parentMessageId ?? '',
-        };
-      }
-      // Resolve the working directory for the run: a topic-level override
-      // wins, else the device's user-configured defaultCwd. The device row
-      // lives in the DB (the gateway only knows live connections), so read
-      // it directly rather than via deviceGateway.
-      // The bound device may be personal (userId-scoped) or a workspace
-      // device (workspace-scoped) — look up both so its defaultCwd resolves.
-      const deviceModelForCwd = new DeviceModel(deps.db, deps.userId, deps.workspaceId);
-      const boundDevice =
-        (await deviceModelForCwd.findByDeviceId(dispatchDeviceId)) ??
-        (await deviceModelForCwd.findWorkspaceDeviceById(dispatchDeviceId));
-      const dispatchWorkspaceId = cliDeviceWorkspaceId;
-      // Resolve via the shared precedence helper so dispatch, workspace-init,
-      // and the new-topic backfill below all agree on the cwd.
-      const deviceCwdConfig = resolveDeviceWorkingDirectoryConfig({
-        deviceDefaultCwd: boundDevice?.defaultCwd,
-        deviceId: dispatchDeviceId,
-        devicePlatform: boundDevice?.platform,
-        initialWorkingDirectory: appContext?.initialTopicMetadata?.workingDirectory,
-        initialWorkingDirectoryConfig: appContext?.initialTopicMetadata?.workingDirectoryConfig,
-        // The run's repos, so a directory that IS one of them is skipped: this
-        // device cannot have it (`owner/repo` is a cloud repo identifier).
-        repos: topicRepos,
-        topicDeviceId: topic?.metadata?.boundDeviceId,
-        topicWorkingDirectory: topic?.metadata?.workingDirectory,
-        topicWorkingDirectoryConfig: topic?.metadata?.workingDirectoryConfig,
-        workingDirByDevice: agentConfig.agencyConfig?.workingDirByDevice,
-      });
-      const deviceCwd = getWorkingDirEffectivePath(deviceCwdConfig);
+        const deviceCwd = getWorkingDirEffectivePath(deviceCwdConfig);
 
-      // An unbound topic has no pinned cwd yet: the directory was only
-      // recorded at agent level (`workingDirByDevice`) when no topic existed.
-      // Persist the resolved cwd onto the topic so the sidebar groups it
-      // under the right project and the next turn reuses the same directory.
-      await deps.bindTopicWorkingDirectory({
-        config: deviceCwdConfig,
-        currentDeviceId: topic?.metadata?.boundDeviceId,
-        currentWorkingDirectory: topic?.metadata?.workingDirectory,
-        deviceId: dispatchDeviceId,
+        // An unbound topic has no pinned cwd yet: the directory was only
+        // recorded at agent level (`workingDirByDevice`) when no topic existed.
+        // Persist the resolved cwd onto the topic so the sidebar groups it
+        // under the right project and the next turn reuses the same directory.
+        if (!appContext?.threadId)
+          await deps.bindTopicWorkingDirectory({
+            config: deviceCwdConfig,
+            currentDeviceId: topic?.metadata?.boundDeviceId,
+            currentWorkingDirectory: topic?.metadata?.workingDirectory,
+            deviceId: dispatchDeviceId,
+            topicId,
+          });
+
+        // Build only device-relevant context instead of reusing the cloud-sandbox one
+        // (which describes an ephemeral /workspace + pre-cloned repos and would mislead
+        // the agent). The spawned CLI already receives deviceCwd as its actual cwd.
+        const deviceSystemContext = buildRemoteDeviceHeteroContext({
+          agentSystemContext,
+          // A fresh edited topic has no native transcript to resume. Keep its
+          // persisted ancestry even when the device supports native Codex.
+          // Native Fork/resume already carries history and must not replay it twice.
+          conversationHistory:
+            input.heterogeneousFreshSession?.usePersistedHistory && !nativeFork
+              ? conversationHistory
+              : nativeCodex || resumeSessionId
+                ? undefined
+                : conversationHistory,
+        });
+        const deviceResumeFallbackSystemContext =
+          !nativeCodex && resumeSessionId && conversationHistory
+            ? buildRemoteDeviceHeteroContext({
+                agentSystemContext,
+                conversationHistory,
+              })
+            : undefined;
+
+        const authorizationError = await resolveDeviceDispatchAuthorizationFailure(
+          deps.db,
+          deps.userId,
+          dispatchDeviceId,
+          dispatchWorkspaceId,
+        );
+        const cancelledBeforeDispatch = await cancelIfRequested();
+        if (cancelledBeforeDispatch) return cancelledBeforeDispatch;
+        dispatchOwner = authorizationError ? 'preparing' : 'device';
+        const result = authorizationError
+          ? {
+              error: 'DEVICE_NOT_FOUND',
+              errorData: authorizationError,
+              notStarted: true,
+              success: false,
+            }
+          : await deviceGateway.dispatchAgentRun({
+              ...heteroParams,
+              agentId: resolvedAgentId,
+              // Only a live client advertising the native protocol receives these wrapper flags.
+              args: nativeCodex
+                ? [
+                    ...(heteroExecArgs ?? []),
+                    '--codex-app-server',
+                    ...(branchRun.codexForkTarget
+                      ? ['--codex-fork-target', JSON.stringify(branchRun.codexForkTarget)]
+                      : []),
+                  ]
+                : heteroExecArgs,
+              resumeSessionId: branchRun.resumeSessionId,
+              cwd: deviceCwd,
+              deviceId: dispatchDeviceId,
+              resumeFallbackSystemContext: deviceResumeFallbackSystemContext,
+              systemContext: deviceSystemContext,
+              // Route to the workspace pool when this is a workspace device; the
+              // operation JWT stays member-scoped (the run belongs to the member).
+              workspaceId: dispatchWorkspaceId,
+              // Topic scope for device-side heteroIngest/heteroFinish. Distinct
+              // from the routing workspace above: a workspace topic on a personal
+              // device still has to write back under `deps.workspaceId`.
+              ingestWorkspaceId: deps.workspaceId,
+            });
+        if (result.notStarted) dispatchOwner = 'preparing';
+        const cancelledAfterDispatch = await cancelIfRequested();
+        if (cancelledAfterDispatch) return cancelledAfterDispatch;
+        if (!result.success) {
+          log('execAgent: hetero device dispatch failed: %s', result.error);
+          const terminalReported = await finalizeHeteroDispatchError(deps, {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            detail: result.error ?? 'Device dispatch failed',
+            deviceRoute: {
+              deviceId: dispatchDeviceId,
+              userId: deps.userId,
+              ...(dispatchWorkspaceId ? { workspaceId: dispatchWorkspaceId } : {}),
+            },
+            errorData: result.errorData,
+            errorType: resolveHeteroDispatchErrorType(result.error),
+            message: humanizeHeteroDispatchError(result.error),
+            operationId,
+            topicId,
+          });
+          return {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            autoStarted: false,
+            createdAt: new Date().toISOString(),
+            error: result.error,
+            errorData: result.errorData,
+            message: 'Hetero agent device dispatch failed',
+            operationId,
+            status: 'error',
+            success: false,
+            terminalReported,
+            timestamp: new Date().toISOString(),
+            topicId,
+            userMessageId: userMessageId ?? parentMessageId ?? '',
+          };
+        }
+
+        // Local CLI hetero agents dispatch to a device just like remote platform
+        // agents, so persist the device route after the dispatch is accepted.
+        // interruptTask uses these fields to find and stop the native process.
+        try {
+          const patched = await deps.topicModel.patchRunningOperation(topicId, operationId, {
+            deviceId: dispatchDeviceId,
+            deviceWorkspaceId: dispatchWorkspaceId,
+            heteroType,
+          });
+          log(
+            'execAgent: patch runningOperation device info=%s deviceId=%s heteroType=%s op=%s',
+            patched,
+            dispatchDeviceId,
+            heteroType,
+            operationId,
+          );
+        } catch (err) {
+          log('execAgent: failed to patch runningOperation with device info: %O', err);
+        }
+      } else {
+        if (heteroType === 'codex' && appContext?.threadId) {
+          const thread = await new ThreadModel(deps.db, deps.userId, deps.workspaceId).findById(
+            appContext.threadId,
+          );
+          // An established child still belongs to its device's native history, even after handoff.
+          if (thread?.metadata?.codexForkTarget) {
+            throw new Error(
+              'Native Codex Fork requires the connected device holding its native history',
+            );
+          }
+        }
+        if (!supportsCloudHeterogeneousSandbox(heteroType)) {
+          const message = `${getHeterogeneousAgentTitle(heteroType)} requires a local or connected device; cloud sandbox execution is not supported.`;
+          const terminalReported = await finalizeHeteroDispatchError(deps, {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            detail: message,
+            message,
+            operationId,
+            topicId,
+          });
+          return {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            autoStarted: false,
+            createdAt: new Date().toISOString(),
+            error: message,
+            message,
+            operationId,
+            status: 'error',
+            success: false,
+            terminalReported,
+            timestamp: new Date().toISOString(),
+            topicId,
+            userMessageId: userMessageId ?? parentMessageId ?? '',
+          };
+        }
+
+        // Cloud sandbox path — only for sandbox-provisioned local CLI agents.
+        // Remote agents (openclaw / hermes) always require a bound device.
+        // The previous lazy-load comment described sandbox-service module initialization.
+        // Keep the dependency static so build and circular-dependency checks can validate it;
+        // sandbox creation still happens only in this cloud-CLI branch.
+        // The entitlement rides on the trust token; without it the execution
+        // plane routes to the ephemeral sandbox whatever the request says.
+        const marketService = await deps.getMarketService(
+          sandbox?.claim ? { sandboxStorage: sandbox.claim } : undefined,
+        );
+        // The sandbox authenticates its nested `lh` calls with this JWT. The
+        // narrow `hetero-operation` token (used for the device-dispatch path
+        // above) is rejected by `oidcAuth`, so CC capabilities that hit
+        // user-scoped endpoints — e.g. uploading a `Read`-on-image result to
+        // the file store for thumbnail echo — would 401 and silently drop.
+        // Mint a user-scoped `cli-sandbox` token instead (still `sub: userId`,
+        // ownership-gated on heteroIngest/heteroFinish) with a run-length TTL
+        // so it outlives a multi-hour run.
+        const sandboxJwt = await signUserJWT(deps.userId, '4h');
+        const cancelledBeforeSandbox = await cancelIfRequested();
+        if (cancelledBeforeSandbox) return cancelledBeforeSandbox;
+        dispatchOwner = 'other';
+        spawnHeteroSandbox({
+          ...heteroParams,
+          agentType: heteroType as 'claude-code' | 'codex',
+          args: heteroExecArgs,
+          jwt: sandboxJwt,
+          marketService,
+          sandbox: sandbox && {
+            cwd: sandbox.cwd,
+            environment: sandbox.environment,
+            mode: sandbox.mode,
+            // The environment's variables, network access, maintenance command
+            // and sources all ride here; dropping it starts the run with none
+            // of them, and nothing reports that they were ignored.
+            specification: sandbox.specification,
+            workingDir: sandbox.workingDir,
+          },
+          workspaceId: deps.workspaceId,
+        }).catch(async (err) => {
+          // Fire-and-forget: execAgent has already returned `autoStarted`, and
+          // the sandbox never reached the point of calling heteroFinish. Drive
+          // the same terminal funnel so the stranded run surfaces an error and
+          // its task is marked failed instead of hanging in `running`.
+          log('execAgent: hetero sandbox spawn failed: %O', err);
+
+          // ...unless the run is demonstrably alive or already finished. This
+          // call is the only dispatch failure that can land AFTER the agent
+          // started, so a rejection here is not by itself evidence that nothing
+          // ran — see `hasHeteroRunStarted`.
+          if (await hasHeteroRunStarted(deps, { operationId, topicId })) return;
+
+          await finalizeHeteroDispatchError(deps, {
+            agentId: resolvedAgentId,
+            assistantMessageId,
+            detail: err instanceof Error ? err.message : String(err),
+            message: 'Hetero sandbox spawn failed',
+            operationId,
+            topicId,
+          }).catch((finalizeErr) =>
+            log('execAgent: sandbox-failure finalize failed: %O', finalizeErr),
+          );
+        });
+      }
+    } catch (error) {
+      const cancelledAfterPreparation = await cancelIfRequested();
+      if (cancelledAfterPreparation) return cancelledAfterPreparation;
+      const detail = error instanceof Error ? error.message : String(error);
+      const terminalReported = await finalizeHeteroDispatchError(deps, {
+        agentId: resolvedAgentId,
+        assistantMessageId,
+        detail,
+        message: 'Heterogeneous agent dispatch failed',
+        operationId,
         topicId,
       });
-
-      // Build only device-relevant context instead of reusing the cloud-sandbox one
-      // (which describes an ephemeral /workspace + pre-cloned repos and would mislead
-      // the agent). The spawned CLI already receives deviceCwd as its actual cwd.
-      const deviceSystemContext = buildRemoteDeviceHeteroContext({
-        agentSystemContext,
-        conversationHistory: resumeSessionId ? undefined : conversationHistory,
-      });
-      const deviceResumeFallbackSystemContext =
-        resumeSessionId && conversationHistory
-          ? buildRemoteDeviceHeteroContext({
-              agentSystemContext,
-              conversationHistory,
-            })
-          : undefined;
-
-      const authorizationError = await resolveDeviceDispatchAuthorizationFailure(
-        deps.db,
-        deps.userId,
-        dispatchDeviceId,
-        dispatchWorkspaceId,
-      );
-      const cancelledBeforeDispatch = await cancelIfRequested();
-      if (cancelledBeforeDispatch) return cancelledBeforeDispatch;
-      dispatchOwner = authorizationError ? 'preparing' : 'device';
-      const result = authorizationError
-        ? {
-            error: 'DEVICE_NOT_FOUND',
-            errorData: authorizationError,
-            notStarted: true,
-            success: false,
-          }
-        : await deviceGateway.dispatchAgentRun({
-            ...heteroParams,
-            agentId: resolvedAgentId,
-            args: heteroExecArgs,
-            cwd: deviceCwd,
-            deviceId: dispatchDeviceId,
-            resumeFallbackSystemContext: deviceResumeFallbackSystemContext,
-            systemContext: deviceSystemContext,
-            // Route to the workspace pool when this is a workspace device; the
-            // operation JWT stays member-scoped (the run belongs to the member).
-            workspaceId: dispatchWorkspaceId,
-            // Topic scope for device-side heteroIngest/heteroFinish. Distinct
-            // from the routing workspace above: a workspace topic on a personal
-            // device still has to write back under `deps.workspaceId`.
-            ingestWorkspaceId: deps.workspaceId,
-          });
-      if (result.notStarted) dispatchOwner = 'preparing';
-      const cancelledAfterDispatch = await cancelIfRequested();
-      if (cancelledAfterDispatch) return cancelledAfterDispatch;
-      if (!result.success) {
-        log('execAgent: hetero device dispatch failed: %s', result.error);
-        const terminalReported = await finalizeHeteroDispatchError(deps, {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          detail: result.error ?? 'Device dispatch failed',
-          deviceRoute: {
-            deviceId: dispatchDeviceId,
-            userId: deps.userId,
-            ...(dispatchWorkspaceId ? { workspaceId: dispatchWorkspaceId } : {}),
-          },
-          errorData: result.errorData,
-          errorType: resolveHeteroDispatchErrorType(result.error),
-          message: humanizeHeteroDispatchError(result.error),
-          operationId,
-          topicId,
-        });
-        return {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          autoStarted: false,
-          createdAt: new Date().toISOString(),
-          error: result.error,
-          errorData: result.errorData,
-          message: 'Hetero agent device dispatch failed',
-          operationId,
-          status: 'error',
-          success: false,
-          terminalReported,
-          timestamp: new Date().toISOString(),
-          topicId,
-          userMessageId: userMessageId ?? parentMessageId ?? '',
-        };
-      }
-
-      // Local CLI hetero agents dispatch to a device just like remote platform
-      // agents, so persist the device route after the dispatch is accepted.
-      // interruptTask uses these fields to find and stop the native process.
-      try {
-        const patched = await deps.topicModel.patchRunningOperation(topicId, operationId, {
-          deviceId: dispatchDeviceId,
-          deviceWorkspaceId: dispatchWorkspaceId,
-          heteroType,
-        });
-        log(
-          'execAgent: patch runningOperation device info=%s deviceId=%s heteroType=%s op=%s',
-          patched,
-          dispatchDeviceId,
-          heteroType,
-          operationId,
-        );
-      } catch (err) {
-        log('execAgent: failed to patch runningOperation with device info: %O', err);
-      }
-    } else {
-      if (!supportsCloudHeterogeneousSandbox(heteroType)) {
-        const message = `${getHeterogeneousAgentTitle(heteroType)} requires a local or connected device; cloud sandbox execution is not supported.`;
-        const terminalReported = await finalizeHeteroDispatchError(deps, {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          detail: message,
-          message,
-          operationId,
-          topicId,
-        });
-        return {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          autoStarted: false,
-          createdAt: new Date().toISOString(),
-          error: message,
-          message,
-          operationId,
-          status: 'error',
-          success: false,
-          terminalReported,
-          timestamp: new Date().toISOString(),
-          topicId,
-          userMessageId: userMessageId ?? parentMessageId ?? '',
-        };
-      }
-
-      // Cloud sandbox path — only for sandbox-provisioned local CLI agents.
-      // Remote agents (openclaw / hermes) always require a bound device.
-      // Lazy-loaded on purpose: `sandboxRunner` pulls the sandbox-service graph
-      // (which eagerly touches server-only ModelRuntime env at module init), so
-      // importing it statically would couple that whole subsystem into every
-      // `aiAgent` import. Only this cloud-CLI branch needs it.
-      const { spawnHeteroSandbox } =
-        await import('@/server/services/heterogeneousAgent/sandboxRunner');
-      // The entitlement rides on the trust token; without it the execution
-      // plane routes to the ephemeral sandbox whatever the request says.
-      const marketService = await deps.getMarketService(
-        sandbox?.claim ? { sandboxStorage: sandbox.claim } : undefined,
-      );
-      // The sandbox authenticates its nested `lh` calls with this JWT. The
-      // narrow `hetero-operation` token (used for the device-dispatch path
-      // above) is rejected by `oidcAuth`, so CC capabilities that hit
-      // user-scoped endpoints — e.g. uploading a `Read`-on-image result to
-      // the file store for thumbnail echo — would 401 and silently drop.
-      // Mint a user-scoped `cli-sandbox` token instead (still `sub: userId`,
-      // ownership-gated on heteroIngest/heteroFinish) with a run-length TTL
-      // so it outlives a multi-hour run.
-      const sandboxJwt = await signUserJWT(deps.userId, '4h');
-      const cancelledBeforeSandboxDispatch = await cancelIfRequested();
-      if (cancelledBeforeSandboxDispatch) return cancelledBeforeSandboxDispatch;
-      // The sandbox completion owner takes over as soon as its spawn is issued.
-      dispatchOwner = 'other';
-      spawnHeteroSandbox({
-        ...heteroParams,
-        agentType: heteroType as 'claude-code' | 'codex',
-        args: heteroExecArgs,
-        jwt: sandboxJwt,
-        marketService,
-        sandbox: sandbox && {
-          cwd: sandbox.cwd,
-          environment: sandbox.environment,
-          mode: sandbox.mode,
-          // The environment's variables, network access, maintenance command
-          // and sources all ride here; dropping it starts the run with none
-          // of them, and nothing reports that they were ignored.
-          specification: sandbox.specification,
-          workingDir: sandbox.workingDir,
-        },
-        workspaceId: deps.workspaceId,
-      }).catch(async (err) => {
-        // Fire-and-forget: execAgent has already returned `autoStarted`, and
-        // the sandbox never reached the point of calling heteroFinish. Drive
-        // the same terminal funnel so the stranded run surfaces an error and
-        // its task is marked failed instead of hanging in `running`.
-        log('execAgent: hetero sandbox spawn failed: %O', err);
-
-        // ...unless the run is demonstrably alive or already finished. This
-        // call is the only dispatch failure that can land AFTER the agent
-        // started, so a rejection here is not by itself evidence that nothing
-        // ran — see `hasHeteroRunStarted`.
-        if (await hasHeteroRunStarted(deps, { operationId, topicId })) return;
-
-        await finalizeHeteroDispatchError(deps, {
-          agentId: resolvedAgentId,
-          assistantMessageId,
-          detail: err instanceof Error ? err.message : String(err),
-          message: 'Hetero sandbox spawn failed',
-          operationId,
-          topicId,
-        }).catch((finalizeErr) =>
-          log('execAgent: sandbox-failure finalize failed: %O', finalizeErr),
-        );
-      });
+      return {
+        agentId: resolvedAgentId,
+        assistantMessageId,
+        autoStarted: false,
+        createdAt: new Date().toISOString(),
+        error: detail,
+        message: detail,
+        operationId,
+        status: 'error',
+        success: false,
+        terminalReported,
+        timestamp: new Date().toISOString(),
+        topicId,
+        userMessageId: userMessageId ?? parentMessageId ?? '',
+      };
     }
   }
 

@@ -4,8 +4,12 @@ import { shouldDropUnsupportedClaudeAssistantPrefill } from '@lobechat/model-run
 import type {
   ChatImageItem,
   ChatTopic,
+  ChatTopicMetadata,
+  CodexForkTarget,
+  ContextSelection,
   ConversationContext,
   HeterogeneousProviderConfig,
+  PageSelection,
   UIChatMessage,
 } from '@lobechat/types';
 import { applyTopicModelToHeterogeneousProvider, resolveAgentAgencyConfig } from '@lobechat/types';
@@ -35,6 +39,10 @@ import { agentByIdSelectors, agentSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
 import { selectRuntimeType } from '@/store/chat/slices/agentRun/actions/dispatch/agentDispatcher';
+import {
+  resolveCodexBranchRun,
+  resolveCodexForkTarget,
+} from '@/store/chat/slices/agentRun/actions/dispatch/codexForkTarget';
 import {
   parseMentionedAgentsFromEditorData,
   parseSelectedSkillsFromEditorData,
@@ -216,14 +224,22 @@ export const resolveHeteroRunContext = (
     legacyAgentWorkingDirectory: agentState.localAgentWorkingDirectoryMap[agentId],
     workspaceScoped,
   });
-  const workingDirectory = topic?.metadata?.workingDirectory || agentWorkingDirectory;
   const heterogeneousProvider = agencyConfig?.heterogeneousProvider;
   const providerBinding = heterogeneousProvider?.authMode === 'api';
+  const thread =
+    context.topicId && context.threadId
+      ? chatStore.threadMaps[context.topicId]?.find((item) => item.id === context.threadId)
+      : undefined;
+  const workingDirectory =
+    thread?.metadata?.workingDirectory ??
+    topic?.metadata?.workingDirectory ??
+    agentWorkingDirectory;
+  const resumeMetadata = (thread?.metadata ?? topic?.metadata) as ChatTopicMetadata | undefined;
 
   // Drops the saved sessionId when its bound cwd disagrees with the current
   // one — without this CC emits "No conversation found with session ID".
   const { cwdChanged, reason, resumeBindingKey, resumeSessionId } = resolveHeteroResume(
-    topic?.metadata,
+    resumeMetadata,
     workingDirectory,
     {
       currentBindingKey:
@@ -250,6 +266,11 @@ export const resolveHeteroRunContext = (
 export const runHeterogeneousFromExistingMessage = async (
   chatStore: ReturnType<typeof useChatStore.getState>,
   params: {
+    codexForkTarget?: CodexForkTarget;
+    /** Captured branch history for retry recovery when navigation changes during preflight. */
+    sourceMessages?: ConversationStore['dbMessages'];
+    contextSelections?: ContextSelection[];
+    pageSelections?: PageSelection[];
     context: ConversationContext;
     /**
      * Start a fresh native session instead of resuming the topic's latest one,
@@ -310,8 +331,24 @@ export const runHeterogeneousFromExistingMessage = async (
     await import('@/store/chat/slices/agentRun/actions/transports/hetero/heterogeneousAgentExecutor');
   await ensureEffectiveAgencyAccess(agentId);
   parentSignal?.throwIfAborted();
-  const { cwdChanged, reason, resumeBindingKey, resumeSessionId, workingDirectory } =
-    resolveHeteroRunContext(chatStore, context, agentId, topicOverride);
+  const runtime = resolveHeteroRunContext(chatStore, context, agentId, topicOverride);
+  const { cwdChanged, reason, resumeBindingKey, workingDirectory } = runtime;
+  let { resumeSessionId } = runtime;
+  let { codexForkTarget } = params;
+  let codexBranchError: string | undefined;
+  if (codexForkTarget) {
+    // An explicit boundary (Fork, or regenerating a started branch turn) forks its own thread.
+    resumeSessionId = codexForkTarget.threadId;
+  } else if (heterogeneousProvider.type === 'codex' && context.topicId && context.threadId) {
+    ({ codexBranchError, codexForkTarget, resumeSessionId } = resolveCodexBranchRun({
+      messageId: parentMessageId,
+      messages: params.sourceMessages ?? chatStore.dbMessagesMap[messageMapKey(context)] ?? [],
+      resumeSessionId,
+      thread: chatStore.threadMaps[context.topicId]?.find(
+        (thread) => thread.id === context.threadId,
+      ),
+    }));
+  }
   if (replayTranscript && !resumeSessionId) {
     throw new Error('Transcript replay needs a resumable CLI session on the topic');
   }
@@ -378,6 +415,11 @@ export const runHeterogeneousFromExistingMessage = async (
 
   const outcome = await executeHeterogeneousAgent(() => useChatStore.getState(), {
     assistantMessageId: assistantMsg.id,
+    userMessageId: parentMessageId,
+    codexBranchError,
+    codexForkTarget,
+    contextSelections: params.contextSelections,
+    pageSelections: params.pageSelections,
     context,
     heterogeneousProvider: effectiveHeterogeneousProvider,
     imageList: imageList?.length ? imageList : undefined,
@@ -411,6 +453,8 @@ interface RegenerateUserMessageSource {
   displayMessages: ConversationStore['displayMessages'];
   hooks: ConversationStore['hooks'];
   readDbMessages: () => ConversationStore['dbMessages'];
+  /** A copied edit topic replays durable tool results and selections through its executor. */
+  replayPersistedHistory?: boolean;
 }
 
 const captureRegenerateUserMessageSource = (
@@ -602,6 +646,14 @@ const regenerateUserMessageFromSource = async (
       workspaceScoped,
     });
 
+    // Native Fork threads inherit history absent from their visible rows. Preserve that
+    // history through an exact native boundary rather than a partial transcript replay.
+    const nativeBranch =
+      heterogeneousProvider?.type === 'codex' && context.threadId && context.topicId
+        ? chatStore.threadMaps[context.topicId]?.find((thread) => thread.id === context.threadId)
+            ?.metadata?.codexForkTarget
+        : undefined;
+
     // ── Gateway mode: trigger server-side regeneration ──
     if (runtimeType === 'gateway') {
       replyStarted = false;
@@ -628,10 +680,11 @@ const regenerateUserMessageFromSource = async (
           heterogeneousProvider?.type === 'codex'
             ? {
                 historyBoundaryMessageId: messageId,
-                systemContext: buildCodexRegenerateContext(
-                  displayMessages.slice(0, currentIndex),
-                  item,
-                ),
+                ...(source.replayPersistedHistory ? { usePersistedHistory: true } : {}),
+                systemContext:
+                  nativeBranch || source.replayPersistedHistory
+                    ? undefined
+                    : buildCodexRegenerateContext(displayMessages.slice(0, currentIndex), item),
               }
             : undefined,
         message: item.content,
@@ -671,6 +724,8 @@ const regenerateUserMessageFromSource = async (
       replyStarted = result.autoStarted;
       if (!replyStarted) {
         await restoreBranch(false);
+        // The rejected placeholder is no longer selected; keep its failure visible separately.
+        if (result.status === 'error') toast.error(result.error ?? result.message);
         settleGenerationEntry(chatStore, operationId);
       }
 
@@ -685,7 +740,21 @@ const regenerateUserMessageFromSource = async (
     // Claude Code retains its existing session-resume behavior.
     if (runtimeType === 'hetero' && heterogeneousProvider) {
       replyStarted = false;
+      const nativeSource = dbMessages.find((message) => message.id === messageId) ?? item;
+      // A started branch turn forks its own thread before that turn. An unstarted one
+      // (no native boundary yet) lets the branch resolver resume or re-fork from the origin.
+      const codexForkTarget =
+        heterogeneousProvider.type === 'codex' &&
+        context.threadId &&
+        nativeSource.metadata?.codexTurnId &&
+        nativeSource.metadata.heteroSessionId
+          ? resolveCodexForkTarget([nativeSource], messageId, 'before')
+          : undefined;
       await runHeterogeneousFromExistingMessage(chatStore, {
+        codexForkTarget,
+        sourceMessages: dbMessages,
+        contextSelections: nativeSource.metadata?.contextSelections,
+        pageSelections: nativeSource.metadata?.pageSelections,
         context,
         heterogeneousProvider,
         // Forward the original user message's images so regenerate re-runs
@@ -694,12 +763,11 @@ const regenerateUserMessageFromSource = async (
         // imageList off the persisted user message; this path must too).
         imageList: item.imageList,
         freshSession:
-          heterogeneousProvider.type === 'codex'
+          heterogeneousProvider.type === 'codex' && !nativeBranch
             ? {
-                systemContext: buildCodexRegenerateContext(
-                  displayMessages.slice(0, currentIndex),
-                  item,
-                ),
+                systemContext: source.replayPersistedHistory
+                  ? undefined
+                  : buildCodexRegenerateContext(displayMessages.slice(0, currentIndex), item),
               }
             : undefined,
         onExecutionStart: () => {
@@ -735,6 +803,76 @@ const regenerateUserMessageFromSource = async (
   }
 };
 
+/** A replacement prompt for an edited Codex user message. */
+export interface CodexMessageEdit {
+  content: string;
+  /** Updated rich editor state; omitted keeps the original message's state. */
+  editorData?: Record<string, unknown>;
+  /** Called once the branch is persisted, before the replacement run starts. */
+  onAccepted?: () => void;
+}
+
+/**
+ * Edit-and-resend for a Codex user message. Codex cannot rewind its native
+ * thread, so the server branches the conversation up to the message into a new
+ * topic carrying the edited prompt, and that topic's ordinary regenerate path
+ * runs it in a fresh session (the executor replays the copied history). The
+ * source topic and its native session are left untouched.
+ *
+ * Rejects before the branch exists so the editor keeps the draft; after that
+ * the run reports its own failures.
+ */
+const editCodexUserMessage = async (
+  messageId: string,
+  source: RegenerateUserMessageSource,
+  edit: CodexMessageEdit,
+) => {
+  const { context, hooks } = source;
+  const chatStore = useChatStore.getState();
+  if (!context.agentId || !context.topicId)
+    throw new Error(t('messageAction.codexEdit.sourceUnavailable', { ns: 'chat' }));
+
+  const branch = await topicService
+    .branchTopicAtMessage({
+      content: edit.content,
+      editorData: edit.editorData,
+      messageId,
+      title: edit.content.slice(0, 80),
+      topicId: context.topicId,
+    })
+    .catch((error: unknown) => {
+      // Transport/parse errors are not user-facing; the editor toasts this and keeps the draft.
+      console.error('[Codex edit] Could not create the branch topic:', error);
+      throw new Error(t('messageAction.codexEdit.branchFailed', { ns: 'chat' }), { cause: error });
+    });
+  edit.onAccepted?.();
+
+  await chatStore.refreshTopic();
+  if (context.isolatedTopic) {
+    // Embedded hosts own their visible topic independently of global navigation.
+    hooks.onTopicCreated?.(branch.topicId);
+  } else {
+    await chatStore.switchTopic(branch.topicId, {
+      onlyIfActiveAgentId: context.agentId,
+      onlyIfActiveTopicIn: [context.topicId],
+    });
+  }
+
+  const target: ConversationContext = { ...context, threadId: null, topicId: branch.topicId };
+  const key = messageMapKey(target);
+  await chatStore.prefetchMessages(target);
+  // The run outlives the editor; it surfaces its own errors.
+  void regenerateUserMessageFromSource(branch.messageId, {
+    replayPersistedHistory: true,
+    context: target,
+    displayMessages: useChatStore.getState().messagesMap[key] ?? [],
+    hooks,
+    readDbMessages: () => useChatStore.getState().dbMessagesMap[key] ?? [],
+  }).catch((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error));
+  });
+};
+
 /**
  * Generation Actions
  *
@@ -755,7 +893,6 @@ export interface GenerationAction {
    * pending user message, so the user can send it now or delete the topic.
    */
   cancelScheduledRun: () => Promise<void>;
-
   /**
    * Clear all operations
    */
@@ -805,6 +942,18 @@ export interface GenerationAction {
   delAndResendThreadMessage: (messageId: string) => Promise<void>;
 
   /**
+   * Creates an isolated Codex branch at the selected native turn.
+   *
+   * Use when:
+   * - Branching from a saved Codex user or assistant message.
+   * Expects:
+   * - A saved source message with native provenance and an idle conversation.
+   * Returns:
+   * - A promise for creation and, for a user message, its replay in the child.
+   */
+  forkCodexMessage: (messageId: string) => Promise<void>;
+
+  /**
    * Start (or reuse) the long-lived `autoRetryPending` operation for a turn so
    * the input/turn stays in its loading state during the auto-retry countdown.
    * Idempotent: reuses an existing still-running wait op for the scope.
@@ -848,9 +997,10 @@ export interface GenerationAction {
   regenerateAssistantMessage: (messageId: string) => Promise<void>;
 
   /**
-   * Regenerate a user message
+   * Regenerate a user message. With `edit`, resend an edited Codex prompt in a
+   * branched topic instead (see {@link editCodexUserMessage}).
    */
-  regenerateUserMessage: (messageId: string) => Promise<void>;
+  regenerateUserMessage: (messageId: string, edit?: CodexMessageEdit) => Promise<void>;
 
   /**
    * Resend a thread message
@@ -1471,8 +1621,16 @@ export const generationSlice: StateCreator<
     await get().regenerateUserMessage(userId);
   },
 
-  regenerateUserMessage: async (messageId: string) =>
-    regenerateUserMessageFromSource(messageId, captureRegenerateUserMessageSource(get)),
+  forkCodexMessage: async (messageId) => {
+    const { forkCodexMessage } = await import('./forkCodexMessage');
+    await forkCodexMessage(get, messageId);
+  },
+
+  regenerateUserMessage: async (messageId: string, edit?: CodexMessageEdit) => {
+    const source = captureRegenerateUserMessageSource(get);
+    if (edit) return editCodexUserMessage(messageId, source, edit);
+    return regenerateUserMessageFromSource(messageId, source);
+  },
 
   resendThreadMessage: async (messageId: string) => {
     // Resend is essentially regenerating the user message in thread context

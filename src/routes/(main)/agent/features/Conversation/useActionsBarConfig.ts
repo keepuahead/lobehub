@@ -3,13 +3,14 @@
 import { useMemo } from 'react';
 
 import { type ActionsBarConfig, type MessageActionSlot } from '@/features/Conversation/types';
+import { useCanEditCodexMessage } from '@/hooks/useCanEditCodexMessage';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 
 /**
  * Hetero-agent (Claude Code / Codex) sessions keep the menu minimal — copy +
  * delete — because the external runtime owns the assistant message lifecycle
- * (edit / branching / translate / share don't apply).
+ * (assistant edit / branching / translate / share don't apply).
  * Regenerate was previously excluded too; Codex now uses the existing
  * heterogeneous rerun path, which preserves the user prompt and attachments.
  * `select` remains available because forwarding / batch deletion is handled by
@@ -25,6 +26,17 @@ const HETERO_USER: { bar: MessageActionSlot[]; menu: MessageActionSlot[] } = {
   menu: ['restoreToInput', 'copy', 'divider', 'select', 'divider', 'del'],
 };
 
+const CODEX_USER: { bar: MessageActionSlot[]; menu: MessageActionSlot[] } = {
+  bar: ['copy'],
+  menu: ['restoreToInput', 'copy', 'branching', 'divider', 'select', 'divider', 'del'],
+};
+
+/** Edited Codex prompts use the supported target while retaining native Fork. */
+const EDITABLE_CODEX_USER: typeof CODEX_USER = {
+  bar: ['edit', ...CODEX_USER.bar],
+  menu: ['edit', ...CODEX_USER.menu],
+};
+
 const HETERO_ASSISTANT: { bar: MessageActionSlot[]; menu: MessageActionSlot[] } = {
   bar: ['copy'],
   menu: ['copy', 'divider', 'select', 'divider', 'del'],
@@ -33,7 +45,7 @@ const HETERO_ASSISTANT: { bar: MessageActionSlot[]; menu: MessageActionSlot[] } 
 /** Codex replies can reuse the existing heterogeneous regeneration path. */
 const CODEX_ASSISTANT: typeof HETERO_ASSISTANT = {
   bar: ['copy', 'regenerate'],
-  menu: ['regenerate', ...HETERO_ASSISTANT.menu],
+  menu: ['regenerate', 'copy', 'branching', 'divider', 'select', 'divider', 'del'],
 };
 
 /**
@@ -49,6 +61,8 @@ const CODEX_ASSISTANT: typeof HETERO_ASSISTANT = {
  * - Runtime-specific overrides, or native message defaults via an empty object.
  */
 export const useActionsBarConfig = (): ActionsBarConfig => {
+  const agentId = useAgentStore((s) => s.activeAgentId);
+  const canEditCodex = useCanEditCodexMessage(agentId);
   const isHeteroAgent = useAgentStore(agentSelectors.isCurrentAgentHeterogeneous);
 
   const providerType = useAgentStore(agentSelectors.currentAgentHeterogeneousProviderType);
@@ -58,10 +72,15 @@ export const useActionsBarConfig = (): ActionsBarConfig => {
       return {
         assistant: providerType === 'codex' ? CODEX_ASSISTANT : HETERO_ASSISTANT,
         assistantGroup: providerType === 'codex' ? CODEX_ASSISTANT : HETERO_ASSISTANT,
-        user: HETERO_USER,
+        user:
+          providerType === 'codex'
+            ? canEditCodex
+              ? EDITABLE_CODEX_USER
+              : CODEX_USER
+            : HETERO_USER,
       };
     }
 
     return {};
-  }, [isHeteroAgent, providerType]);
+  }, [canEditCodex, isHeteroAgent, providerType]);
 };
