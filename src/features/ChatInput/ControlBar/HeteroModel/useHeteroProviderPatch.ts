@@ -5,6 +5,18 @@ import { useCallback } from 'react';
 import { useAgentStore } from '@/store/agent';
 import { useChatStore } from '@/store/chat';
 
+/**
+ * Persist model, effort and speed selections to the active topic or Agent default.
+ *
+ * Use when:
+ * - A heterogeneous model picker changes a supported runtime selection.
+ *
+ * Expects:
+ * - The active topic owns its pins; absent topics use the Agent configuration.
+ *
+ * Returns:
+ * - An async writer that preserves the scope of each selection.
+ */
 export const useHeteroProviderPatch = ({
   agentId,
   enabled,
@@ -22,13 +34,17 @@ export const useHeteroProviderPatch = ({
     async (selection: HeteroSelection) => {
       if (!enabled || !agentId || !provider) return;
 
-      // Model and effort are topic-scoped once a topic exists (the topic keeps
-      // its own pins, see `ChatTopic.model` / `ChatTopicMetadata.heteroEffort`);
-      // the remaining dimensions (mode, speed) still write the shared agent config.
-      const { effort, model, ...agentSelection } = selection;
+      // Model, effort and speed are topic-scoped once a topic exists.
+      // Mode remains in the shared Agent configuration.
+      const { effort, model, speed, ...agentSelection } = selection;
       if (activeTopicId) {
-        if (model !== undefined || effort !== undefined) {
-          await updateTopicHeteroPin(activeTopicId, { effort, model, provider: provider.type });
+        if (model !== undefined || effort !== undefined || speed !== undefined) {
+          await updateTopicHeteroPin(activeTopicId, {
+            effort,
+            model,
+            provider: provider.type,
+            speed,
+          });
         }
         if (Object.keys(agentSelection).length === 0) return;
       }

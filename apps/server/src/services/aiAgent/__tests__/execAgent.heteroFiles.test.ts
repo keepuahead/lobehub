@@ -1228,6 +1228,39 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     complete.mockRestore();
   });
 
+  /** @example A raw document uploaded by a bot remains required on native continuation. */
+  it('fails safely when a native continuation cannot load its raw document', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockIngestAttachment.mockResolvedValue({
+      fileId: 'raw-document',
+      isImage: false,
+      isVideo: false,
+      resolvedUrl: 'https://files.test/document.txt',
+    });
+    mockMessageQuery.mockRejectedValueOnce(new Error('Current document unavailable'));
+    const complete = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    // ROOT CAUSE:
+    // The request has raw files but no fileIds; only resolved attachments identify the new document.
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Read the attachment',
+      files: [{ mimeType: 'text/plain', name: 'document.txt', url: 'https://im/document.txt' }],
+    });
+    /** @example A missing current document never silently becomes a text-only run. */
+    expect(result.success).toBe(false);
+    /** @example The device is not dispatched with incomplete input. */
+    expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    complete.mockRestore();
+  });
+
   /** @example Native resume can fall back to fresh execution without losing older images. */
   it('retains ancestor images in the payload used by native resume fallback', async () => {
     Object.assign(heteroAgentConfig.agencyConfig, {

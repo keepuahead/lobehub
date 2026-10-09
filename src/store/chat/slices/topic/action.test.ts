@@ -491,6 +491,22 @@ describe('topic action', () => {
       });
     };
 
+    /** @example A Standard selection persists independently of model and effort. */
+    it('persists the topic speed pin without replacing effort', async () => {
+      const spy = vi.spyOn(topicService, 'updateTopicMetadata').mockResolvedValue(undefined);
+      seed();
+      // ROOT CAUSE:
+      // The topic pin writer accepted only model/effort and silently discarded speed-only updates.
+      await act(async () => {
+        await useChatStore.getState().updateTopicHeteroPin('hetero-topic', {
+          provider: 'codex',
+          speed: 'default',
+        });
+      });
+      /** @example Speed-only updates use the existing serialized metadata writer. */
+      expect(spy).toHaveBeenCalledWith('hetero-topic', { heteroSpeed: 'default' });
+    });
+
     it('writes model and effort reset in one request', async () => {
       const { result } = renderHook(() => useChatStore());
       const spy = vi.spyOn(topicService, 'updateTopicModel').mockResolvedValue(undefined as any);

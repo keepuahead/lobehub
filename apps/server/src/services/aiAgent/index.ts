@@ -1335,7 +1335,8 @@ export class AiAgentService {
             !turn.userMessageId ||
             params.contextSelections?.length ||
             params.pageSelections?.length ||
-            params.fileIds?.length,
+            params.fileIds?.length ||
+            runAttachments.fileIds?.length,
           ),
           runAttachments,
           selfMessageIds,
