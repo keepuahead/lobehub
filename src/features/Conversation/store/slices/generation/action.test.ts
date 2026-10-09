@@ -1944,6 +1944,63 @@ describe('Generation Actions', () => {
       },
     );
 
+    /** @example A failed destination fetch keeps an isolated editor open and retryable. */
+    it.runIf(providerType === 'codex')(
+      'keeps the edit until the copied message is available for resend',
+      async () => {
+        const target = { agentId: 'session-1', threadId: null, topicId: 'branch-topic' };
+        const onTopicCreated = vi.fn();
+        const onAccepted = vi.fn();
+        const switchTopic = vi.fn();
+        await setupHeteroChatStore({
+          dbMessagesMap: {},
+          messagesMap: {},
+          prefetchMessages: vi.fn().mockResolvedValue(undefined),
+          refreshTopic: vi.fn(),
+          switchTopic,
+        });
+        vi.mocked(topicService.branchTopicAtMessage).mockResolvedValue({
+          messageId: 'branch-user',
+          topicId: 'branch-topic',
+        });
+        const store = createStore({
+          context: {
+            agentId: 'session-1',
+            isolatedTopic: true,
+            threadId: null,
+            topicId: 'topic-1',
+          },
+          hooks: { onTopicCreated },
+        });
+        // ROOT CAUSE:
+        // Background prefetch swallows network errors; an empty destination made resend silently
+        // return after onAccepted closed the editor. Acceptance must wait for the copied message.
+        await expect(
+          store.getState().regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted }),
+        ).rejects.toThrow('Could not load the new topic. Your edit is kept; try sending again.');
+        /** @example Neither host navigation nor draft acceptance happens on incomplete context. */
+        expect(onAccepted).not.toHaveBeenCalled();
+        expect(onTopicCreated).not.toHaveBeenCalled();
+        expect(switchTopic).not.toHaveBeenCalled();
+        expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
+
+        const { useChatStore } = await import('@/store/chat');
+        const rows = [{ content: 'fixed prompt', id: 'branch-user', role: 'user' as const }];
+        const state = useChatStore.getState();
+        vi.mocked(state.prefetchMessages).mockImplementation(async () => {
+          state.messagesMap[messageMapKey(target)] = rows;
+          state.dbMessagesMap[messageMapKey(target)] = rows;
+        });
+        await store
+          .getState()
+          .regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted });
+        /** @example A retry dispatches the edited prompt once the destination fetch succeeds. */
+        await vi.waitFor(() => expect(executeHeterogeneousAgentSpy).toHaveBeenCalledTimes(1));
+        expect(onAccepted).toHaveBeenCalledTimes(1);
+        expect(onTopicCreated).toHaveBeenCalledWith('branch-topic');
+      },
+    );
+
     it.runIf(providerType === 'codex')(
       'reports a friendly error and keeps the draft when the branch cannot be created',
       async () => {

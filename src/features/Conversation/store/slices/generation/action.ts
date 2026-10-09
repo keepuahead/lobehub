@@ -574,7 +574,7 @@ export interface CodexMessageEdit {
   content: string;
   /** Updated rich editor state; omitted keeps the original message's state. */
   editorData?: Record<string, unknown>;
-  /** Called once the branch is persisted, before the replacement run starts. */
+  /** Called once the copied message is ready, before the replacement run starts. */
   onAccepted?: () => void;
 }
 
@@ -585,8 +585,8 @@ export interface CodexMessageEdit {
  * runs it in a fresh session (the executor replays the copied history). The
  * source topic and its native session are left untouched.
  *
- * Rejects before the branch exists so the editor keeps the draft; after that
- * the run reports its own failures.
+ * Rejects until the copied message is ready so the editor keeps the draft;
+ * after acceptance, the run reports its own failures.
  */
 const editCodexUserMessage = async (
   messageId: string,
@@ -611,6 +611,17 @@ const editCodexUserMessage = async (
       console.error('[Codex edit] Could not create the branch topic:', error);
       throw new Error(t('messageAction.codexEdit.branchFailed', { ns: 'chat' }), { cause: error });
     });
+  const target: ConversationContext = { ...context, threadId: null, topicId: branch.topicId };
+  const key = messageMapKey(target);
+  await chatStore.prefetchMessages(target);
+  const displayMessages = useChatStore.getState().messagesMap[key] ?? [];
+  // Background warming may swallow a failed fetch or skip an in-flight request.
+  // Keep the source editor until the copied user message can actually start a run.
+  if (
+    !displayMessages.some((message) => message.id === branch.messageId && message.role === 'user')
+  ) {
+    throw new Error(t('messageAction.codexEdit.prepareFailed', { ns: 'chat' }));
+  }
   edit.onAccepted?.();
 
   await chatStore.refreshTopic();
@@ -624,13 +635,10 @@ const editCodexUserMessage = async (
     });
   }
 
-  const target: ConversationContext = { ...context, threadId: null, topicId: branch.topicId };
-  const key = messageMapKey(target);
-  await chatStore.prefetchMessages(target);
   // The run outlives the editor; it surfaces its own errors.
   void regenerateUserMessageFromSource(branch.messageId, {
     context: target,
-    displayMessages: useChatStore.getState().messagesMap[key] ?? [],
+    displayMessages,
     hooks,
     readDbMessages: () => useChatStore.getState().dbMessagesMap[key] ?? [],
   }).catch((error: unknown) => {

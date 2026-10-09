@@ -843,6 +843,8 @@ export default {
     'Sends in a new topic; the original stays as it is. Files Codex already changed are not reverted.',
   'messageAction.codexEdit.cannotSubmit':
     'This conversation cannot accept an edited message right now',
+  'messageAction.codexEdit.prepareFailed':
+    'Could not load the new topic. Your edit is kept; try sending again.',
   'messageAction.codexEdit.sourceUnavailable': 'The source conversation or agent is unavailable',
   'messageAction.collapse': 'Collapse Message',
   'messageAction.continueGeneration': 'Continue Generating',
