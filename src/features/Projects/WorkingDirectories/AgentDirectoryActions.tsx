@@ -22,7 +22,7 @@ export function AgentDirectoryActions({
   agentId: string;
   path: string;
   topics: ChatTopic[];
-  onLegacyStart: () => Promise<void>;
+  onLegacyStart: (projectWorkingDirectoryId?: string) => Promise<void>;
   /** Render only the binding/menu affordance; the caller provides its own start action. */
   hideStartAction?: boolean;
 }) {
@@ -46,13 +46,14 @@ export function AgentDirectoryActions({
         directory.path.replace(/[\\/]+$/, '') === path.replace(/[\\/]+$/, ''),
   );
   const [pending, setPending] = useState(false);
-  // "+" only opens the new-topic composer for this group; it must never create
-  // a topic. The topic is persisted once the user sends the first message, so
-  // clicking "+" leaves no empty "untitled" row behind in the project.
-  const start = async () => {
+  // "+" opens the new-topic composer for this group; it must never create a
+  // topic. The row is persisted on the first message, which is also when the
+  // directory is applied — the caller stages it so the deferred topic is still
+  // born inside the project instead of dropping into a path-only conversation.
+  const start = async (projectWorkingDirectoryId?: string) => {
     setPending(true);
     try {
-      await onLegacyStart();
+      await onLegacyStart(projectWorkingDirectoryId);
     } catch (error) {
       console.error('Failed to start directory conversation', error);
       toast.error(error instanceof Error ? error.message : t('operationFailed', { ns: 'common' }));
@@ -115,7 +116,7 @@ export function AgentDirectoryActions({
           title={t('directories.start')}
           onClick={(e) => {
             e.stopPropagation();
-            void start();
+            void start(bindings[0]?.id);
           }}
         />
       )}
