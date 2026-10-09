@@ -78,6 +78,7 @@ import {
 import { dispatchHeteroAgent } from './pipeline/heteroDispatch';
 import { buildOperationInitRequest, runOperationInit } from './pipeline/operationInit';
 import { createHistoryMessagesLoader } from './pipeline/operationPrep';
+import { type PrecreatedTopicDeps, resolvePrecreatedTopicConfig } from './pipeline/precreatedTopic';
 import { resolveRunAgentConfig } from './pipeline/resolveRunAgentConfig';
 import { traceSendStage } from './pipeline/sendTracing';
 import { startOperation } from './pipeline/startOperation';
@@ -441,26 +442,22 @@ export class AiAgentService {
     return agentConfig;
   }
 
+  /** Deps shared by every pre-created topic, so its snapshot matches `setupTurn`'s. */
+  private precreatedTopicDeps(): PrecreatedTopicDeps {
+    return {
+      db: this.db,
+      resolveAgentConfigOrThrow: (id) => this.resolveAgentConfigOrThrow(id),
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    };
+  }
+
   /** Resolve caller model policy before a pre-created topic permanently pins its model. */
-  private async resolvePrecreatedTopicConfig(
+  private resolvePrecreatedTopicConfig(
     identifier: string,
     overrides?: { model?: string; provider?: string },
   ) {
-    const { agentConfig } = await resolveRunAgentConfig(
-      {
-        db: this.db,
-        resolveAgentConfigOrThrow: (id) => this.resolveAgentConfigOrThrow(id),
-        userId: this.userId,
-        workspaceId: this.workspaceId,
-      },
-      {
-        identifier,
-        modelOverride: overrides?.model,
-        providerOverride: overrides?.provider,
-        throwIfExecutionAborted: async () => {},
-      },
-    );
-    return agentConfig;
+    return resolvePrecreatedTopicConfig(this.precreatedTopicDeps(), identifier, overrides);
   }
 
   /**
@@ -1602,6 +1599,7 @@ export class AiAgentService {
         },
         runContext,
         {
+          acceptsFileWorks: params.acceptsFileWorks,
           acceptsMemberRuntimeEnd: params.acceptsMemberRuntimeEnd,
           approvalClaim,
           approvalSourceOperationId,

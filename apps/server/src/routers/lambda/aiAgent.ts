@@ -552,9 +552,10 @@ export const dispatchClaimedAgentIntervention = async (
    * `acceptsMemberRuntimeEnd`: the resolving client's own declaration when that
    * client is the one subscribing to the continuation (the Web source bridge).
    * Left unset for a resolver that isn't (token Review), so the continuation
-   * inherits the parked operation's declaration.
+   * inherits the parked operation's declaration. `acceptsFileWorks` follows
+   * the same rule.
    */
-  options: { acceptsMemberRuntimeEnd?: boolean } = {},
+  options: { acceptsFileWorks?: boolean; acceptsMemberRuntimeEnd?: boolean } = {},
 ): Promise<{ execution?: ExecAgentResult; status: AgentInterventionReviewStatus }> => {
   const { runtimeAction } = resolution;
   let execution: ExecAgentResult | undefined;
@@ -638,6 +639,7 @@ export const dispatchClaimedAgentIntervention = async (
             const skipped = customAction.type === 'skipped';
             execution = await ctx.aiAgentService.execAgent({
               agentId: runtimeAction.agentId,
+              acceptsFileWorks: options.acceptsFileWorks,
               acceptsMemberRuntimeEnd: options.acceptsMemberRuntimeEnd,
               approvalResolutionRequestId: resolution.resolutionRequestId,
               approvalSourceOperationId: runtimeAction.operationId,
@@ -674,6 +676,7 @@ export const dispatchClaimedAgentIntervention = async (
           const [singleDecision] = runtimeAction.decisions;
           execution = await ctx.aiAgentService.execAgent({
             agentId: runtimeAction.agentId,
+            acceptsFileWorks: options.acceptsFileWorks,
             acceptsMemberRuntimeEnd: options.acceptsMemberRuntimeEnd,
             approvalResolutionRequestId: resolution.resolutionRequestId,
             approvalSourceOperationId: runtimeAction.operationId,
@@ -696,6 +699,7 @@ export const dispatchClaimedAgentIntervention = async (
         case 'resume_tool_result': {
           execution = await ctx.aiAgentService.execAgent({
             agentId: runtimeAction.agentId,
+            acceptsFileWorks: options.acceptsFileWorks,
             acceptsMemberRuntimeEnd: options.acceptsMemberRuntimeEnd,
             approvalResolutionRequestId: resolution.resolutionRequestId,
             approvalSourceOperationId: runtimeAction.operationId,
@@ -1055,6 +1059,14 @@ const StartExecutionSchema = z.object({
 const acceptsMemberRuntimeEndOf = (streamFeatures: string[] | undefined): boolean =>
   streamFeatures?.includes('member_runtime_end') ?? false;
 
+/**
+ * Whether the calling client declared it renders `file` Works in pushed
+ * snapshots (`streamFeatures`). Same boolean contract as
+ * {@link acceptsMemberRuntimeEndOf}.
+ */
+const acceptsFileWorksOf = (streamFeatures: string[] | undefined): boolean =>
+  streamFeatures?.includes('file_works') ?? false;
+
 /** A client's declaration that it can run relayed LLM attempts (`agent_llm_relay`). */
 const LlmExecutorSchema = z.object({
   capabilities: z.array(z.string()).max(16),
@@ -1175,7 +1187,8 @@ const ExecAgentSchema = z
     /**
      * Gateway stream features the calling client handles. `member_runtime_end`:
      * a group member's terminal arrives on the supervisor's channel under that
-     * name instead of `agent_runtime_end`. Free-form strings so an older server
+     * name instead of `agent_runtime_end`. `file_works`: pushed snapshots may
+     * carry `file` Work summaries. Free-form strings so an older server
      * ignores features it does not know rather than rejecting the run.
      */
     streamFeatures: z.array(z.string()).optional(),
@@ -1387,7 +1400,7 @@ export const bridgeLegacyResumeToSourceIntervention = async (
   },
   ctx: AgentInterventionDispatchContext,
   /** Forwarded to {@link dispatchClaimedAgentIntervention}; see its `options`. */
-  options: { acceptsMemberRuntimeEnd?: boolean } = {},
+  options: { acceptsFileWorks?: boolean; acceptsMemberRuntimeEnd?: boolean } = {},
 ): Promise<ExecAgentResult | undefined> => {
   const {
     messageModel,
@@ -2549,11 +2562,15 @@ export const aiAgentRouter = router({
           resumeToolResult,
         },
         ctx,
-        { acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures) },
+        {
+          acceptsFileWorks: acceptsFileWorksOf(input.streamFeatures),
+          acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures),
+        },
       );
       if (bridged) return bridged;
 
       const result = await ctx.aiAgentService.execAgent({
+        acceptsFileWorks: acceptsFileWorksOf(input.streamFeatures),
         acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures),
         heterogeneousFreshSession: input.heterogeneousFreshSession,
         signal,
@@ -2726,6 +2743,7 @@ export const aiAgentRouter = router({
           workspaceId: ctx.workspaceId,
         });
         const result = await ctx.aiAgentService.execAgent({
+          acceptsFileWorks: acceptsFileWorksOf(task.streamFeatures),
           acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(task.streamFeatures),
           clientProtocol: task.clientProtocol,
           includeFinalState: task.includeFinalState,
@@ -3679,6 +3697,7 @@ export const aiAgentRouter = router({
       }
 
       const dispatch = await dispatchClaimedAgentIntervention(resolution, ctx, {
+        acceptsFileWorks: acceptsFileWorksOf(input.streamFeatures),
         acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures),
       });
       return {
