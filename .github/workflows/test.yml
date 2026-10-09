@@ -75,6 +75,11 @@ jobs:
       - name: Install deps
         run: pnpm install
 
+      - name: Generate and verify server translations
+        run: |
+          bun run i18n:server
+          bunx vitest run --config scripts/serverI18n/vitest.config.ts --silent=passed-only
+
       - name: Install CLI deps
         run: pnpm install
         working-directory: apps/cli
@@ -208,6 +213,11 @@ jobs:
 
       - name: Install deps
         run: pnpm install
+
+      - name: Generate and verify server translations
+        run: |
+          bun run i18n:server
+          bunx vitest run --config scripts/serverI18n/vitest.config.ts --silent=passed-only
 
       - name: Run tests
         run: bunx vitest --coverage --silent='passed-only' --reporter=default --project app --shard=${{ matrix.shard }}/3
@@ -391,6 +401,11 @@ jobs:
 
       - name: Install deps
         run: pnpm install
+
+      - name: Generate and verify server translations
+        run: |
+          bun run i18n:server
+          bunx vitest run --config scripts/serverI18n/vitest.config.ts --silent=passed-only
 
       - name: Test Server Coverage
         run: bunx vitest --coverage --silent='passed-only' --reporter=default --coverage.reportsDirectory=./apps/server/coverage --project server --shard=${{ matrix.shard }}/2
