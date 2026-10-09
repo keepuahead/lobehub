@@ -159,6 +159,25 @@ export const traceServerGraph = async (
 
 /** Missing workspace symlinks must not make source packages disappear from analysis. */
 export const addWorkspacePaths = async (root: string, options: ts.CompilerOptions) => {
+  let rootManifest: {
+    dependencies?: Record<string, string>;
+    overrides?: Record<string, string>;
+    pnpm?: { overrides?: Record<string, string> };
+  } = {};
+  try {
+    rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const aliases = new Map<string, string[]>();
+  for (const [name, value] of Object.entries({
+    ...rootManifest.dependencies,
+    ...rootManifest.overrides,
+    ...rootManifest.pnpm?.overrides,
+  })) {
+    const target = /^workspace:(.+)@[^@]+$/.exec(value)?.[1];
+    if (target) aliases.set(target, [...(aliases.get(target) ?? []), name]);
+  }
   const visit = async (directory: string) => {
     const entries = await readdir(directory, { withFileTypes: true });
     if (entries.some((entry) => entry.name === 'package.json')) {
@@ -166,18 +185,21 @@ export const addWorkspacePaths = async (root: string, options: ts.CompilerOption
         name: string;
         exports?: Record<string, string | { types?: string; default?: string }>;
       };
+      const names = [...(aliases.get(manifest.name) ?? [])];
       try {
         await access(path.join(root, 'node_modules', manifest.name, 'package.json'));
-        return;
       } catch {
-        /* Resolve absent workspace links from their declared exports. */
+        names.push(manifest.name);
       }
+      if (!names.length) return;
       for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
         const value = typeof target === 'string' ? target : (target.types ?? target.default);
         if (!value) throw new Error(`Unsupported workspace export: ${manifest.name}/${subpath}`);
-        const name = manifest.name + (subpath === '.' ? '' : subpath.slice(1));
-        options.paths ??= {};
-        options.paths[name] ??= [path.resolve(directory, value)];
+        for (const packageName of names) {
+          const name = packageName + (subpath === '.' ? '' : subpath.slice(1));
+          options.paths ??= {};
+          options.paths[name] ??= [path.resolve(directory, value)];
+        }
       }
       return;
     }

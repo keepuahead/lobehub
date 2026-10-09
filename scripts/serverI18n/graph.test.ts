@@ -113,3 +113,26 @@ it('rejects app-local runtime declarations that could hide translation calls', a
     'Cannot trace workspace runtime',
   );
 });
+
+it('resolves declared workspace aliases even when installed links point at a stub', async () => {
+  const root = await fixture({
+    'package.json': JSON.stringify({
+      dependencies: { '@example/copy': 'workspace:@example/implementation@*' },
+    }),
+    'entry.ts': "export { render } from '@example/copy/details';",
+    'node_modules/@example/copy/package.json': JSON.stringify({
+      name: '@example/copy',
+      exports: { '.': './index.ts' },
+    }),
+    'node_modules/@example/copy/index.ts': 'export {};',
+    'packages/copy/package.json': JSON.stringify({
+      name: '@example/implementation',
+      exports: { './details': { default: './src/details.ts' } },
+    }),
+    'packages/copy/src/details.ts': 'export const render = () => "copy";',
+  });
+  const options: ts.CompilerOptions = { moduleResolution: ts.ModuleResolutionKind.Bundler };
+  await addWorkspacePaths(root, options);
+  const graph = await traceServerGraph(root, [path.join(root, 'entry.ts')], options);
+  expect(graph.files.map((file) => path.basename(file))).toContain('details.ts');
+});
