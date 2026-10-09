@@ -323,6 +323,49 @@ describe('topicComment replicas', () => {
     expect(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY]).toBeUndefined();
   });
 
+  it('does not paint a warmup reply that lands after the cache scope changed', async () => {
+    // The warmup passes the scope it captured to every replacement, not only the
+    // root feed: the reply fetched for a root under one identity must be rejected
+    // when the identity changes before it lands, so it can neither paint nor
+    // persist into the new partition.
+    let resolveReplies: ((page: unknown) => void) | undefined;
+    listThreadsSpy.mockResolvedValue({ items: [thread('root-1', 1)], nextCursor: null });
+    listRepliesSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveReplies = resolve;
+        }),
+    );
+
+    const prefetch = useTopicCommentStore.getState().prefetchTopicComments('topic-1');
+    await waitFor(() => expect(resolveReplies).toBeDefined());
+
+    // The root feed was already replaced under the identity it was fetched for,
+    // and the reply prefetch it triggered is the request now in flight.
+    expect(ids(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY])).toEqual(['root-1']);
+
+    const nextScope = `topic-user-${randomUUID()}:personal`;
+    useScope(nextScope);
+
+    await act(async () => {
+      resolveReplies!({
+        items: [comment('reply-1', { parentCommentId: 'root-1' })],
+        nextCursor: null,
+        total: 1,
+      });
+      await prefetch;
+    });
+
+    expect(useTopicCommentStore.getState().replyFeedMap['root-1']).toBeUndefined();
+    await waitFor(async () => {
+      const row = await topicCommentReplyResource.storage!.get({
+        queryKey: 'root-1',
+        scope: nextScope,
+      });
+      expect(row).toBeUndefined();
+    });
+  });
+
   it('keeps one comment by id in the detail view and drops it from view and storage', async () => {
     act(() => useTopicCommentStore.getState().upsertTopicCommentDetail(comment('comment-1')));
 
