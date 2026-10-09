@@ -484,7 +484,6 @@ export const CACHE_TIERS = {
     'topic:', // topic lists / agent view / search
     'agent:', // sidebar agent list + agent documents
     'builtinAgent:', // builtin identity and configuration used by the first paint
-    'group:detail', // group detail (group list stays in localStorage)
     'task:', // task lists + detail
     'document:', // editor document content
     'page:', // page detail / list / meta
@@ -499,7 +498,6 @@ export const CACHE_TIERS = {
     'fetchRecentTopics',
     'fetchRecentResources',
     'fetchRecentPages',
-    'group:list',
     'agentBuilder:suggestions', // builder opening-suggestion chips (skip LLM regen on revisit)
     'taskTemplate:', // home task-template recommendations
     'modelConfig:', // small remote model config shells used by home starter chips
