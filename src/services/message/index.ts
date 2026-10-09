@@ -41,6 +41,8 @@ export interface MessageReadQueryContext {
   /** Agent-share visitor surface — routes the read through `shareChat.getMessages`. */
   agentShareId?: string;
   groupId?: string | null;
+  /** Include stored ancestors hidden by display groups for authorized native replay. */
+  includeGroupedMessages?: boolean;
   /**
    * Ask the server for render-facing tool view models instead of the stored
    * payloads. Only set it for a read whose result is never turned into an LLM

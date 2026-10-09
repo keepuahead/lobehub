@@ -1,6 +1,7 @@
+import type { UIChatMessage } from '@lobechat/types';
 import { describe, expect, it } from 'vitest';
 
-import { formatPreviousConversation } from './index';
+import { buildHeterogeneousConversationContext, formatPreviousConversation } from './index';
 
 describe('formatPreviousConversation', () => {
   it('returns undefined without turns', () => {
@@ -82,4 +83,39 @@ describe('formatPreviousConversation', () => {
     /** @example The retained conversation stays within its scope and context budget. */
     expect(result).toContain('earlier turns omitted');
   });
+});
+
+/** @example Long assistant prose never consumes the tool-call context budget. */
+it('preserves tool calls after a long assistant explanation', () => {
+  // ROOT CAUSE:
+  // Appending serialized calls to prose let the 2 KB dialogue limit erase every
+  // call while the next tool-result entry still referenced its call ID.
+  const messages = [
+    { id: 'user', role: 'user', content: 'Read the marker.' },
+    {
+      id: 'assistant',
+      parentId: 'user',
+      role: 'assistant',
+      content: 'a'.repeat(3000),
+      tools: [
+        {
+          id: 'call-1',
+          apiName: 'shell',
+          identifier: 'shell',
+          arguments: '{"command":"cat marker.txt"}',
+          type: 'builtin',
+        },
+      ],
+    },
+    { id: 'tool', parentId: 'assistant', role: 'tool', tool_call_id: 'call-1', content: 'MARKER' },
+    { id: 'edit', parentId: 'tool', role: 'user', content: 'Edited question' },
+  ] as UIChatMessage[];
+  const result = formatPreviousConversation(
+    buildHeterogeneousConversationContext(messages, 'edit').history,
+  )!;
+  /** @example The call name, arguments and result attribution survive together. */
+  expect(result).toContain('<tool_calls>');
+  expect(result).toContain('cat marker.txt');
+  expect(result).toContain('Tool call ID: call-1');
+  expect(result).not.toContain('a'.repeat(2049));
 });

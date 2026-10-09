@@ -12,6 +12,7 @@ import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
 import { type ConversationContext, type ConversationHooks } from '../../../types';
 import { createStore } from '../../index';
+import type { CodexMessageEdit } from './action';
 import { MAX_HETERO_AUTO_RETRIES } from './heteroRetryConfig';
 
 vi.mock('@/services/topic', () => ({
@@ -1951,6 +1952,7 @@ describe('Generation Actions', () => {
         const target = { agentId: 'session-1', threadId: null, topicId: 'branch-topic' };
         const onTopicCreated = vi.fn();
         const onAccepted = vi.fn();
+        const edit: CodexMessageEdit = { content: 'fixed prompt', onAccepted };
         const switchTopic = vi.fn();
         await setupHeteroChatStore({
           dbMessagesMap: {},
@@ -1975,9 +1977,9 @@ describe('Generation Actions', () => {
         // ROOT CAUSE:
         // Background prefetch swallows network errors; an empty destination made resend silently
         // return after onAccepted closed the editor. Acceptance must wait for the copied message.
-        await expect(
-          store.getState().regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted }),
-        ).rejects.toThrow('Could not load the new topic. Your edit is kept; try sending again.');
+        await expect(store.getState().regenerateUserMessage('msg-1', edit)).rejects.toThrow(
+          'Could not load the new topic. Your edit is kept; try sending again.',
+        );
         /** @example Neither host navigation nor draft acceptance happens on incomplete context. */
         expect(onAccepted).not.toHaveBeenCalled();
         expect(onTopicCreated).not.toHaveBeenCalled();
@@ -1985,17 +1987,29 @@ describe('Generation Actions', () => {
         expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
 
         const { useChatStore } = await import('@/store/chat');
-        const rows = [{ content: 'fixed prompt', id: 'branch-user', role: 'user' as const }];
+        // The same editor may amend its draft before retrying the failed preparation.
+        vi.spyOn(messageService, 'updateMessage').mockResolvedValue({ success: true });
+        edit.content = 'amended prompt';
+        const rows = [{ content: 'amended prompt', id: 'branch-user', role: 'user' as const }];
         const state = useChatStore.getState();
         vi.mocked(state.prefetchMessages).mockImplementation(async () => {
           state.messagesMap[messageMapKey(target)] = rows;
           state.dbMessagesMap[messageMapKey(target)] = rows;
         });
-        await store
-          .getState()
-          .regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted });
+        await store.getState().regenerateUserMessage('msg-1', edit);
         /** @example A retry dispatches the edited prompt once the destination fetch succeeds. */
         await vi.waitFor(() => expect(executeHeterogeneousAgentSpy).toHaveBeenCalledTimes(1));
+        /** @example Retrying preparation reuses the already-created destination. */
+        expect(topicService.branchTopicAtMessage).toHaveBeenCalledTimes(1);
+        /** @example Only the already-created destination receives the amended draft. */
+        expect(messageService.updateMessage).toHaveBeenCalledWith('branch-user', {
+          content: 'amended prompt',
+          editorData: undefined,
+        });
+        expect(executeHeterogeneousAgentSpy).toHaveBeenCalledWith(
+          expect.any(Function),
+          expect.objectContaining({ message: 'amended prompt' }),
+        );
         expect(onAccepted).toHaveBeenCalledTimes(1);
         expect(onTopicCreated).toHaveBeenCalledWith('branch-topic');
       },

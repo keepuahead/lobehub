@@ -576,6 +576,21 @@ export interface CodexMessageEdit {
   editorData?: Record<string, unknown>;
   /** Called once the copied message is ready, before the replacement run starts. */
   onAccepted?: () => void;
+  /** Unsent destination retained by the open editor after a preparation failure. */
+  preparedTopic?: {
+    /** Last prompt persisted in the copied message. */
+    content: string;
+    /** Serialized editor state last persisted in the copied message. */
+    editorData?: string;
+    /** Destination user message, never the source message. */
+    messageId: string;
+    /** Source boundary used to prevent reuse by another editor. */
+    sourceMessageId: string;
+    /** Source conversation used to prevent cross-topic reuse. */
+    sourceTopicId: string;
+    /** Destination created for this editor but not yet dispatched. */
+    topicId: string;
+  };
 }
 
 /**
@@ -598,30 +613,60 @@ const editCodexUserMessage = async (
   if (!context.agentId || !context.topicId)
     throw new Error(t('messageAction.codexEdit.sourceUnavailable', { ns: 'chat' }));
 
-  const branch = await topicService
-    .branchTopicAtMessage({
+  let branch = edit.preparedTopic;
+  if (branch?.sourceMessageId !== messageId || branch.sourceTopicId !== context.topicId) {
+    const created = await topicService
+      .branchTopicAtMessage({
+        content: edit.content,
+        editorData: edit.editorData,
+        messageId,
+        title: edit.content.slice(0, 80),
+        topicId: context.topicId,
+      })
+      .catch((error: unknown) => {
+        // Transport/parse errors are not user-facing; the editor toasts this and keeps the draft.
+        console.error('[Codex edit] Could not create the branch topic:', error);
+        throw new Error(t('messageAction.codexEdit.branchFailed', { ns: 'chat' }), {
+          cause: error,
+        });
+      });
+    branch = {
+      ...created,
       content: edit.content,
-      editorData: edit.editorData,
-      messageId,
-      title: edit.content.slice(0, 80),
-      topicId: context.topicId,
-    })
-    .catch((error: unknown) => {
-      // Transport/parse errors are not user-facing; the editor toasts this and keeps the draft.
-      console.error('[Codex edit] Could not create the branch topic:', error);
-      throw new Error(t('messageAction.codexEdit.branchFailed', { ns: 'chat' }), { cause: error });
-    });
+      editorData: JSON.stringify(edit.editorData),
+      sourceMessageId: messageId,
+      sourceTopicId: context.topicId,
+    };
+    edit.preparedTopic = branch;
+  }
   const target: ConversationContext = { ...context, threadId: null, topicId: branch.topicId };
   const key = messageMapKey(target);
+  if (branch.content !== edit.content || branch.editorData !== JSON.stringify(edit.editorData)) {
+    // The draft can change after a failed read. Update only its unsent copy,
+    // then refresh that bucket before accepting; the source row stays untouched.
+    await messageService.updateMessage(branch.messageId, {
+      content: edit.content,
+      editorData: edit.editorData,
+    });
+    await chatStore.refreshMessages(target);
+    branch.content = edit.content;
+    branch.editorData = JSON.stringify(edit.editorData);
+  }
   await chatStore.prefetchMessages(target);
   const displayMessages = useChatStore.getState().messagesMap[key] ?? [];
   // Background warming may swallow a failed fetch or skip an in-flight request.
   // Keep the source editor until the copied user message can actually start a run.
   if (
-    !displayMessages.some((message) => message.id === branch.messageId && message.role === 'user')
+    !displayMessages.some(
+      (message) =>
+        message.id === branch.messageId &&
+        message.role === 'user' &&
+        message.content === edit.content,
+    )
   ) {
     throw new Error(t('messageAction.codexEdit.prepareFailed', { ns: 'chat' }));
   }
+  edit.preparedTopic = undefined;
   edit.onAccepted?.();
 
   await chatStore.refreshTopic();

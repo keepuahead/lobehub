@@ -113,8 +113,13 @@ export const buildHeterogeneousConversationContext = (
       role === 'assistant' && message.tools?.length
         ? `<tool_calls>\n${JSON.stringify(message.tools)}\n</tool_calls>`
         : '';
-    const content = [message.content, calls].filter(Boolean).join('\n');
-    return content || context ? [{ content, role, ...(context ? { context } : {}) }] : [];
+    // Calls share the bounded metadata budget, not the assistant prose budget.
+    // A long explanation must not erase the names/arguments of retained results.
+    const retainedContext = [context, calls].filter(Boolean).join('\n\n');
+    const content = message.content;
+    return content || retainedContext
+      ? [{ content, role, ...(retainedContext ? { context: retainedContext } : {}) }]
+      : [];
   });
   const images = new Map<string, Pick<ChatImageItem, 'id' | 'url'>>();
   for (const message of [...retained, current]) {
