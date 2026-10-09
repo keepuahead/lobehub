@@ -157,14 +157,26 @@ export class TopicRepository {
         threadIdPairs: [],
         topicIdPairs: [[topicId, branch.id]],
       });
-      // Message groups are copied per topic; drop those (e.g. compression
-      // summaries of later turns) that no copied row belongs to.
+      // Keep referenced groups and their ancestor closure. Deleting an empty
+      // parent would cascade into its retained descendants and their messages.
+      // UNION deduplicates groups so a malformed cycle cannot recurse forever.
       await tx.execute(sql`
+        with recursive retained_groups(id, parent_group_id) as (
+          select ${messageGroups.id}, ${messageGroups.parentGroupId}
+          from ${messageGroups}
+          where ${messageGroups.topicId} = ${branch.id}
+            and exists (
+              select 1 from ${messages} where ${messages.messageGroupId} = ${messageGroups.id}
+            )
+          union
+          select ${messageGroups.id}, ${messageGroups.parentGroupId}
+          from ${messageGroups}
+          join retained_groups on ${messageGroups.id} = retained_groups.parent_group_id
+          where ${messageGroups.topicId} = ${branch.id}
+        )
         delete from ${messageGroups}
         where ${messageGroups.topicId} = ${branch.id}
-          and not exists (
-            select 1 from ${messages} where ${messages.messageGroupId} = ${messageGroups.id}
-          )
+          and ${messageGroups.id} not in (select id from retained_groups)
       `);
 
       const branchMessageId = messageIdPairs.find(([sourceId]) => sourceId === messageId)![1];
