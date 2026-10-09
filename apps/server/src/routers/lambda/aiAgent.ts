@@ -102,6 +102,8 @@ import {
   HeteroOperationPrincipalError,
   resolveActiveHeteroOperationPrincipal,
 } from '@/server/services/heterogeneousAgent/operationPrincipal';
+import { createTaskRunHooks } from '@/server/services/task/runHooks';
+import { type TopicRunReopenOutcome, TopicRunService } from '@/server/services/task/topicRun';
 
 const log = debug('lobe-server:ai-agent-router');
 
@@ -2547,6 +2549,25 @@ export const aiAgentRouter = router({
       );
       if (bridged) return bridged;
 
+      // A message typed into a Task's own conversation continues that Task's
+      // run — and the composer dispatches it, not `runTask`. Everything the Task
+      // side needs for this run is attached here: the hook that settles the run
+      // when it ends, and the reopen that puts its run row back in flight.
+      // Without the pair, an answered run is invisible to the Task: the run card
+      // keeps the finished state of the run it replied to, `cancelTopic` refuses
+      // to stop the live one, and the detail page stops polling for it.
+      const topicRunService = new TopicRunService(
+        ctx.serverDB,
+        ctx.userId,
+        ctx.workspaceId ?? undefined,
+      );
+      const topicRun = appContext?.topicId
+        ? await topicRunService.resolveOwnableRun(appContext.topicId)
+        : undefined;
+      // Recorded on the operation-created boundary and acted on once the
+      // dispatch has returned.
+      let reopenOutcome: TopicRunReopenOutcome | undefined;
+
       const result = await ctx.aiAgentService.execAgent({
         acceptsFileWorks: acceptsFileWorksOf(input.streamFeatures),
         acceptsMemberRuntimeEnd: acceptsMemberRuntimeEndOf(input.streamFeatures),
@@ -2573,6 +2594,29 @@ export const aiAgentRouter = router({
         deviceId,
         localDeviceId,
         existingMessageIds,
+        ...(topicRun && {
+          hooks: createTaskRunHooks({
+            db: ctx.serverDB,
+            taskId: topicRun.taskId,
+            taskIdentifier: topicRun.taskIdentifier,
+            trigger: 'manual',
+            // The Task's creator, not the caller: the completion callback
+            // resolves the workspace from `tasks.createdByUserId`, so passing a
+            // workspace member would make that lookup miss and strand the run.
+            userId: topicRun.ownerUserId,
+            workspaceId: ctx.workspaceId ?? undefined,
+          }),
+          // Before the run's first step, so a short run can never finish — and
+          // have its own completion hook settle the row — ahead of the reopen.
+          onOperationCreated: async (operationId) => {
+            reopenOutcome = await topicRunService
+              .reopen({ link: topicRun, operationId })
+              .catch((error) => {
+                console.error('[aiAgent.execAgent] failed to reopen the task run: %O', error);
+                return 'refused' as const;
+              });
+          },
+        }),
         fileIds,
         mentionedAgents,
         parentMessageId,
@@ -2591,6 +2635,36 @@ export const aiAgentRouter = router({
         userAgent: ctx.userAgent ?? undefined,
         userInterventionConfig,
       });
+      // The run was dispatched but it did not take the Task's run row over. Two
+      // ways that happens: the Task was retired while the run was starting (the
+      // write failed or there is no row to keep honest), or a concurrent send on
+      // the same topic won the reopen and already owns the row. In both cases
+      // the run's hooks are already attached for the whole run, and
+      // `onTopicComplete` settles the topic row by id without checking which
+      // operation owns it — so letting this run continue would let the loser
+      // settle a row it does not own, finishing the winner's run ahead of it and
+      // overwriting its handoff/result. Stop it, exactly as the runner stops the
+      // run it dispatched under the same race.
+      if (reopenOutcome === 'refused' || reopenOutcome === 'already-running') {
+        const lostTheRow = reopenOutcome === 'already-running';
+        const stop = await ctx.aiAgentService
+          .interruptTask({ operationId: result.operationId })
+          .catch((error) => {
+            console.error('[aiAgent.execAgent] failed to stop the orphaned task run: %O', error);
+            return undefined;
+          });
+        // Same confirmation gate as `TaskService.interruptTaskOperation`.
+        const stopped = !!stop?.success && stop.deviceCancellationConfirmed !== false;
+        throw new TRPCError({
+          code: stopped ? 'CONFLICT' : 'INTERNAL_SERVER_ERROR',
+          message: stopped
+            ? lostTheRow
+              ? 'Another run is already live on this task; this duplicate send was stopped.'
+              : 'This task run could not be recorded while it was starting; the run was stopped.'
+            : `This task run could not be recorded while it was starting, and stopping it (operation ${result.operationId}) could not be confirmed.`,
+        });
+      }
+
       return toClientExecAgentResult(result);
     } catch (error: any) {
       console.error('execAgent failed: %O', error);
