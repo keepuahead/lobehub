@@ -14,17 +14,13 @@
  * Each factory also exposes `.root` (the namespace string) for `mutate`
  * matchers that compare `key[0]`.
  *
- * Document / page / notebook / agent-document keys are defined in
+ * Document / page / agent-document keys are defined in
  * `@/services/document/swrKeys` (already a factory, widely imported) and
  * re-exported here so the whole set is reachable from one place.
  */
 import { type ConversationContext } from '@lobechat/types';
 
-import {
-  agentDocumentSWRKeys,
-  documentSWRKeys,
-  notebookSWRKeys,
-} from '@/services/document/swrKeys';
+import { agentDocumentSWRKeys, documentSWRKeys } from '@/services/document/swrKeys';
 
 type KeyFactory<A extends unknown[]> = ((...args: A) => readonly unknown[]) & { root: string };
 
@@ -413,13 +409,10 @@ export const workKeys = {
 };
 
 // ---- brief --------------------------------------------------------------
+// The unresolved brief feed no longer has an SWR key: it moved onto
+// `@lobechat/replica` (`briefList`, partitioned by identity scope). Only the
+// day-scoped news digest still reads through SWR.
 export const briefKeys = {
-  /**
-   * Unresolved brief feed, keyed by login + identity scope. Briefs are per-user
-   * AND per-workspace rows, so an entry fetched in one scope must never be
-   * served in another — its ids are unreachable there.
-   */
-  list: def('brief:list', (isLogin: boolean, scope: string) => ['brief:list', isLogin, scope]),
   /**
    * Day-scoped news digest (`insight` + `result`, resolved included), keyed by
    * the viewer's local day (`YYYY-MM-DD`) on top of the identity scope.
@@ -728,24 +721,7 @@ export const ragEvalKeys = {
   ]),
 };
 
-// ---- knowledge base -----------------------------------------------------
-export const knowledgeBaseKeys = {
-  item: def('knowledgeBase:item', (id: string) => ['knowledgeBase:item', id]),
-  list: def(
-    'knowledgeBase:list',
-    (workspaceId?: string | null, visibility?: 'private' | 'public') => {
-      const base = workspaceId ? ['knowledgeBase:list', workspaceId] : ['knowledgeBase:list'];
-      return visibility ? [...base, visibility] : base;
-    },
-  ),
-};
-
 // ---- device -------------------------------------------------------------
-export const trashKeys = {
-  countByType: def('trash:countByType', () => ['trash:countByType']),
-  list: def('trash:list', (resourceType?: string | null) => ['trash:list', resourceType ?? 'all']),
-};
-
 export const deviceKeys = {
   cliUpdateState: def('device:cliUpdateState', (workspaceId: string | null, deviceId: string) => [
     'device:cliUpdateState',
@@ -903,13 +879,6 @@ export const toolKeys = {
   ]),
   composioConnections: def('tool:composioConnections', () => ['tool:composioConnections']),
   installedPlugins: def('tool:installedPlugins', () => ['tool:installedPlugins']),
-  lobehubSkillConnections: def('tool:lobehubSkillConnections', () => [
-    'tool:lobehubSkillConnections',
-  ]),
-  lobehubSkillTools: def('tool:lobehubSkillTools', (provider: string) => [
-    'tool:lobehubSkillTools',
-    provider,
-  ]),
   uninstalledBuiltins: def('tool:uninstalledBuiltins', (workspaceId: string | null | undefined) => [
     'tool:uninstalledBuiltins',
     workspaceId,
@@ -1164,6 +1133,11 @@ export const inboxKeys = {
 // ---- share (shared agent / topic / page) ---------------------------------
 export const shareKeys = {
   agentInfo: def('share:agentInfo', (slugOrId: string) => ['share:agentInfo', slugOrId]),
+  /** Connector lists the creator-side AGENT share tool picker screens, keyed by agentId. */
+  agentShareConnectors: def('share:agentShareConnectors', (agentId: string) => [
+    'share:agentShareConnectors',
+    agentId,
+  ]),
   /** Candidates for the creator-side AGENT share skill picker, keyed by agentId. */
   agentShareGrantableSkills: def('share:agentShareGrantableSkills', (agentId: string) => [
     'share:agentShareGrantableSkills',
@@ -1465,12 +1439,10 @@ export const swrKeys = {
   image: imageKeys,
   imessage: imessageKeys,
   inbox: inboxKeys,
-  knowledgeBase: knowledgeBaseKeys,
   localFile: localFileKeys,
   message: messageKeys,
   messenger: messengerKeys,
   scm: scmKeys,
-  notebook: notebookSWRKeys,
   ollama: ollamaKeys,
   onboarding: onboardingKeys,
   openInApp: openInAppKeys,
@@ -1494,7 +1466,6 @@ export const swrKeys = {
   documentComment: documentCommentKeys,
   documentLike: documentLikeKeys,
   topicAction: topicActionKeys,
-  trash: trashKeys,
   user: userKeys,
   userMemory: userMemoryKeys,
   verify: verifyKeys,
