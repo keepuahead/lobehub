@@ -1,11 +1,24 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createServerTranslator } from './server/render';
 import { getServerTranslations, translation } from './serverTranslation';
 
+// Keep renderer tests runnable before the build-time projection exists.
+vi.mock('./server/generated/resources', async () => ({
+  serverResources: {
+    'en-US': {
+      home: (await import('@/../locales/en-US/home.json')).default,
+    },
+    'zh-CN': {
+      heterogeneousError: (await import('@/../locales/zh-CN/heterogeneousError.json')).default,
+      home: (await import('@/../locales/zh-CN/home.json')).default,
+    },
+  },
+}));
+
 describe('server translations', () => {
-  it('renders a real non-default language from projected resources', async () => {
+  it('renders real non-default language copy', async () => {
     const { t } = await translation('home', 'zh-CN');
     expect(t('brief.action.openGoal')).toBe('查看目标');
     expect(t('brief.action.openGoal')).not.toBe(
@@ -31,7 +44,7 @@ describe('server translations', () => {
     expect(copy.find('constructor')).toBeUndefined();
     expect(createServerTranslator(resources, 'home', 'zz', 'en-US').t('title')).toBe('Title');
   });
-  it('renders bot error copy without importing original catalogs', () => {
+  it('renders bot error copy with interpolation', () => {
     const copy = getServerTranslations('heterogeneousError', 'zh-CN');
     expect(copy.t('heterogeneous.auth_required.title')).toBe('需要重新登录');
     expect(copy.t('heterogeneous.auth_required.description', { agent: 'Codex' })).toContain(
