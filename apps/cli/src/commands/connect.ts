@@ -1001,6 +1001,7 @@ function bindGatewayClientHandlers(
             assistantMessageId: request.assistantMessageId,
             args: request.args,
             cwd: request.cwd,
+            freshSession: request.freshSession,
             imageList: request.imageList,
             jwt: request.jwt,
             operationId: request.operationId,

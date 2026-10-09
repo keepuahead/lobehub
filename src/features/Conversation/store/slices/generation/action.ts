@@ -56,6 +56,7 @@ import { getUserStoreState } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
 
 import { type Store as ConversationStore } from '../../action';
+import { buildCodexRegenerateContext } from './codexRegenerate';
 import { MAX_HETERO_AUTO_RETRIES } from './heteroRetryConfig';
 
 const buildRetryInitialContext = (editorData: Record<string, any> | null | undefined) => {
@@ -249,6 +250,11 @@ export const runHeterogeneousFromExistingMessage = async (
   chatStore: ReturnType<typeof useChatStore.getState>,
   params: {
     context: ConversationContext;
+    /**
+     * Start a fresh native session instead of resuming the topic's latest one,
+     * with optional context appended to the provider's systemContext.
+     */
+    freshSession?: { systemContext?: string };
     heterogeneousProvider: HeterogeneousProviderConfig;
     /** Image attachments from the original user message — forwarded to the CLI for vision support */
     imageList?: ChatImageItem[];
@@ -276,6 +282,7 @@ export const runHeterogeneousFromExistingMessage = async (
 }> => {
   const {
     context,
+    freshSession,
     heterogeneousProvider,
     imageList,
     parentMessageId,
@@ -295,19 +302,27 @@ export const runHeterogeneousFromExistingMessage = async (
   if (replayTranscript && !resumeSessionId) {
     throw new Error('Transcript replay needs a resumable CLI session on the topic');
   }
-  if (cwdChanged) toast.info(t('heteroAgent.resumeReset.cwdChanged', { ns: 'chat' }));
-  else if (reason === 'binding_changed')
-    toast.info(t('heteroAgent.resumeReset.bindingChanged', { ns: 'chat' }));
+  // A fresh session never resumes, so a resume-reset notice would be misleading.
+  if (!freshSession) {
+    if (cwdChanged) toast.info(t('heteroAgent.resumeReset.cwdChanged', { ns: 'chat' }));
+    else if (reason === 'binding_changed')
+      toast.info(t('heteroAgent.resumeReset.bindingChanged', { ns: 'chat' }));
+  }
 
   const topicPin =
     (topicOverride ? resolveTopicHeteroPin(topicOverride) : undefined) ??
     (context.topicId
       ? topicSelectors.getTopicHeteroPinById(context.topicId)(chatStore)
       : undefined);
-  const effectiveHeterogeneousProvider = applyTopicModelToHeterogeneousProvider(
-    heterogeneousProvider,
-    topicPin,
-  );
+  const pinnedProvider = applyTopicModelToHeterogeneousProvider(heterogeneousProvider, topicPin);
+  const effectiveHeterogeneousProvider = freshSession?.systemContext
+    ? {
+        ...pinnedProvider,
+        systemContext: [pinnedProvider.systemContext, freshSession.systemContext]
+          .filter(Boolean)
+          .join('\n\n'),
+      }
+    : pinnedProvider;
 
   const assistantMsg = await messageService.createMessage({
     agentId,
@@ -350,8 +365,8 @@ export const runHeterogeneousFromExistingMessage = async (
     ...(replayTranscript
       ? { replayTranscript: true, replayTranscriptConfigDir, replayTranscriptStartedAt }
       : {}),
-    resumeBindingKey,
-    resumeSessionId,
+    resumeBindingKey: freshSession ? undefined : resumeBindingKey,
+    resumeSessionId: freshSession ? undefined : resumeSessionId,
     workingDirectory,
   });
 
@@ -513,8 +528,28 @@ const regenerateUserMessageFromSource = async (
       // actually aborts the request instead of being swallowed.
       // `onComplete` still fires at session end for the UI hook; re-completing
       // the already-settled wrapper is an idempotent no-op.
+      const isCodex = heterogeneousProvider?.type === 'codex';
       await chatStore.executeGatewayAgent({
         context,
+        // A resumed turn creates no user message, so the server only sees the
+        // selected turn's attachments when they are passed again. Codex needs
+        // them for its fresh native session; other runtimes read the persisted turn.
+        fileIds: isCodex
+          ? [...(item.imageList ?? []), ...(item.fileList ?? []), ...(item.videoList ?? [])].map(
+              (file) => file.id,
+            )
+          : undefined,
+        // Resuming the topic's latest native session would expose replaced and
+        // later turns; Codex starts fresh from the selected branch instead.
+        heterogeneousFreshSession: isCodex
+          ? {
+              historyBoundaryMessageId: messageId,
+              systemContext: buildCodexRegenerateContext(
+                displayMessages.slice(0, currentIndex),
+                item,
+              ),
+            }
+          : undefined,
         message: item.content,
         onComplete: () =>
           settleGenerationEntry(chatStore, operationId, () =>
@@ -530,8 +565,9 @@ const regenerateUserMessageFromSource = async (
     // ── Hetero mode: re-run the local CLI against the original user prompt ──
     // Creates a fresh assistant row branched off the existing user message so
     // the CC / Codex turn replaces the previous attempt without rewriting
-    // history, and resumes the same session id (when the cwd still matches)
-    // so prior context is preserved.
+    // history. Codex reconstructs the selected boundary in a fresh native
+    // session; resuming the latest transcript would include replaced/later turns.
+    // Claude Code retains its existing session-resume behavior.
     if (runtimeType === 'hetero' && heterogeneousProvider) {
       await runHeterogeneousFromExistingMessage(chatStore, {
         context,
@@ -541,6 +577,15 @@ const regenerateUserMessageFromSource = async (
         // this, regenerate silently drops attachments (the send path reads
         // imageList off the persisted user message; this path must too).
         imageList: item.imageList,
+        freshSession:
+          heterogeneousProvider.type === 'codex'
+            ? {
+                systemContext: buildCodexRegenerateContext(
+                  displayMessages.slice(0, currentIndex),
+                  item,
+                ),
+              }
+            : undefined,
         parentMessageId: messageId,
         parentOperationId: operationId,
         prompt: item.content,
