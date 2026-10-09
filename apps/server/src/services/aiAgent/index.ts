@@ -1331,6 +1331,12 @@ export class AiAgentService {
           pinnedHeterogeneousTopicModel: turn.pinnedHeterogeneousTopicModel,
           requestTrigger: requestTriggerMetadata.trigger,
           requestedDeviceId: turn.requestedDeviceId,
+          requiresPersistedPromptContext: Boolean(
+            !turn.userMessageId ||
+            params.contextSelections?.length ||
+            params.pageSelections?.length ||
+            params.fileIds?.length,
+          ),
           runAttachments,
           selfMessageIds,
           topicStartOwnerOperationId: params.topicStartOwnerOperationId,

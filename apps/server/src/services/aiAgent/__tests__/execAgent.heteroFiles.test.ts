@@ -1175,6 +1175,59 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     completeOperationSpy.mockRestore();
   });
 
+  /** @example Optional replay failure cannot block a plain native continuation. */
+  it('continues a context-free native Codex turn if recovery history is unavailable', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockMessageQuery.mockRejectedValueOnce(new Error('Old attachment signing unavailable'));
+    // ROOT CAUSE:
+    // Provider-wide fail-closed handling made optional replay a prerequisite for
+    // plain native continuations, although their CLI session already owns history.
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Continue',
+    });
+    /** @example The existing native session can execute without serialized recovery history. */
+    expect(result.success).toBe(true);
+    /** @example Recovery is absent rather than presented as an empty authoritative history. */
+    expect(mockDispatchAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeSessionId: 'native-session-existing',
+        resumeFallbackSystemContext: undefined,
+      }),
+    );
+  });
+
+  /** @example New selections still require durable context even with native history. */
+  it('fails safely when a native continuation cannot load its new selected context', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockMessageQuery.mockRejectedValueOnce(new Error('Selected context unavailable'));
+    const complete = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Use selection',
+      pageSelections: [{ id: 'page-selected', pageId: 'page-1', content: 'new selection' }],
+    });
+    /** @example The missing current selection must not silently disappear. */
+    expect(result.success).toBe(false);
+    /** @example No CLI starts with incomplete current input. */
+    expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    complete.mockRestore();
+  });
+
   /** @example Native resume can fall back to fresh execution without losing older images. */
   it('retains ancestor images in the payload used by native resume fallback', async () => {
     Object.assign(heteroAgentConfig.agencyConfig, {
@@ -1191,11 +1244,17 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
         imageList: [{ id: 'red', url: 'https://files.test/red.png' }],
       },
       { id: 'answer', role: 'assistant', parentId: 'old', content: 'Remembered' },
-      { id: 'edited', role: 'user', parentId: 'answer', content: 'Edited question' },
+      {
+        id: 'edited',
+        role: 'user',
+        parentId: 'answer',
+        content: 'Edited question',
+        imageList: [{ id: 'blue', url: 'https://files.test/blue.png' }],
+      },
     ]);
     // ROOT CAUSE:
-    // The CLI's resume-to-fresh retry reuses imageList. Dropping ancestor images
-    // for the first native attempt also removed them from its fresh fallback.
+    // Sharing imageList repeated ancestor vision input on successful resumes.
+    // A separate fallback list preserves recovery without duplicating native history.
     await service.execAgent({
       agentId: 'agent-1',
       appContext: { topicId: 'topic-1' },
@@ -1206,7 +1265,11 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     /** @example Fallback text and actual vision input travel together to the same CLI. */
     expect(mockDispatchAgentRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        imageList: [{ id: 'red', url: 'https://files.test/red.png' }],
+        imageList: [{ id: 'blue', url: 'https://files.test/blue.png' }],
+        resumeFallbackImageList: [
+          { id: 'red', url: 'https://files.test/red.png' },
+          { id: 'blue', url: 'https://files.test/blue.png' },
+        ],
         resumeFallbackSystemContext: 'device recovery context',
         resumeSessionId: 'unavailable-native-session',
       }),

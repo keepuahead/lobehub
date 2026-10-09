@@ -37,6 +37,8 @@ export const buildHeteroExecStdinPayload = (params: {
   imageList?: HeteroExecImageRef[];
   isNewSession?: boolean;
   prompt: string;
+  /** Complete image inputs used only when native resume falls back to a fresh session. */
+  resumeFallbackImageList?: HeteroExecImageRef[];
   resumeFallbackSystemContext?: string;
   systemContext?: string;
 }): string => {
@@ -44,6 +46,7 @@ export const buildHeteroExecStdinPayload = (params: {
     imageList = [],
     isNewSession,
     prompt,
+    resumeFallbackImageList,
     resumeFallbackSystemContext,
     systemContext,
   } = params;
@@ -53,7 +56,7 @@ export const buildHeteroExecStdinPayload = (params: {
     return JSON.stringify({
       content: blocks,
       resumeFallback: buildHeterogeneousPrompt({
-        imageList,
+        imageList: resumeFallbackImageList ?? imageList,
         isNewSession: true,
         prompt,
         systemContext: resumeFallbackSystemContext,

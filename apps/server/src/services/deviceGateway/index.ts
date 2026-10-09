@@ -1887,6 +1887,8 @@ export class DeviceGateway {
     jwt: string;
     operationId: string;
     prompt: string;
+    /** Complete vision input reserved for a fresh-session recovery attempt. */
+    resumeFallbackImageList?: Array<{ id?: string; url: string }>;
     resumeFallbackSystemContext?: string;
     resumeSessionId?: string;
     systemContext?: string;
