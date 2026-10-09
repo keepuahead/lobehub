@@ -1,6 +1,7 @@
 import { revalidateReplica } from '@/libs/replica';
 import { mutate } from '@/libs/swr';
 import { portalKeys } from '@/libs/swr/keys';
+import { documentDetailResource } from '@/store/document/slices/document/projection';
 import { notebookDocumentsResource } from '@/store/notebook/projection';
 import { agentDocumentSkillsResource } from '@/store/tool/slices/agentDocumentSkills/projection';
 
@@ -34,7 +35,9 @@ export const invalidateDocumentMutation = async (
 
   if (documentId) {
     if (refreshDocumentEditor !== false) {
-      revalidations.push(mutate(documentSWRKeys.editor(documentId)));
+      // The document detail is a replica; its sync lives outside the SWR cache
+      // keyed by `document:editor`, so revalidate the replica instead.
+      revalidations.push(revalidateReplica(documentDetailResource, documentId));
     }
     revalidations.push(mutate(documentSWRKeys.pageDetail(documentId)));
     revalidations.push(mutate(documentSWRKeys.pageMeta(documentId)));

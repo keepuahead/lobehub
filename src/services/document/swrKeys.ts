@@ -15,7 +15,6 @@ export const agentDocumentSWRKeys = {
 };
 
 export const documentSWRKeys = {
-  editor: (documentId: string) => ['document:editor', documentId] as const,
   pageDetail: (documentId: string) => ['page:detail', documentId] as const,
   pageDocuments: () => ['page:list'] as const,
   pageMeta: (documentId: string) => ['page:meta', documentId] as const,
