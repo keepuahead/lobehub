@@ -1961,11 +1961,13 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
 
   // Flat view: one list, no state buckets. See `buildFlatToolsOrder` for why the order
   // can only depend on what a row is, never on its activation state.
-  const flatItems: ItemType[] = buildFlatToolsOrder({
+  const flatItems: ItemType[] = buildFlatToolsOrder<SkillMenuItem>({
     capabilityItems,
     fixedItems,
     isAgentSkillItem,
-    skillItems: allSkillItems as unknown as ItemType[],
+    // `allSkillItems` is typed by the menu's `ItemType`; every entry is a row built by
+    // `createManagedSkillItem`, which is what the flat view needs to interleave.
+    skillItems: allSkillItems as unknown as SkillMenuItem[],
   });
 
   const marketItems: ItemType[] = viewMode === 'flat' ? flatItems : groupedItems;
