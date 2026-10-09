@@ -198,6 +198,7 @@ export interface HumanApprovalResolution {
   content?: string;
   id: string;
   intervention: Record<string, unknown>;
+  pluginError?: MessagePluginItem['error'] | null;
   pluginState?: Record<string, unknown> | null;
   replacePluginState?: boolean;
 }
@@ -4266,6 +4267,7 @@ export class MessageModel {
           .update(messagePlugins)
           .set({
             intervention: resolution.intervention,
+            ...(resolution.pluginError !== undefined && { error: resolution.pluginError }),
             ...(resolution.pluginState !== undefined && { state: resolution.pluginState }),
           })
           .where(and(eq(messagePlugins.id, resolution.id), this.pluginsOwnership()));
@@ -4641,8 +4643,8 @@ export class MessageModel {
       replacePluginState?: boolean;
       /** Completion replay may not overwrite an already withheld result. */
       preserveBlockedResult?: boolean;
-      /** Only runtime-owned completions may release a pending review marker. */
-      releaseToolResultReview?: boolean;
+      /** Authoritative runtime verdict; never derive it from tool-owned pluginState. */
+      toolResultReview?: NonNullable<MessageMetadata['toolResultControl']>;
     },
   ): Promise<{ applied: boolean; snapshotSeq?: number; success: boolean }> => {
     const {
@@ -4664,15 +4666,14 @@ export class MessageModel {
       await this.db.transaction(async (trx) => {
         if (params.preserveBlockedResult) {
           const [plugin] = await trx
-            .select({ state: messagePlugins.state })
+            .select({ metadata: messages.metadata })
             .from(messagePlugins)
-            .where(and(eq(messagePlugins.id, id), this.pluginsOwnership()))
+            .innerJoin(messages, eq(messagePlugins.id, messages.id))
+            .where(and(eq(messagePlugins.id, id), this.pluginsOwnership(), this.ownership()))
             .for('update');
           if (
-            isPlainRecord(plugin?.state) &&
-            plugin.state.type === 'blocked' &&
-            plugin.state.phase === 'afterToolCall' &&
-            !(pluginState?.type === 'blocked' && pluginState.phase === 'afterToolCall')
+            plugin?.metadata?.toolResultControl?.status === 'blocked' &&
+            params.toolResultReview?.status !== 'blocked'
           ) {
             matchedRow = true;
             applied = false;
@@ -4685,16 +4686,17 @@ export class MessageModel {
         if (
           metadata !== undefined ||
           heterogeneousToolState !== undefined ||
-          params.releaseToolResultReview
+          params.toolResultReview
         ) {
           const baseQuery = trx
             .select({ metadata: messages.metadata })
             .from(messages)
             .where(and(eq(messages.id, id), this.ownership()))
             .limit(1);
-          const [existingMessage] = heterogeneousToolState
-            ? await baseQuery.for('update')
-            : await baseQuery;
+          const [existingMessage] =
+            heterogeneousToolState || params.toolResultReview
+              ? await baseQuery.for('update')
+              : await baseQuery;
 
           matchedRow = !!existingMessage;
           if (!existingMessage) return;
@@ -4724,7 +4726,7 @@ export class MessageModel {
         // Update messages table (content, metadata)
         if (
           content !== undefined ||
-          params.releaseToolResultReview ||
+          params.toolResultReview ||
           metadata !== undefined ||
           heterogeneousToolState !== undefined
         ) {
@@ -4737,17 +4739,11 @@ export class MessageModel {
           if (
             metadata !== undefined ||
             heterogeneousToolState !== undefined ||
-            params.releaseToolResultReview
+            params.toolResultReview
           ) {
             const mergedMetadata = merge(existingMetadata || {}, metadata || {});
-            if (params.releaseToolResultReview && mergedMetadata.toolResultControl) {
-              mergedMetadata.toolResultControl = {
-                ...mergedMetadata.toolResultControl,
-                status:
-                  pluginState?.phase === 'afterToolCall' && pluginState.type === 'blocked'
-                    ? 'blocked'
-                    : 'allowed',
-              };
+            if (params.toolResultReview) {
+              mergedMetadata.toolResultControl = params.toolResultReview;
             }
             messageUpdateData.metadata = heterogeneousToolState
               ? merge(mergedMetadata, {
@@ -4755,7 +4751,7 @@ export class MessageModel {
                   heterogeneousToolStateSeq: heterogeneousToolState.snapshotSeq,
                 })
               : mergedMetadata;
-            if (!params.releaseToolResultReview) {
+            if (!params.toolResultReview) {
               messageUpdateData.metadata = preserveToolResultControl(
                 messages.metadata,
                 messageUpdateData.metadata,
