@@ -2,7 +2,7 @@ name: Dedicated Zeabur CI
 
 # Personal fast path for rdmclin2 only. Does not replace Test CI.
 # GitHub-hosted ubuntu-latest jobs in test.yml still run as usual.
-# Requires three Idle runners labeled lobe-zeabur-linux.
+# Three runners share one Linux user, so tool installs must stay out of $HOME.
 
 on:
   pull_request:
@@ -60,15 +60,27 @@ jobs:
           git fetch --no-tags --depth=1 origin "${REF_SHA}"
           git checkout --force FETCH_HEAD
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
+      # Do not use ./.github/actions/setup-env here. Its pnpm step installs into
+      # ~/setup-pnpm. Three runners share that home and race on the same directory.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.11.1'
+          package-manager-cache: false
 
       - name: Install deps
         run: pnpm install
 
       - name: Run tests
         run: bunx vitest --coverage --silent='passed-only' --reporter=default --project app --shard=${{ matrix.shard }}/3
-
-      - name: Cleanup workspace
-        if: always()
-        run: rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.[!.]* || true
