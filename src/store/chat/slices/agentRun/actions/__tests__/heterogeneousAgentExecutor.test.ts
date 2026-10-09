@@ -3570,6 +3570,13 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
           type: 'continuation',
           metadata: { codexForkTarget: target, workingDirectory: '/work/project' },
         };
+        const previousLab = useUserStore.getState().preference.lab;
+        useUserStore.setState((state) => ({
+          preference: {
+            ...state.preference,
+            lab: { ...state.preference.lab, enableCodexAppServer: false },
+          },
+        }));
         const previous = useChatStore.getState().threadMaps;
         useChatStore.setState({ threadMaps: { 'topic-1': [branch] } });
         const store = createMockStore({
@@ -3613,16 +3620,21 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
               },
             );
           }
+          // ROOT CAUSE:
+          // After the first Fork, only the child resume ID is sent. Selecting the runtime
+          // from Labs alone silently used legacy exec and lost native turn provenance.
+          // The immutable branch origin must keep every follow-up on app-server.
           /** @example Only the first run forks the source; both later runs resume the child. */
           expect(
             mockStartSession.mock.calls.map(([params]) => [
               params.resumeSessionId,
               params.codexForkTarget,
+              params.useCodexAppServer,
             ]),
           ).toEqual([
-            ['native-source', target],
-            ['native-child', undefined],
-            ['native-child', undefined],
+            ['native-source', target, true],
+            ['native-child', undefined, true],
+            ['native-child', undefined, true],
           ]);
           /** @example The origin is never rewritten; only the child binding is added. */
           expect(store.threadMaps['topic-1'][0].metadata).toMatchObject({
@@ -3632,6 +3644,9 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
           /** @example A child's persistence must never update the parent topic. */
           expect(store.updateTopicMetadata).not.toHaveBeenCalled();
         } finally {
+          useUserStore.setState((state) => ({
+            preference: { ...state.preference, lab: previousLab },
+          }));
           consoleError.mockRestore();
           useChatStore.setState({ threadMaps: previous });
         }

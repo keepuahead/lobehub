@@ -2167,6 +2167,14 @@ export const executeHeterogeneousAgent = async (
           }
         : undefined;
 
+    // The immutable origin survives child binding and renderer reloads. Native branches
+    // must keep turn provenance even after the user disables the app-server Labs preference.
+    const branchOrigin =
+      context.topicId && context.threadId
+        ? get().threadMaps[context.topicId]?.find((thread) => thread.id === context.threadId)
+            ?.metadata?.codexForkTarget
+        : undefined;
+
     // Start session (pass resumeSessionId for multi-turn --resume)
     const result = await heterogeneousAgentService.startSession({
       agentType: adapterType,
@@ -2185,7 +2193,9 @@ export const executeHeterogeneousAgent = async (
       providerBinding,
       resumeSessionId,
       useClaudeCodeSdk: labPreferSelectors.enableClaudeCodeSdk(useUserStore.getState()),
-      useCodexAppServer: labPreferSelectors.enableCodexAppServer(useUserStore.getState()),
+      useCodexAppServer:
+        (adapterType === 'codex' && Boolean(codexForkTarget || branchOrigin)) ||
+        labPreferSelectors.enableCodexAppServer(useUserStore.getState()),
     });
     activeSessionBindingKey =
       result.providerBindingKey ?? getNativeHeteroSessionBindingKey(adapterType);
