@@ -1,0 +1,279 @@
+/**
+ * @vitest-environment happy-dom
+ *
+ * The file manager's knowledge-item list and by-id detail are
+ * `@lobechat/replica` resources: the persisted head page / detail paints before
+ * the network answers, the response confirms and persists it, "load more"
+ * appends through the engine, and — because the two resources are linked — a
+ * rename or delete reaches the list row and every loaded detail entry at once.
+ */
+import { randomUUID } from 'node:crypto';
+
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type { PropsWithChildren } from 'react';
+import { createElement, useEffect } from 'react';
+import { SWRConfig, useSWRConfig } from 'swr';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { cacheScope } from '@/libs/replica';
+import { setScopedMutate } from '@/libs/swr/mutate';
+import { lambdaClient } from '@/libs/trpc/client';
+import { type FileListItem } from '@/types/files';
+
+import { useFileStore } from '../../store';
+import {
+  fileDetailResource,
+  type FileListData,
+  type FileListParams,
+  fileListResource,
+} from './projection';
+
+vi.mock('@/libs/trpc/client', () => ({
+  lambdaClient: {
+    document: { updateDocument: { mutate: vi.fn() } },
+    file: {
+      getFileItemById: { query: vi.fn() },
+      getKnowledgeItems: { query: vi.fn() },
+      publishFileToWorkspace: { mutate: vi.fn() },
+      removeFile: { mutate: vi.fn() },
+      removeFiles: { mutate: vi.fn() },
+      setFileVisibility: { mutate: vi.fn() },
+      updateFile: { mutate: vi.fn() },
+    },
+  },
+}));
+
+const BASE_PARAMS: FileListParams = { category: 'all', pageSize: 50 };
+const BASE_KEY = fileListResource.storageKey(BASE_PARAMS);
+
+const file = (id: string, name = id): FileListItem =>
+  ({
+    chunkCount: null,
+    chunkingError: null,
+    createdAt: new Date(0),
+    embeddingError: null,
+    fileType: 'text/plain',
+    finishEmbedding: false,
+    id,
+    name,
+    size: 1,
+    sourceType: 'file',
+    updatedAt: new Date(0),
+    url: `https://example.com/${id}`,
+  }) as FileListItem;
+
+const listData = (items: FileListItem[], total?: number): FileListData => ({
+  currentPage: 0,
+  hasMore: total === undefined ? false : total > items.length,
+  items,
+  pageSize: BASE_PARAMS.pageSize,
+  total,
+});
+
+/** Never-resolving fetch: the first frame can only come from storage. */
+const pending = () => new Promise<never>(() => {});
+
+const MutateBridge = () => {
+  const { mutate } = useSWRConfig();
+  useEffect(() => setScopedMutate(mutate), [mutate]);
+  return null;
+};
+
+const wrapper = ({ children }: PropsWithChildren) =>
+  createElement(
+    SWRConfig,
+    { value: { dedupingInterval: 0, provider: () => new Map() } },
+    createElement(MutateBridge),
+    children,
+  );
+
+describe('fileManager replicas', () => {
+  const scopes = new Set<string>();
+  let scope = '';
+
+  const useScope = (next: string) => {
+    scope = next;
+    scopes.add(next);
+    vi.spyOn(cacheScope, 'get').mockImplementation(() => scope);
+    vi.spyOn(cacheScope, 'use').mockImplementation(() => scope);
+    vi.spyOn(cacheScope, 'canPersist').mockReturnValue(true);
+  };
+
+  beforeEach(() => {
+    useScope(`file-user-${randomUUID()}:personal`);
+    act(() =>
+      useFileStore.setState({
+        dockUploadFileList: [],
+        fileDetailMap: {},
+        fileList: [],
+        fileListMeta: undefined,
+      }),
+    );
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await Promise.all(
+      [...scopes].flatMap((value) => [
+        fileListResource.storage!.remove({ queryKey: BASE_KEY, scope: value }),
+        fileDetailResource.storage!.remove({ queryKey: 'file-1', scope: value }),
+      ]),
+    );
+    scopes.clear();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('paints the persisted head page before the network answers', async () => {
+    await fileListResource.storage!.set(
+      { queryKey: BASE_KEY, scope },
+      { data: listData([file('cached-1')], 40), updatedAt: 1 },
+    );
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockImplementation(pending);
+
+    const sync = renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(useFileStore.getState().fileList.map((f) => f.id)).toEqual(['cached-1']),
+    );
+    expect(sync.result.current.isHydrated).toBe(true);
+    expect(sync.result.current.isValidating).toBe(true);
+  });
+
+  it('replaces the head page with the server response and persists it', async () => {
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
+      hasMore: true,
+      items: [file('a'), file('b')],
+    } as any);
+
+    renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(useFileStore.getState().fileList.map((f) => f.id)).toEqual(['a', 'b']),
+    );
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(true);
+    // A non-final page leaves the total unknown; the response still persists.
+    await waitFor(async () => {
+      const row = await fileListResource.storage!.get({ queryKey: BASE_KEY, scope });
+      expect((row?.data as FileListData).items.map((f) => f.id)).toEqual(['a', 'b']);
+    });
+  });
+
+  it('appends the next page with the loaded query params', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) => file(`file-${i}`));
+    const secondPage = Array.from({ length: 5 }, (_, i) => file(`file-${50 + i}`));
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockImplementation(
+      async (params: any) =>
+        ((params?.offset ?? 0) === 0
+          ? { hasMore: true, items: firstPage }
+          : { hasMore: false, items: secondPage }) as any,
+    );
+
+    renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(useFileStore.getState().fileList).toHaveLength(50));
+
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+
+    const list = useFileStore.getState().fileList;
+    expect(list).toHaveLength(55);
+    expect(list[50].id).toBe('file-50');
+    expect(lambdaClient.file.getKnowledgeItems.query).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 50, offset: 50 }),
+    );
+  });
+
+  describe('linked entity mutations', () => {
+    const seed = async () => {
+      vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
+        hasMore: false,
+        items: [file('file-1', 'Original'), file('file-2')],
+      } as any);
+      vi.mocked(lambdaClient.file.getFileItemById.query).mockResolvedValue(
+        file('file-1', 'Original'),
+      );
+
+      renderHook(
+        () => {
+          useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 });
+          useFileStore((s) => s.useFetchKnowledgeItem)('file-1');
+        },
+        { wrapper },
+      );
+
+      await waitFor(() => {
+        expect(useFileStore.getState().fileList).toHaveLength(2);
+        expect(useFileStore.getState().fileDetailMap['file-1']?.file?.name).toBe('Original');
+      });
+    };
+
+    const listName = () => useFileStore.getState().fileList.find((f) => f.id === 'file-1')?.name;
+    const detailName = () => useFileStore.getState().fileDetailMap['file-1']?.file?.name;
+
+    it('renames the list row and the loaded detail optimistically', async () => {
+      await seed();
+      let resolveUpdate!: (value: unknown) => void;
+      vi.mocked(lambdaClient.document.updateDocument.mutate).mockImplementation(
+        () => new Promise((resolve) => (resolveUpdate = resolve)) as any,
+      );
+
+      let operation!: Promise<unknown>;
+      act(() => {
+        operation = useFileStore.getState().renameFolder('file-1', 'Renamed');
+      });
+
+      expect(listName()).toBe('Renamed');
+      expect(detailName()).toBe('Renamed');
+
+      vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
+        hasMore: false,
+        items: [file('file-1', 'Renamed'), file('file-2')],
+      } as any);
+      await act(async () => {
+        resolveUpdate({});
+        await operation;
+      });
+
+      expect(listName()).toBe('Renamed');
+    });
+
+    it('rolls both copies back when the rename fails', async () => {
+      await seed();
+      vi.mocked(lambdaClient.document.updateDocument.mutate).mockRejectedValue(new Error('boom'));
+
+      const operation = useFileStore.getState().renameFolder('file-1', 'Renamed');
+      await act(async () => {
+        await expect(operation).rejects.toThrow('boom');
+      });
+
+      expect(listName()).toBe('Original');
+      expect(detailName()).toBe('Original');
+    });
+
+    it('drops a removed file from the list and its detail', async () => {
+      await seed();
+      vi.mocked(lambdaClient.file.removeFile.mutate).mockResolvedValue(undefined);
+      vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
+        hasMore: false,
+        items: [file('file-2')],
+      } as any);
+
+      await act(async () => {
+        await useFileStore.getState().removeFileItem('file-1');
+      });
+
+      expect(useFileStore.getState().fileList.map((f) => f.id)).toEqual(['file-2']);
+      expect(useFileStore.getState().fileDetailMap['file-1']).toBeUndefined();
+    });
+  });
+});
