@@ -78,7 +78,11 @@ export interface ReplicaEngineOptions<TParams, TData, TFetched> {
   port: ReplicaStorePort<TData>;
   /** Re-run the network sync of one entry (or all); wired by the fetch adapter. */
   revalidate?: (key?: string) => Promise<unknown>;
-  /** Strip transient / client-only parts before persisting; `undefined` skips. */
+  /**
+   * Strip transient / client-only parts before persisting. `undefined` = the
+   * value has no persistent form: nothing is written, and any row persisted for
+   * this entry earlier is removed so a reload cannot hydrate a stale value.
+   */
   toPersisted?: (data: TData) => TData | undefined;
   /** Paged: domain fields derived from params, written with every head page. */
   viewFields?: (params: TParams) => Partial<TData>;
@@ -174,7 +178,15 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
         continue;
       }
       const data = toPersisted(effect.data);
-      if (data === undefined) continue;
+      if (data === undefined) {
+        // The confirmed value has no persistent form (e.g. a "not found"
+        // marker). Drop any earlier row instead of leaving it behind: a reload
+        // would otherwise hydrate — and resurrect — a value the resource itself
+        // no longer considers persistable.
+        writeQueue.remove(key);
+        trackStorageKey(effect.scope, key.queryKey, false);
+        continue;
+      }
       writeQueue.set(key, { data, updatedAt: Date.now() });
       trackStorageKey(effect.scope, key.queryKey, true);
     }
