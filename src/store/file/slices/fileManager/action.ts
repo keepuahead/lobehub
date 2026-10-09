@@ -622,6 +622,18 @@ export class FileManageActionImpl {
     await this.#get().refreshFileList();
   };
 
+  /**
+   * Drop cached knowledge items without calling the server, for a deletion that
+   * was already confirmed elsewhere (the resource explorer has its own delete
+   * paths). Both of this slice's replicas persist by id, so leaving a deleted
+   * row behind lets a later direct visit repaint it until a NOT_FOUND answer
+   * arrives — and offline that answer never comes. Evicts the list row and every
+   * loaded detail together, exactly like a local delete.
+   */
+  forgetKnowledgeItems = (ids: string[]): void => {
+    for (const id of ids) this.#fileEntity.remove(id);
+  };
+
   renameFolder = async (folderId: string, newName: string): Promise<void> => {
     // Rename optimistically in every loaded list / detail, then confirm from the server.
     await this.#fileEntity.optimistic(

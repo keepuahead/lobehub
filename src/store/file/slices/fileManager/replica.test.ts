@@ -298,6 +298,45 @@ describe('fileManager replicas', () => {
     expect(vi.mocked(lambdaClient.file.getKnowledgeItems.query).mock.calls.length).toBe(calls);
   });
 
+  // The explorer deletes through the resource slice, not through this one. Both
+  // of this slice's replicas persist by id, so a confirmed deletion must evict
+  // them too — otherwise a later direct visit repaints the deleted item until a
+  // NOT_FOUND answer arrives, and offline that answer never comes.
+  describe('resource deletion eviction', () => {
+    it('drops the list row and the persisted detail when the explorer deletes a resource', async () => {
+      vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
+        hasMore: false,
+        items: [file('file-1', 'Original'), file('file-2')],
+      } as any);
+      vi.mocked(lambdaClient.file.getFileItemById.query).mockResolvedValue(
+        file('file-1', 'Original'),
+      );
+      vi.mocked(lambdaClient.file.removeFile.mutate).mockResolvedValue(undefined);
+
+      renderHook(
+        () => {
+          useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 });
+          useFileStore((s) => s.useFetchKnowledgeItem)('file-1');
+        },
+        { wrapper },
+      );
+      await waitFor(() => {
+        expect(useFileStore.getState().fileDetailMap['file-1']?.file?.name).toBe('Original');
+      });
+
+      await act(async () => {
+        await useFileStore.getState().deleteResource('file-1');
+      });
+
+      expect(useFileStore.getState().fileList.map((f) => f.id)).toEqual(['file-2']);
+      expect(useFileStore.getState().fileDetailMap['file-1']).toBeUndefined();
+      // The persisted row is gone, so a reload cannot repaint the deleted item.
+      await expect(
+        fileDetailResource.storage!.get({ queryKey: 'file-1', scope }),
+      ).resolves.toBeFalsy();
+    });
+  });
+
   describe('confirmed missing detail', () => {
     it('drops the persisted projection on NOT_FOUND so a reload cannot paint the stale file', async () => {
       // A previous visit persisted this file's detail.
