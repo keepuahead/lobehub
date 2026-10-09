@@ -51,6 +51,12 @@ export default {
   'branching': 'Create Subtopic',
   'branchingRequiresSavedTopic':
     'Current topic is not saved, please save it first to use subtopic feature',
+  'codexEditUnavailable': 'This message cannot be resent right now. Your draft has been kept.',
+  'codexFork': 'Fork',
+  'codexForkFailed': 'Unable to fork the Codex conversation: {{message}}',
+  'codexForkFilesystemNotice':
+    'The fork has independent Codex context, but shares the same working directory and current files.',
+  'codexForkUnavailable': 'Fork (needs Codex app-server in Labs)',
   'viewExecutionDetails': 'View execution details',
   'cancel': 'Cancel',
   'changelog': 'Changelog',

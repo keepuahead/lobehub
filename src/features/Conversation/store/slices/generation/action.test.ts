@@ -21,7 +21,9 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
   toast: { info: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('@/services/topic', () => ({ topicService: { cancelRateLimitContinuation: vi.fn() } }));
+vi.mock('@/services/topic', () => ({
+  topicService: { branchTopicAtMessage: vi.fn(), cancelRateLimitContinuation: vi.fn() },
+}));
 
 // Mock useChatStore
 const mockCancelOperations = vi.fn();
@@ -2408,6 +2410,191 @@ describe('Generation Actions', () => {
         }),
       );
     });
+
+    it.runIf(providerType === 'codex')(
+      'resends an edit through the branched topic, leaving the source session alone',
+      async () => {
+        const branchContext = { agentId: 'session-1', threadId: null, topicId: 'branch-topic' };
+        const branchRows = [
+          { content: 'Earlier question', id: 'earlier-user', role: 'user' },
+          {
+            content: 'Earlier summary',
+            id: 'earlier-assistant',
+            parentId: 'earlier-user',
+            role: 'assistant',
+          },
+          {
+            content: 'fixed prompt',
+            id: 'branch-user',
+            parentId: 'earlier-assistant',
+            role: 'user',
+          },
+        ];
+        const mockSwitchTopic = vi.fn();
+        await setupHeteroChatStore({
+          dbMessagesMap: { [messageMapKey(branchContext)]: branchRows },
+          messagesMap: { [messageMapKey(branchContext)]: branchRows },
+          prefetchMessages: vi.fn(),
+          refreshTopic: vi.fn(),
+          switchTopic: mockSwitchTopic,
+          topicDataMap: {
+            test: { items: [{ id: 'topic-1', metadata: { heteroSessionId: 'source-thread' } }] },
+          },
+        });
+        vi.mocked(topicService.branchTopicAtMessage).mockResolvedValue({
+          messageId: 'branch-user',
+          topicId: 'branch-topic',
+        });
+        const store = createStore({
+          context: { agentId: 'session-1', threadId: null, topicId: 'topic-1' },
+        });
+        store.setState({
+          displayMessages: [{ content: 'typo prompt', id: 'msg-1', role: 'user' }],
+        } as any);
+        const onAccepted = vi.fn();
+
+        await store
+          .getState()
+          .regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted });
+        await vi.waitFor(() => expect(executeHeterogeneousAgentSpy).toHaveBeenCalled());
+
+        expect(topicService.branchTopicAtMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: 'fixed prompt',
+            messageId: 'msg-1',
+            topicId: 'topic-1',
+          }),
+        );
+        expect(onAccepted).toHaveBeenCalled();
+        expect(mockSwitchTopic).toHaveBeenCalledWith(
+          'branch-topic',
+          expect.objectContaining({ onlyIfActiveTopicIn: ['topic-1'] }),
+        );
+        expect(createMessageSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ parentId: 'branch-user', topicId: 'branch-topic' }),
+        );
+        // ROOT CAUSE:
+        // The copied topic needs hydrated tool bodies and saved selections.
+        // A display-only previous_conversation suppresses that executor replay.
+        /** @example Editing delegates durable history to the fresh local executor. */
+        expect(
+          executeHeterogeneousAgentSpy.mock.calls[0][1].heterogeneousProvider.systemContext ?? '',
+        ).not.toContain('<previous_conversation>');
+        expect(executeHeterogeneousAgentSpy).toHaveBeenCalledWith(
+          expect.any(Function),
+          expect.objectContaining({
+            context: expect.objectContaining({ topicId: 'branch-topic' }),
+            message: 'fixed prompt',
+            resumeSessionId: undefined,
+          }),
+        );
+      },
+    );
+
+    it.runIf(providerType === 'codex')(
+      'sends a copied edit boundary to the gateway for durable fresh-session replay',
+      async () => {
+        const branchContext = { agentId: 'session-1', threadId: null, topicId: 'branch-topic' };
+        const branchRows = [
+          { content: 'Earlier question', id: 'earlier-user', role: 'user' },
+          {
+            content: 'Earlier summary',
+            id: 'earlier-assistant',
+            parentId: 'earlier-user',
+            role: 'assistant',
+          },
+          {
+            content: 'fixed prompt',
+            id: 'branch-user',
+            parentId: 'earlier-assistant',
+            role: 'user',
+          },
+        ];
+        const mockSwitchTopic = vi.fn();
+        await setupHeteroChatStore({
+          dbMessagesMap: { [messageMapKey(branchContext)]: branchRows },
+          messagesMap: { [messageMapKey(branchContext)]: branchRows },
+          prefetchMessages: vi.fn(),
+          refreshTopic: vi.fn(),
+          switchTopic: mockSwitchTopic,
+          topicDataMap: {
+            test: { items: [{ id: 'topic-1', metadata: { heteroSessionId: 'source-thread' } }] },
+          },
+        });
+        vi.mocked(topicService.branchTopicAtMessage).mockResolvedValue({
+          messageId: 'branch-user',
+          topicId: 'branch-topic',
+        });
+        const store = createStore({
+          context: { agentId: 'session-1', threadId: null, topicId: 'topic-1' },
+        });
+        store.setState({
+          displayMessages: [{ content: 'typo prompt', id: 'msg-1', role: 'user' }],
+        } as any);
+        vi.mocked(agentDispatcher.selectRuntimeType).mockReturnValue('gateway');
+        const onAccepted = vi.fn();
+
+        await store
+          .getState()
+          .regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted });
+        await vi.waitFor(() => expect(mockExecuteGatewayAgent).toHaveBeenCalled());
+
+        expect(topicService.branchTopicAtMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: 'fixed prompt',
+            messageId: 'msg-1',
+            topicId: 'topic-1',
+          }),
+        );
+        expect(onAccepted).toHaveBeenCalled();
+        expect(mockSwitchTopic).toHaveBeenCalledWith(
+          'branch-topic',
+          expect.objectContaining({ onlyIfActiveTopicIn: ['topic-1'] }),
+        );
+        // ROOT CAUSE:
+        // Edit shares the regenerate entry point but needs the copied topic's
+        // persisted tool results, selections and attachments, not display-only replay.
+        /** @example The server receives the copied boundary and explicit durable replay intent. */
+        expect(mockExecuteGatewayAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            context: expect.objectContaining({ topicId: 'branch-topic' }),
+            parentMessageId: 'branch-user',
+            heterogeneousFreshSession: {
+              historyBoundaryMessageId: 'branch-user',
+              usePersistedHistory: true,
+              systemContext: undefined,
+            },
+          }),
+        );
+        /** @example A gateway edit never falls back to the local executor. */
+        expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it.runIf(providerType === 'codex')(
+      'reports a friendly error and keeps the draft when the branch cannot be created',
+      async () => {
+        await setupHeteroChatStore();
+        vi.mocked(topicService.branchTopicAtMessage).mockRejectedValue(new Error('offline'));
+        const store = createStore({
+          context: { agentId: 'session-1', threadId: null, topicId: 'topic-1' },
+        });
+        const onAccepted = vi.fn();
+
+        const result = store
+          .getState()
+          .regenerateUserMessage('msg-1', { content: 'fixed prompt', onAccepted });
+
+        // The editor toasts this message, so it must not be the raw transport error.
+        await expect(result).rejects.toThrow(
+          'Could not create the new topic. Your edit is kept; try sending again.',
+        );
+        await expect(result).rejects.toMatchObject({ cause: new Error('offline') });
+
+        expect(onAccepted).not.toHaveBeenCalled();
+        expect(executeHeterogeneousAgentSpy).not.toHaveBeenCalled();
+      },
+    );
 
     it('resumes legacy Claude sessions and reconstructs Codex regeneration', async () => {
       await setupHeteroChatStore({

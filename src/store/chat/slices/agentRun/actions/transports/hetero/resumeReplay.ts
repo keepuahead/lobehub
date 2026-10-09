@@ -1,3 +1,7 @@
+import {
+  buildHeterogeneousConversationContext,
+  type ConversationHistoryEntry,
+} from '@lobechat/prompts';
 import type { HeteroSessionImportMessage, UIChatMessage } from '@lobechat/types';
 
 /**
@@ -78,3 +82,24 @@ export const buildResumeReplayMessages = (
 
   return mapped;
 };
+
+/**
+ * Resolves completed ancestry for a fresh local run using the device path's formatter.
+ *
+ * Use when:
+ * - A newly copied Codex topic has no native session to resume.
+ *
+ * Expects:
+ * - Raw persisted messages and the assistant placeholder for this run.
+ *
+ * Returns:
+ * - Previous dialogue, tool results and user context, excluding the current prompt.
+ */
+export const buildPreviousConversationTurns = (
+  messages: UIChatMessage[] | undefined,
+  assistantMessageId: string,
+): ConversationHistoryEntry[] =>
+  buildHeterogeneousConversationContext(
+    messages,
+    messages?.find((message) => message.id === assistantMessageId)?.parentId ?? undefined,
+  ).history;

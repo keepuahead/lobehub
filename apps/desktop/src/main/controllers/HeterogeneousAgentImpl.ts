@@ -109,6 +109,7 @@ import {
   resolveHeteroSpawnCwd,
 } from '@lobechat/heterogeneous-agents/workingDirectory';
 import type {
+  CodexForkTarget,
   HeterogeneousAgentModelCatalog,
   HeterogeneousServerDefaultApiConfig,
   HeteroSessionImportMessage,
@@ -286,6 +287,8 @@ interface StartSessionParams {
   agentType?: HeterogeneousCliAgentType;
   /** Additional CLI arguments */
   args?: string[];
+  /** Fork the resumed Codex thread at this native turn boundary before the next prompt. */
+  codexForkTarget?: CodexForkTarget;
   /** Command to execute */
   command: string;
   /** Working directory */
@@ -477,6 +480,7 @@ interface AgentSession {
    */
   cancelledByUs?: boolean;
   codexAppServerFallback?: boolean;
+  codexForkTarget?: CodexForkTarget;
   command: string;
   cursorAcpSession?: CursorAcpSession;
   cwd?: string;
@@ -686,11 +690,15 @@ export default class HeterogeneousAgentCtr {
       }
     },
     'codex': async (params, session) => {
+      const requiresFork = session.codexForkTarget !== undefined;
       if (
         session.hostedProviderBinding ||
         session.codexAppServerFallback ||
-        !(session.useCodexAppServer || this.isCodexAppServerLabEnabled)
+        !(requiresFork || session.useCodexAppServer || this.isCodexAppServerLabEnabled)
       ) {
+        if (requiresFork) {
+          throw new Error('Codex thread forks require the native Codex app-server runtime');
+        }
         return false;
       }
       const unsupportedArgs = getCodexAppServerUnsupportedArgs(session.args, {
@@ -700,6 +708,11 @@ export default class HeterogeneousAgentCtr {
         // `true` = app-server handled the prompt; `false` = fall through to
         // the generic `codex exec` spawn.
         return this.sendPromptWithCodexAppServer(params, session);
+      }
+      if (requiresFork) {
+        throw new Error(
+          `Codex thread forks cannot preserve these CLI arguments: ${unsupportedArgs.join(', ')}`,
+        );
       }
       if (session.agentSessionId) {
         const message = `Codex app-server cannot safely resume this session without dropping CLI arguments: ${unsupportedArgs.join(', ')}`;
@@ -1731,6 +1744,7 @@ export default class HeterogeneousAgentCtr {
       agentType,
       args: hostedProviderBinding?.args ?? params.args ?? [],
       command: params.command,
+      codexForkTarget: params.codexForkTarget,
       cwd: params.cwd,
       env: hostedProviderBinding?.env ?? params.env,
       hostedProviderBinding,
@@ -2189,24 +2203,29 @@ export default class HeterogeneousAgentCtr {
     // One app-server serves multiple topics; ownership belongs to each thread, not its process.
     const spawnEnv = this.buildSessionSpawnEnv(session, false);
     const commandPath = session.resolvedCommandPath ?? this.resolveSessionCommand(session);
-    const promptInput = buildHeterogeneousPrompt({
-      imageList: params.imageList,
-      isNewSession: this.needsSessionIntroduction(session),
-      prompt: params.prompt,
-      systemContext: params.systemContext,
-    });
-    let inputPlan;
-    try {
-      inputPlan = await buildAgentInput('codex', promptInput, { cacheDir: this.fileCacheDir });
-    } catch (error) {
-      logger.error('Failed to prepare Codex app-server input:', error);
-      throw new Error(
-        `Failed to attach image(s) to Codex app-server: ${this.getErrorMessage(error) || 'Unknown error'}`,
-        { cause: error },
-      );
-    }
-
-    const input = buildCodexAppServerInput(inputPlan);
+    const needsIntroduction = this.needsSessionIntroduction(session);
+    /** Prepare the prompt after determining whether the native fork retained any history. */
+    const prepareInput = async (isNewSession: boolean) => {
+      const promptInput = buildHeterogeneousPrompt({
+        imageList: params.imageList,
+        isNewSession,
+        prompt: params.prompt,
+        systemContext: params.systemContext,
+      });
+      try {
+        const inputPlan = await buildAgentInput('codex', promptInput, {
+          cacheDir: this.fileCacheDir,
+        });
+        return buildCodexAppServerInput(inputPlan);
+      } catch (error) {
+        logger.error('Failed to prepare Codex app-server input:', error);
+        throw new Error(
+          `Failed to attach image(s) to Codex app-server: ${this.getErrorMessage(error) || 'Unknown error'}`,
+          { cause: error },
+        );
+      }
+    };
+    const input = await prepareInput(needsIntroduction);
     const appServerArgs = buildCodexAppServerArgs(session.args);
     const initialModel = await resolveCodexInitialModel({ args: session.args, env: spawnEnv });
     if (initialModel?.model) {
@@ -2269,6 +2288,7 @@ export default class HeterogeneousAgentCtr {
       session.appServerSession ??
       new CodexThreadSession({
         client,
+        forkTarget: session.codexForkTarget,
         initialCumulativeUsage,
         initialModel: session.model,
         initialThreadId: session.agentSessionId,
@@ -2304,7 +2324,17 @@ export default class HeterogeneousAgentCtr {
 
     try {
       await appServerSession.run({
-        input,
+        input: async (isNewSession) => {
+          if (!isNewSession || needsIntroduction) return input;
+          // Forking before the first turn starts a fresh native thread even though the UI supplied a resume ID.
+          const freshInput = await prepareInput(true);
+          await this.writeCliTraceFile(
+            traceSession,
+            'stdin.txt',
+            `${JSON.stringify(freshInput)}\n`,
+          );
+          return freshInput;
+        },
         onRawMessage: (line) => this.appendCliTraceFile(traceSession, 'stdout.jsonl', line),
         operationId: params.operationId,
       });

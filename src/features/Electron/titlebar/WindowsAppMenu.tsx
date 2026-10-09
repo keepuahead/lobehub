@@ -27,9 +27,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   logo: css`
     display: flex;
+    gap: 4px;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+
     width: 100%;
     height: 100%;
   `,
@@ -46,6 +47,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
     width: 44px;
     height: 28px;
+
     /* Align the mark with the sidebar navigation icons below. */
     margin-inline-start: -4px;
     padding: 0;
