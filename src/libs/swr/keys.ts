@@ -879,10 +879,6 @@ export const toolKeys = {
   ]),
   composioConnections: def('tool:composioConnections', () => ['tool:composioConnections']),
   installedPlugins: def('tool:installedPlugins', () => ['tool:installedPlugins']),
-  uninstalledBuiltins: def('tool:uninstalledBuiltins', (workspaceId: string | null | undefined) => [
-    'tool:uninstalledBuiltins',
-    workspaceId,
-  ]),
 };
 
 // ---- global -------------------------------------------------------------
