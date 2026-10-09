@@ -1,3 +1,5 @@
+import { MemoryManifest } from '@lobechat/builtin-tool-memory';
+import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { getConnectorCatalog, RECOMMENDED_SKILLS, RecommendedSkillType } from '@lobechat/const';
 import { type AgentPluginMode, getDisabledPluginIds } from '@lobechat/types';
 import type { ItemType } from '@lobehub/ui';
@@ -34,6 +36,7 @@ import { useFetchInstalledPlugins } from '@/hooks/useFetchInstalledPlugins';
 import { usePermission } from '@/hooks/usePermission';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors, chatConfigByIdSelectors } from '@/store/agent/selectors';
+import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { serverConfigSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useToolStore } from '@/store/tool';
 import {
@@ -48,8 +51,17 @@ import { connectorSelectors } from '@/store/tool/slices/connector';
 import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore/types';
 
 import { useAgentId } from '../../hooks/useAgentId';
+import { useEffectiveModel } from '../../hooks/useEffectiveModel';
 import { useUpdateAgentConfig } from '../../hooks/useUpdateAgentConfig';
 import { closeToolDetailPopovers } from '../components/useDetailPopoverState';
+import { MemoryEffortControl } from '../Memory/Controls';
+import { useMemoryEnabled } from '../Memory/useMemoryEnabled';
+import { SearchAdvancedControls } from '../Search/Controls';
+import {
+  isCapabilityTool,
+  resolveCapabilityConfigPatch,
+  resolveCapabilityMode,
+} from './capabilityTools';
 import ComposioServerItem from './ComposioServerItem';
 import ComposioSkillIcon from './ComposioSkillIcon';
 import { SKILL_ICON_GAP, SKILL_ICON_SIZE, SKILL_TRAILING_CONTROL_SIZE } from './constants';
@@ -76,6 +88,38 @@ interface SkillDeleteConfig {
 
 interface SkillConfigureConfig {
   onConfigure: () => void;
+}
+
+interface SkillPolicyMenuOptions {
+  configureConfig?: SkillConfigureConfig;
+  /**
+   * @default 'auto'
+   */
+  defaultMode?: SkillPolicyMode;
+  deleteConfig?: SkillDeleteConfig;
+  /**
+   * Hide the activation options and show only the configure/delete actions. Used
+   * for integrations that exist but aren't connected yet (pending auth /
+   * re-authorize), where activation is meaningless but the user still needs a way
+   * to remove the entry.
+   */
+  deleteOnly?: boolean;
+  /**
+   * Activation state for rows whose on/off is NOT stored in `agents.plugins` —
+   * memory and web search derive it from chatConfig, so reading the plugin list
+   * would report the wrong state for them.
+   */
+  modeOverride?: SkillPolicyMode;
+  /**
+   * Capability settings rendered under the activation options (e.g. the memory
+   * effort level), so a capability row keeps its tuning after leaving the "+"
+   * menu.
+   */
+  panelExtra?: ReactNode;
+  /**
+   * @default ['pinned', 'auto', 'disabled']
+   */
+  supportedModes?: SkillPolicyMode[];
 }
 
 type SkillMenuItem = NonNullable<ItemType> & {
@@ -316,6 +360,12 @@ const styles = createStaticStyles(({ css }) => ({
       0 0 15px 0 #00000008,
       0 2px 30px 0 #00000014;
   `,
+  /* Capability rows (memory / web search) host their own settings under the
+     activation policy, so the panel takes the width those settings had as
+     standalone popovers instead of the compact 132px policy list. */
+  policyPanelWide: css`
+    width: 320px;
+  `,
   policyText: css`
     flex: 1;
     text-align: start;
@@ -497,9 +547,46 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   );
   const plugins = useAgentStore((s) => agentByIdSelectors.getAgentPluginsById(agentId)(s));
 
+  // Memory and web browsing are runtime-managed builtin tools: `hidden` keeps them
+  // out of `metaList`, and the shared engine rules force their enabled state from
+  // chatConfig rather than from `agents.plugins`. They still belong in the Tools
+  // popover's activation list, so their policy is derived from — and written back
+  // to — that same chatConfig. One source of truth keeps every other reader of it
+  // (memory injection, the search wiring) in agreement with this list.
+  const isMemoryCapabilityEnabled = useMemoryEnabled(agentId);
+  const { model, provider } = useEffectiveModel(agentId);
+  const searchMode = useAgentStore((s) => chatConfigByIdSelectors.getSearchModeById(agentId)(s));
+  const isModelBuiltinSearchInternal = useAiInfraStore(
+    aiModelSelectors.isModelBuiltinSearchInternal(model, provider),
+  );
+  // A model whose built-in search can never be turned off has no Disabled state to
+  // offer — the action would write a config the runtime keeps overriding.
+  const isSearchCapabilityEnabled = isModelBuiltinSearchInternal || searchMode !== 'off';
+  const searchCapabilityModes = useMemo<SkillPolicyMode[]>(
+    () => (isModelBuiltinSearchInternal ? ['auto'] : ['auto', 'disabled']),
+    [isModelBuiltinSearchInternal],
+  );
+  const disabledCapabilityIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!isMemoryCapabilityEnabled) ids.add(MemoryManifest.identifier);
+    if (!isSearchCapabilityEnabled) ids.add(WebBrowsingManifest.identifier);
+    return ids;
+  }, [isMemoryCapabilityEnabled, isSearchCapabilityEnabled]);
+
   const updateSkillPolicy = useCallback(
     async (id: string, mode: SkillPolicyMode) => {
       if (!canEdit) return;
+
+      // Capability rows do not live in `agents.plugins`: their Auto/Disable actions
+      // write the chatConfig the engine reads (see `capabilityTools`), so the row and
+      // the actual tool set can never disagree. Pinned is not offered for them, hence
+      // a missing patch is simply nothing to apply.
+      if (isCapabilityTool(id)) {
+        const patch = resolveCapabilityConfigPatch(id, mode);
+        if (patch) await updateAgentChatConfig(patch);
+        return;
+      }
+
       const currentMode: SkillPolicyMode = checkedSet.has(id)
         ? 'pinned'
         : disabledIdSet.has(id)
@@ -509,7 +596,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
 
       await setPluginMode(id, mode);
     },
-    [canEdit, checkedSet, disabledIdSet, setPluginMode],
+    [canEdit, checkedSet, disabledIdSet, setPluginMode, updateAgentChatConfig],
   );
 
   const openSkillPolicyMenu = useCallback((id: string) => {
@@ -518,23 +605,19 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   }, []);
 
   const renderPolicyMenu = useCallback(
-    (
-      id: string,
-      deleteConfig?: SkillDeleteConfig,
-      configureConfig?: SkillConfigureConfig,
-      // When true, hide the Pinned/Auto activation options and show only the
-      // configure/delete actions. Used for integrations that exist but aren't
-      // connected yet (pending auth / re-authorize), where activation is
-      // meaningless but the user still needs a way to remove the entry.
-      deleteOnly = false,
-      supportedModes: SkillPolicyMode[] = ['pinned', 'auto', 'disabled'],
-      defaultMode: SkillPolicyMode = 'auto',
-    ) => {
-      const mode: SkillPolicyMode = checkedSet.has(id)
-        ? 'pinned'
-        : disabledIdSet.has(id)
-          ? 'disabled'
-          : defaultMode;
+    (id: string, options: SkillPolicyMenuOptions = {}) => {
+      const {
+        configureConfig,
+        defaultMode = 'auto',
+        deleteConfig,
+        deleteOnly = false,
+        modeOverride,
+        panelExtra,
+        supportedModes = ['pinned', 'auto', 'disabled'],
+      } = options;
+      const mode: SkillPolicyMode =
+        modeOverride ??
+        (checkedSet.has(id) ? 'pinned' : disabledIdSet.has(id) ? 'disabled' : defaultMode);
       const renderCheck = (value: SkillPolicyMode) =>
         mode === value ? (
           <span className={cx(styles.policyCheck)}>
@@ -573,7 +656,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
 
       const content = (
         <div
-          className={cx(styles.policyPanel)}
+          className={cx(styles.policyPanel, panelExtra && styles.policyPanelWide)}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.stopPropagation()}
         >
@@ -657,6 +740,8 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <span className={cx(styles.policyText)}>{t('tools.builtins.uninstall')}</span>
             </button>
           )}
+          {panelExtra && <div className={cx(styles.deleteDivider)} />}
+          {panelExtra}
         </div>
       );
 
@@ -743,14 +828,16 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
     ({
       badge,
       configureConfig,
+      defaultMode,
       deleteConfig,
       extraTag,
       icon,
       id,
+      modeOverride,
+      panelExtra,
       popoverContent,
-      defaultMode,
-      supportedModes,
       searchText,
+      supportedModes,
       title,
     }: {
       badge?: ReactNode;
@@ -760,9 +847,11 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
       extraTag?: ReactNode;
       icon: ReactNode;
       id: string;
+      modeOverride?: SkillPolicyMode;
+      panelExtra?: ReactNode;
       popoverContent?: ReactNode;
-      supportedModes?: SkillPolicyMode[];
       searchText?: string;
+      supportedModes?: SkillPolicyMode[];
       title: ReactNode;
     }): SkillMenuItem =>
       ({
@@ -771,7 +860,14 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         label: renderToolLabel(
           id,
           title,
-          renderPolicyMenu(id, deleteConfig, configureConfig, false, supportedModes, defaultMode),
+          renderPolicyMenu(id, {
+            configureConfig,
+            defaultMode,
+            deleteConfig,
+            modeOverride,
+            panelExtra,
+            supportedModes,
+          }),
           badge,
           icon,
           extraTag,
@@ -1003,15 +1099,13 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
             const removableId = server?.identifier ?? type.identifier;
             if (server || checkedSet.has(type.identifier) || disabledIdSet.has(type.identifier)) {
               return {
-                extra: renderPolicyMenu(
-                  removableId,
-                  {
+                extra: renderPolicyMenu(removableId, {
+                  deleteConfig: {
                     displayName: type.label,
                     onDelete: () => removeComposioServer(removableId),
                   },
-                  undefined,
-                  true,
-                ),
+                  deleteOnly: true,
+                }),
                 key: removableId,
                 label: (
                   <span
@@ -1164,6 +1258,72 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         });
       }),
     [filteredBuiltinList, t, createManagedSkillItem, uninstallBuiltinTool],
+  );
+
+  // Memory / web browsing rows. Both are builtin tools the engine turns on from
+  // chatConfig, so their activation policy is derived from — and written back to —
+  // that same config instead of `agents.plugins`: Auto keeps the engine default,
+  // Disable turns the capability off and moves the row to the Disabled group. Their
+  // own settings travel with the row (`panelExtra`), because the "+" menu no longer
+  // hosts them.
+  const capabilityItems: SkillMenuItem[] = useMemo(
+    () =>
+      [
+        {
+          enabled: isMemoryCapabilityEnabled,
+          manifest: MemoryManifest,
+          panelExtra: <MemoryEffortControl />,
+          supportedModes: ['auto', 'disabled'] as SkillPolicyMode[],
+        },
+        {
+          enabled: isSearchCapabilityEnabled,
+          manifest: WebBrowsingManifest,
+          panelExtra: <SearchAdvancedControls />,
+          supportedModes: searchCapabilityModes,
+        },
+      ].map(({ enabled, manifest, panelExtra, supportedModes }) => {
+        const { identifier } = manifest;
+        const avatar = manifest.meta?.avatar;
+        const title = t(`tools.builtins.${identifier}.title` as any, { defaultValue: identifier });
+
+        return createManagedSkillItem({
+          icon: avatar ? (
+            <Avatar avatar={avatar} shape={'square'} size={SKILL_ICON_SIZE} />
+          ) : (
+            <Icon icon={SkillsIcon} size={SKILL_ICON_SIZE} />
+          ),
+          id: identifier,
+          modeOverride: resolveCapabilityMode(enabled),
+          panelExtra,
+          popoverContent: (
+            <ToolItemDetailPopover
+              identifier={identifier}
+              sourceLabel={t('skillStore.tabs.lobehub')}
+              title={title}
+              description={t(`tools.builtins.${identifier}.description` as any, {
+                defaultValue: '',
+              })}
+              icon={
+                avatar ? (
+                  <Avatar avatar={avatar} shape={'square'} size={36} />
+                ) : (
+                  <Icon icon={SkillsIcon} size={36} />
+                )
+              }
+            />
+          ),
+          searchText: `${title} ${identifier}`,
+          supportedModes,
+          title,
+        });
+      }),
+    [
+      createManagedSkillItem,
+      isMemoryCapabilityEnabled,
+      isSearchCapabilityEnabled,
+      searchCapabilityModes,
+      t,
+    ],
   );
 
   // Builtin runtime tools support an explicit pinned/disabled policy. They intentionally
@@ -1525,10 +1685,25 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
     );
   };
   const allPinnedItems = allSkillItems.filter((item) => checkedSet.has(String(item.key)));
-  const allAutoItems = allSkillItems.filter(
-    (item) => !checkedSet.has(String(item.key)) && !disabledIdSet.has(String(item.key)),
+  // Capability rows keep their activation state in chatConfig rather than in
+  // `plugins`, so they are partitioned from that state and lead the Auto group, where
+  // the two most fundamental capabilities stay easy to find.
+  const capabilityAutoItems = capabilityItems.filter(
+    (item) => !disabledCapabilityIds.has(String(item.key)),
   );
-  const allDisabledItems = allSkillItems.filter((item) => disabledIdSet.has(String(item.key)));
+  const capabilityDisabledItems = capabilityItems.filter((item) =>
+    disabledCapabilityIds.has(String(item.key)),
+  );
+  const allAutoItems = [
+    ...capabilityAutoItems,
+    ...allSkillItems.filter(
+      (item) => !checkedSet.has(String(item.key)) && !disabledIdSet.has(String(item.key)),
+    ),
+  ];
+  const allDisabledItems = [
+    ...capabilityDisabledItems,
+    ...allSkillItems.filter((item) => disabledIdSet.has(String(item.key))),
+  ];
   const fixedPinnedItems = fixedItems.filter((item) => !disabledIdSet.has(String(item.key)));
   const fixedDisabledItems = fixedItems.filter((item) => disabledIdSet.has(String(item.key)));
   // Enabled builtin tools lead the pinned section. All disabled tools and skills live in

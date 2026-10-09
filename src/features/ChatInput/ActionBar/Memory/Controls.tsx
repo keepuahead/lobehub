@@ -94,13 +94,58 @@ const ToggleItem = memo<ToggleOption>(({ value, description, icon, label }) => {
   );
 });
 
-const Controls = memo(() => {
+/**
+ * Agent-level memory effort override. Rendered next to the Auto/Disable policy of
+ * the memory capability row in the chat-input Tools popover, so moving the memory
+ * entry out of the "+" menu keeps its tuning reachable.
+ */
+export const MemoryEffortControl = memo(() => {
   const { t } = useTranslation('chat');
   const agentId = useAgentId();
   const { updateAgentChatConfig } = useUpdateAgentConfig();
   const isEnabled = useMemoryEnabled(agentId);
   const { allowed: canCreate } = usePermission('create_content');
   const effort = useAgentStore((s) => chatConfigByIdSelectors.getMemoryToolEffortById(agentId)(s));
+
+  if (!isEnabled) return null;
+
+  return (
+    <Flexbox horizontal align={'center'} gap={16} padding={8}>
+      <Flexbox flex={1} gap={4} style={{ minWidth: 100 }}>
+        <div className={styles.title}>{t('memory.effort.title')}</div>
+        <div className={styles.description}>{t('memory.effort.desc')}</div>
+      </Flexbox>
+      <Flexbox
+        flex={1}
+        style={{
+          opacity: canCreate ? undefined : 0.5,
+          pointerEvents: canCreate ? undefined : 'none',
+        }}
+      >
+        <LevelSlider<UserMemoryEffort>
+          defaultValue="medium"
+          levels={MEMORY_EFFORT_LEVELS}
+          value={effort}
+          marks={{
+            0: t('memory.effort.low.title'),
+            1: t('memory.effort.medium.title'),
+            2: t('memory.effort.high.title'),
+          }}
+          onChange={async (value) => {
+            if (!canCreate) return;
+            await updateAgentChatConfig({ memory: { effort: value, enabled: true } });
+          }}
+        />
+      </Flexbox>
+    </Flexbox>
+  );
+});
+
+MemoryEffortControl.displayName = 'MemoryEffortControl';
+
+const Controls = memo(() => {
+  const { t } = useTranslation('chat');
+  const isEnabled = useMemoryEnabled(useAgentId());
 
   const toggleOptions: ToggleOption[] = [
     {
@@ -125,34 +170,7 @@ const Controls = memo(() => {
       {isEnabled && (
         <>
           <Divider style={{ margin: 0 }} />
-          <Flexbox horizontal align={'center'} gap={16} padding={8}>
-            <Flexbox flex={1} gap={4} style={{ minWidth: 100 }}>
-              <div className={styles.title}>{t('memory.effort.title')}</div>
-              <div className={styles.description}>{t('memory.effort.desc')}</div>
-            </Flexbox>
-            <Flexbox
-              flex={1}
-              style={{
-                opacity: canCreate ? undefined : 0.5,
-                pointerEvents: canCreate ? undefined : 'none',
-              }}
-            >
-              <LevelSlider<UserMemoryEffort>
-                defaultValue="medium"
-                levels={MEMORY_EFFORT_LEVELS}
-                value={effort}
-                marks={{
-                  0: t('memory.effort.low.title'),
-                  1: t('memory.effort.medium.title'),
-                  2: t('memory.effort.high.title'),
-                }}
-                onChange={async (value) => {
-                  if (!canCreate) return;
-                  await updateAgentChatConfig({ memory: { effort: value, enabled: true } });
-                }}
-              />
-            </Flexbox>
-          </Flexbox>
+          <MemoryEffortControl />
         </>
       )}
     </Flexbox>
