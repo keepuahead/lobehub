@@ -298,12 +298,15 @@ export const copyMessagesInDatabase = async ({
     toolCallId: sql`case
       when ${messagePlugins.toolCallId} is null then null
       else ${remappedToolId(
-        // Plugins belong to the tool-result row; its parent owns the tool call.
-        // Legacy plugins stored on the assistant itself retain that row's seed.
+        // A separate result borrows its parent's seed only when that parent owns the call.
+        // Legacy same-row calls/plugins retain their own seed, regardless of parent role.
         sql`coalesce((
           select _assistant.new_id from ${messages} _result
           join _copy_msg_id_map _assistant on _assistant.source_id = _result.parent_id
+          join ${messages} _owner on _owner.id = _assistant.source_id
           where _result.id = ${messagePlugins.id} and _result.role = 'tool'
+            and _owner.tools @> jsonb_build_array(jsonb_build_object('id', ${messagePlugins.toolCallId}))
+            and not coalesce(_result.tools @> jsonb_build_array(jsonb_build_object('id', ${messagePlugins.toolCallId})), false)
         ), ${newMessageId})`,
         sql`${messagePlugins.toolCallId}`,
       )}

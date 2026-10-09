@@ -461,9 +461,11 @@ export const dispatchHeteroAgent = async (
       // creator-facing default would hand the agent an empty history.
       const fileService = new FileService(deps.db, deps.userId, deps.workspaceId);
       const recentMsgs = await deps.messageModel.query(
-        { topicId, pageSize: 200 },
+        { topicId, pageSize: 200, skipWorks: true },
         {
           allowShareVisitor: true,
+          // Native parent IDs can lead into compressed or parallel message groups.
+          includeGroupedMessages: true,
           // Database rows carry storage keys; a device CLI needs freshly signed URLs.
           // MessageModel still enforces attachment ownership before invoking this callback.
           postProcessUrl: (path) => fileService.getFullFileUrl(path),

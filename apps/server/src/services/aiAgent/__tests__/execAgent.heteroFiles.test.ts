@@ -1116,6 +1116,8 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
       }),
     );
     const queryOptions = mockMessageQuery.mock.calls.at(-1)?.[1];
+    /** @example Native replay can follow IDs inside compressed history. */
+    expect(queryOptions.includeGroupedMessages).toBe(true);
     /** @example Device replay resolves persisted storage keys with the authorized file service. */
     expect(await queryOptions.postProcessUrl('persisted-red.png')).toBe(
       'https://files.test/signed/persisted-red.png',
