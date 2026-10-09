@@ -18,6 +18,16 @@ inputs:
 runs:
   using: composite
   steps:
+    # Several self-hosted runners share one Linux user. Give each runner its own
+    # HOME so pnpm (~/setup-pnpm), bun (~/.bun) and caches do not race.
+    - name: Isolate HOME on self-hosted runners
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      run: |
+        home="$(dirname "$RUNNER_WORKSPACE")/_home"
+        mkdir -p "$home"
+        echo "HOME=$home" >> "$GITHUB_ENV"
+
     - name: Install pnpm
       uses: pnpm/action-setup@v6
       with:
