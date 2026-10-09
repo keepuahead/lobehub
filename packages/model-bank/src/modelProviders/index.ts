@@ -189,7 +189,6 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   TogetherAIProvider,
   FireworksAIProvider,
   FreeAIapikeyProvider,
-  FreeAIapikeyProvider,
   GroqProvider,
   PerplexityProvider,
   ModelScopeProvider,
