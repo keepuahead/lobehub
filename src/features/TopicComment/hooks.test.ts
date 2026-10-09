@@ -93,6 +93,7 @@ const seedThreads = (
     isLoadingMore?: boolean;
     loadMoreError?: unknown;
     messageId?: string;
+    nextCursor?: string | null;
   } = {},
 ) =>
   useTopicCommentStore.setState((state) => ({
@@ -104,7 +105,7 @@ const seedThreads = (
         isLoadingMore: options.isLoadingMore,
         items,
         loadMoreError: options.loadMoreError,
-        nextCursor: null,
+        nextCursor: options.nextCursor ?? null,
         total: items.length,
       },
     },
@@ -1200,7 +1201,7 @@ describe('topic comment read hooks', () => {
   it('exposes a tail error without turning it into an initial failure', () => {
     const error = new Error('next page failed');
     const thread = threadOf({ id: 'comment-1' } as TopicCommentItem);
-    seedThreads('topic-1', [thread], { hasMore: true, loadMoreError: error });
+    seedThreads('topic-1', [thread], { hasMore: true, loadMoreError: error, nextCursor: 'c2' });
 
     const { result } = renderHook(() => useTopicCommentThreads('topic-1'));
 
@@ -1209,6 +1210,43 @@ describe('topic comment read hooks', () => {
     expect(result.current.isInitialError).toBe(false);
     expect(result.current.isLoadingMore).toBe(false);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it('retries the failed cursor request on reload instead of the head', async () => {
+    const error = new Error('next page failed');
+    const thread = threadOf({ id: 'comment-1' } as TopicCommentItem);
+    seedThreads('topic-1', [thread], { hasMore: true, loadMoreError: error, nextCursor: 'c2' });
+
+    const { result } = renderHook(() => useTopicCommentThreads('topic-1'));
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    // The head-only revalidation cannot reach the page that failed: reload must
+    // re-issue the cursor request.
+    expect(mocks.listThreads).toHaveBeenCalledWith({
+      cursor: 'c2',
+      limit: 30,
+      messageId: undefined,
+      topicId: 'topic-1',
+    });
+  });
+
+  it('revalidates the head when there is no tail error to retry', async () => {
+    seedThreads('topic-1', [threadOf({ id: 'comment-1' } as TopicCommentItem)], {
+      hasMore: true,
+      nextCursor: 'c2',
+    });
+
+    const { result } = renderHook(() => useTopicCommentThreads('topic-1'));
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    expect(mocks.mutate.mock.calls.some(([key]) => typeof key === 'function')).toBe(true);
+    expect(mocks.listThreads).not.toHaveBeenCalled();
   });
 
   it('marks a first-page failure as an initial error', () => {

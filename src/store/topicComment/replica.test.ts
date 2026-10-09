@@ -263,6 +263,66 @@ describe('topicComment replicas', () => {
     );
   });
 
+  it('drops the loaded tail when the feed is revalidated for an event', async () => {
+    listThreadsSpy
+      .mockResolvedValueOnce({ items: [thread('a')], nextCursor: 'c1' })
+      .mockResolvedValueOnce({ items: [thread('b')], nextCursor: null })
+      .mockResolvedValueOnce({ items: [thread('a')], nextCursor: 'c1' });
+
+    renderHook(() => useTopicCommentStore((s) => s.useFetchTopicCommentThreads)(THREAD_PARAMS), {
+      wrapper,
+    });
+    await waitFor(() =>
+      expect(ids(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY])).toEqual(['a']),
+    );
+
+    await act(async () => {
+      await useTopicCommentStore.getState().loadMoreTopicCommentThreads(THREAD_PARAMS);
+    });
+    expect(ids(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY])).toEqual(['a', 'b']);
+    expect(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY]?.currentPage).toBe(1);
+
+    await act(async () => {
+      await useTopicCommentStore.getState().revalidateTopicCommentThreads(THREAD_PARAMS);
+    });
+
+    // A head-only refresh would keep the stale tail: the view collapses to the
+    // refreshed head page instead.
+    await waitFor(() =>
+      expect(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY]?.currentPage).toBe(0),
+    );
+    expect(ids(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY])).toEqual(['a']);
+  });
+
+  it('does not paint a warmup that lands after the cache scope changed', async () => {
+    let resolveThreads: ((page: unknown) => void) | undefined;
+    listThreadsSpy
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveThreads = resolve;
+          }),
+      )
+      .mockImplementation(pending);
+
+    const prefetch = useTopicCommentStore.getState().prefetchTopicComments('topic-1');
+    await waitFor(() => expect(resolveThreads).toBeDefined());
+
+    // The identity changes while the warmup is in flight, and a consumer mounts
+    // in the new partition — that partition's replica slot is now the active one.
+    useScope(`topic-user-${randomUUID()}:personal`);
+    renderHook(() => useTopicCommentStore((s) => s.useFetchTopicCommentThreads)(THREAD_PARAMS), {
+      wrapper,
+    });
+
+    await act(async () => {
+      resolveThreads!({ items: [thread('late')], nextCursor: null });
+      await prefetch;
+    });
+
+    expect(useTopicCommentStore.getState().threadFeedMap[THREAD_VIEW_KEY]).toBeUndefined();
+  });
+
   it('keeps one comment by id in the detail view and drops it from view and storage', async () => {
     act(() => useTopicCommentStore.getState().upsertTopicCommentDetail(comment('comment-1')));
 

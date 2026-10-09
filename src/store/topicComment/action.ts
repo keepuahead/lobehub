@@ -100,10 +100,11 @@ export class TopicCommentActionImpl {
       rootCommentId: params.rootCommentId,
     });
 
-  #prefetchReplies = async (rootCommentId: string) => {
+  #prefetchReplies = async (rootCommentId: string, scope: string) => {
     const params = { pageSize: TOPIC_COMMENT_PAGE_SIZE, rootCommentId };
     const page = await this.#fetchReplies(params);
-    this.#replies.replace(params, page);
+    // `scope` was captured before the request (see `prefetchTopicComments`).
+    this.#replies.replace(params, page, scope);
   };
 
   #fetchThreads = (params: TopicCommentThreadsParams, cursor?: string) =>
@@ -147,11 +148,22 @@ export class TopicCommentActionImpl {
   loadMoreTopicCommentReplies = (params: TopicCommentRepliesParams) =>
     this.#replies.loadMore(params.rootCommentId, params);
 
-  revalidateTopicCommentThreads = (params: TopicCommentThreadsParams) =>
-    this.#thread.revalidate(topicCommentThreadsKey(params));
+  /**
+   * Re-read a feed after an event or an explicit refresh. A head-only
+   * revalidation keeps the already-loaded tail pages, so a change another
+   * member made to an older page would survive it — drop the tail first, then
+   * re-read the head; the next "load more" walks the pages below it again.
+   */
+  revalidateTopicCommentThreads = (params: TopicCommentThreadsParams) => {
+    const key = topicCommentThreadsKey(params);
+    this.#thread.collapse(key);
+    return this.#thread.revalidate(key);
+  };
 
-  revalidateTopicCommentReplies = (params: TopicCommentRepliesParams) =>
-    this.#replies.revalidate(params.rootCommentId);
+  revalidateTopicCommentReplies = (params: TopicCommentRepliesParams) => {
+    this.#replies.collapse(params.rootCommentId);
+    return this.#replies.revalidate(params.rootCommentId);
+  };
 
   revalidateTopicCommentSummary = (topicId: string) => this.#summary.revalidate(topicId);
 
@@ -184,8 +196,13 @@ export class TopicCommentActionImpl {
     this.#prefetching.add(topicId);
     try {
       const params = { pageSize: TOPIC_COMMENT_PAGE_SIZE, topicId };
+      // Capture the partition before the request. A warmup that lands after a
+      // workspace / account switch must not paint, or persist, the previous
+      // identity's rows into the new one: resolving the scope at write time
+      // would target whatever partition is active when the response arrives.
+      const scope = topicCommentThreadResource.scope.get();
       const threads = await this.#fetchThreads(params);
-      this.#thread.replace(params, threads);
+      this.#thread.replace(params, threads, scope);
 
       const rootCommentIds = threads.items.flatMap(({ replyCount, root }) =>
         replyCount > 0 ? [root.id] : [],
@@ -194,7 +211,7 @@ export class TopicCommentActionImpl {
         await Promise.all(
           rootCommentIds
             .slice(index, index + PREFETCH_CONCURRENCY)
-            .map((rootCommentId) => this.#prefetchReplies(rootCommentId)),
+            .map((rootCommentId) => this.#prefetchReplies(rootCommentId, scope)),
         );
       }
     } catch {

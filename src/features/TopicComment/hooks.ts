@@ -324,14 +324,17 @@ export const useTopicCommentThreads = (topicId?: string | null, messageId?: stri
   const isInitialError = Boolean(sync.error) && !hasLoadedPages;
   const isLoadingInitial = !sync.error && sync.isValidating && !hasLoadedPages;
   const isLoadingMore = !sync.error && (data?.isLoadingMore ?? false);
+  const hasTailError = Boolean(data?.loadMoreError);
   const loadMore = useCallback(
     () => (params ? loadMoreThreads(params) : Promise.resolve()),
     [loadMoreThreads, params],
   );
-  const reload = useCallback(
-    () => (params ? revalidateThreads(params) : Promise.resolve()),
-    [params, revalidateThreads],
-  );
+  const reload = useCallback(() => {
+    if (!params) return Promise.resolve();
+    // A failed cursor request is retried with its own cursor: a head-only
+    // revalidation cannot reach the page that failed.
+    return hasTailError ? loadMoreThreads(params) : revalidateThreads(params);
+  }, [hasTailError, loadMoreThreads, params, revalidateThreads]);
 
   return {
     error,
@@ -339,7 +342,7 @@ export const useTopicCommentThreads = (topicId?: string | null, messageId?: stri
     isInitialError,
     isLoadingInitial,
     isLoadingMore,
-    isRetrying: Boolean(sync.error) && sync.isValidating,
+    isRetrying: Boolean(error) && (sync.isValidating || Boolean(data?.isLoadingMore)),
     items,
     loadMore,
     pendingCommentIds,
@@ -419,14 +422,17 @@ export const useTopicCommentReplies = (
   const isInitialError = Boolean(sync.error) && !hasLoadedPages;
   const isLoadingInitial = !sync.error && sync.isValidating && !hasLoadedPages;
   const isLoadingMore = !sync.error && (data?.isLoadingMore ?? false);
+  const hasTailError = Boolean(data?.loadMoreError);
   const loadMore = useCallback(
     () => (params ? loadMoreReplies(params) : Promise.resolve()),
     [loadMoreReplies, params],
   );
-  const reload = useCallback(
-    () => (params ? revalidateReplies(params) : Promise.resolve()),
-    [params, revalidateReplies],
-  );
+  const reload = useCallback(() => {
+    if (!params) return Promise.resolve();
+    // A failed cursor request is retried with its own cursor: a head-only
+    // revalidation cannot reach the page that failed.
+    return hasTailError ? loadMoreReplies(params) : revalidateReplies(params);
+  }, [hasTailError, loadMoreReplies, params, revalidateReplies]);
 
   return {
     error,
@@ -434,7 +440,7 @@ export const useTopicCommentReplies = (
     isInitialError,
     isLoadingInitial,
     isLoadingMore,
-    isRetrying: Boolean(sync.error) && sync.isValidating,
+    isRetrying: Boolean(error) && (sync.isValidating || Boolean(data?.isLoadingMore)),
     items,
     loadMore,
     pendingCommentIds,
