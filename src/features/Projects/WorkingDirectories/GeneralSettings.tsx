@@ -1,5 +1,6 @@
-import { Flexbox, Form } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
 import { Button, confirmModal, Input, TextArea, toast } from '@lobehub/ui/base-ui';
+import { Form } from '@lobehub/ui/base-ui/form';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
