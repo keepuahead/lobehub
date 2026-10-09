@@ -108,7 +108,8 @@ describe('createCodexAgentHandle', () => {
     // ROOT CAUSE:
     // CodexThreadSession resolves after a transport interruption so Desktop can resume later.
     // The device bridge previously converted every resolved turn into exit code zero.
-    // Preserve the runtime terminal while leaving partial events and native history intact.
+    // Exit code 1 alone left the persisted error unclassified, so the UI could not Continue.
+    // Preserve partial events and native history while reporting a recoverable transport error.
     const partial: AgentStreamEvent = {
       data: { content: 'RECOVERY_STEP_ONE' },
       operationId: 'op-device',
@@ -137,13 +138,51 @@ describe('createCodexAgentHandle', () => {
     /** @example An interrupted native turn is not a successful empty completion. */
     expect(await handle.exit).toEqual({ code: 1, signal: null });
     /** @example Completed tool/text output and interruption provenance remain available to ingest. */
-    expect(received).toEqual([partial, interrupted]);
+    expect(received).toEqual([
+      partial,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentType: 'codex',
+          code: 'overloaded',
+          details: { kind: 'network_drop' },
+        }),
+        operationId: 'op-device',
+        type: 'error',
+      }),
+      interrupted,
+    ]);
     /** @example A later explicit continuation can still use the original native history. */
     expect(handle.sessionId).toBe('existing-native');
     /** @example The device finish report explains interruption without pretending history was lost. */
     expect(stderr).toContain('interrupted before completion');
     /** @example No implicit replay is started after the interruption. */
     expect(mocks.run).toHaveBeenCalledOnce();
+  });
+
+  /** @example UI Stop remains a neutral cancellation even when native transport ends. */
+  it('does not offer automatic recovery for an explicitly cancelled native turn', async () => {
+    let finishTurn!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finishTurn = resolve;
+    });
+    mocks.run.mockReturnValue(finished);
+    const handle = await createCodexAgentHandle(options);
+    handle.kill('SIGINT');
+    const interrupted: AgentStreamEvent = {
+      data: { reason: 'interrupted' },
+      operationId: 'op-device',
+      stepIndex: 0,
+      timestamp: 2,
+      type: 'agent_runtime_end',
+    };
+    await mocks.options[0].onEvents([interrupted]);
+    finishTurn();
+    const received: AgentStreamEvent[] = [];
+    for await (const event of handle.events) received.push(event);
+    /** @example Intentional Stop must not create an overloaded card or schedule auto-retry. */
+    expect(received).toEqual([interrupted]);
+    /** @example The exit contract retains the user's cancellation signal. */
+    expect(await handle.exit).toEqual({ code: null, signal: 'SIGINT' });
   });
 
   /** @example A before-first-turn child gets its own introduction and keeps its image. */

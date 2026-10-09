@@ -6,6 +6,7 @@ import { type AgentPromptInput, buildHeterogeneousPrompt } from '../protocol';
 import { createEventQueue } from '../spawn/agentEventQueue';
 import { buildAgentInput } from '../spawn/input';
 import type { SpawnAgentHandle } from '../spawn/spawnAgent';
+import type { HeterogeneousTerminalErrorData } from '../types';
 import {
   buildCodexAppServerInput,
   buildCodexAppServerThreadParams,
@@ -105,11 +106,30 @@ export const createCodexAgentHandle = async (
     initialThreadId: options.resumeSessionId,
     onEvents: (batch) => {
       // The shared session resolves after transport loss to allow a later explicit resume.
-      // Preserve that terminal state for the device CLI's exit-based finish report.
-      interrupted ||= batch.some(
+      // Exit code alone cannot preserve the device status guide through the ingest/finish loop.
+      // Report unexpected process loss before its terminal event; UI Stop remains neutral.
+      const interruptedIndex = batch.findIndex(
         (event) => event.type === 'agent_runtime_end' && event.data?.reason === 'interrupted',
       );
-      return events.push(batch);
+      if (interruptedIndex < 0 || cancelledSignal || interrupted) return events.push(batch);
+      interrupted = true;
+      const terminalEvent = batch[interruptedIndex];
+      const message = 'The connection to the native Codex process was lost before completion.';
+      return events.push([
+        ...batch.slice(0, interruptedIndex),
+        {
+          ...terminalEvent,
+          data: {
+            agentType: 'codex',
+            code: 'overloaded',
+            details: { kind: 'network_drop' },
+            error: message,
+            message,
+          } satisfies HeterogeneousTerminalErrorData,
+          type: 'error',
+        },
+        ...batch.slice(interruptedIndex),
+      ]);
     },
     onRuntimeStatus: () => {},
     onSessionId: (id) => {
