@@ -32,7 +32,7 @@ export const generateServerI18n = async (root = repoRoot) => {
   // Keep analysis independent of stale generated types and expose only a stable resource contract.
   await writeIfChanged(
     path.join(generated, 'resources.d.ts'),
-    "import type { ServerResources } from '../render';\nexport declare const serverResources: ServerResources;\n",
+    "import type { ServerResources } from '../render';\n\nexport declare const serverResources: ServerResources;\n",
   );
   const appFiles = await sourceFiles(path.join(root, 'src/app'));
   const entries = appFiles.filter((file) =>
