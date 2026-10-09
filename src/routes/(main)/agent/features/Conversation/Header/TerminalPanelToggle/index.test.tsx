@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalPanelToggle from './index';
 
 const mocks = vi.hoisted(() => ({
+  deviceCount: 0,
+  isDesktop: true,
   showTerminalPanel: false,
   toggleTerminalPanel: vi.fn(),
 }));
@@ -23,7 +25,19 @@ vi.mock('@lobehub/ui/base-ui', async (importOriginal) => {
   };
 });
 
-vi.mock('@/const/version', () => ({ isDesktop: true }));
+vi.mock('@/const/version', () => ({
+  get isDesktop() {
+    return mocks.isDesktop;
+  },
+}));
+
+vi.mock('@/store/device', () => ({
+  deviceSelectors: {
+    deviceList: (s: { devices: unknown[] }) => s.devices,
+  },
+  useDeviceStore: (selector: (state: { devices: unknown[] }) => unknown) =>
+    selector({ devices: Array.from({ length: mocks.deviceCount }) }),
+}));
 
 vi.mock('@/store/global', () => ({
   useGlobalStore: (
@@ -57,6 +71,8 @@ vi.mock('@/store/user/selectors', () => ({
 
 describe('TerminalPanelToggle', () => {
   beforeEach(() => {
+    mocks.deviceCount = 0;
+    mocks.isDesktop = true;
     mocks.showTerminalPanel = false;
     mocks.toggleTerminalPanel.mockReset();
     actionIconPropsSpy.mockClear();
@@ -76,5 +92,23 @@ describe('TerminalPanelToggle', () => {
     rerender(<TerminalPanelToggle key="open" />);
 
     expect(actionIconPropsSpy).toHaveBeenCalledWith(expect.objectContaining({ active: true }));
+  });
+
+  it('stays hidden on the web while no device is connected', () => {
+    mocks.isDesktop = false;
+
+    render(<TerminalPanelToggle />);
+
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('appears on the web once a device is connected', () => {
+    mocks.isDesktop = false;
+    mocks.deviceCount = 1;
+
+    render(<TerminalPanelToggle />);
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(mocks.toggleTerminalPanel).toHaveBeenCalledTimes(1);
   });
 });

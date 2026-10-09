@@ -2725,6 +2725,7 @@ export default {
   'terminalPanel.createFailed': 'Failed to start the terminal session',
   'terminalPanel.newTab': 'New terminal',
   'terminalPanel.split': 'Split terminal',
+  'terminalPanel.targetLocal': 'This computer',
   'terminalPanel.title': 'Terminal',
   'thread.threadMessageCount': '{{messageCount}} messages',
   'thread.title': 'Subtopic',
