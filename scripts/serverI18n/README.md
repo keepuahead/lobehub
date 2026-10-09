@@ -7,6 +7,14 @@ before bundling; their development servers regenerate when source or locale file
 change. CI generates fresh resources before tests. Generated resources are not
 translation sources: edit `packages/locales/src/default/` and the locale JSON files.
 
+Applications embedding this repository must call `prepareServerI18n(applicationRoot)`
+from their own build configuration and await `watchServerI18n(applicationRoot)` in
+development. The application root supplies entry points and TypeScript overrides;
+the embedded source root supplies the catalogs, allowlist, and generated output.
+The watcher covers both roots. Merely importing the shared Next config helper
+does not install these hooks. Also exclude the embedded `locales/` directory and
+`src/libs/i18n/server/generated/report.json` from the application's runtime traces.
+
 Use `getServerTranslations(namespace, locale)` from `@/libs/i18n/serverTranslation`.
 It returns `t`, which falls back to the key, and `find`, which returns `undefined`
 when neither the requested language nor English has a value. Both interpolate

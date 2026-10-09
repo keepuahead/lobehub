@@ -38,7 +38,7 @@ export default async (phase: string) => {
     await prepareServerI18n(process.cwd());
     if (phase === 'phase-development-server') {
       stopI18nWatcher?.();
-      stopI18nWatcher = watchServerI18n(process.cwd());
+      stopI18nWatcher = await watchServerI18n(process.cwd());
     }
   }
   return nextConfig;

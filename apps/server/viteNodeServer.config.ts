@@ -31,8 +31,8 @@ export const honoServerPlugins = () => [
     async buildStart() {
       await prepareServerI18n(path.dirname(tsconfigProjects[0]));
     },
-    configureServer(server) {
-      const stop = watchServerI18n(path.dirname(tsconfigProjects[0]));
+    async configureServer(server) {
+      const stop = await watchServerI18n(path.dirname(tsconfigProjects[0]));
       server.httpServer?.once('close', stop);
     },
   } satisfies Plugin,

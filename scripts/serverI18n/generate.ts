@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -20,14 +20,16 @@ const writeIfChanged = async (file: string, content: string) => {
   await rename(temporary, file);
 };
 
-export const generateServerI18n = async (root = repoRoot) => {
+export const generateServerI18n = async (root = repoRoot, sourceRoot = repoRoot) => {
+  root = await realpath(root);
+  sourceRoot = await realpath(sourceRoot);
   // TypeScript's config and module resolver require a synchronous host.
   const config = ts.readConfigFile(path.join(root, 'tsconfig.json'), ts.sys.readFile);
   if (config.error)
     throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
   const { options } = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
   await addWorkspacePaths(root, options);
-  const generated = path.join(repoRoot, 'src/libs/i18n/server/generated');
+  const generated = path.join(sourceRoot, 'src/libs/i18n/server/generated');
   await mkdir(generated, { recursive: true });
   // Keep analysis independent of stale generated types and expose only a stable resource contract.
   await writeIfChanged(
@@ -40,7 +42,7 @@ export const generateServerI18n = async (root = repoRoot) => {
       file,
     ),
   );
-  entries.push(path.join(repoRoot, 'apps/server/src/router-hono/standalone.ts'));
+  entries.push(path.join(sourceRoot, 'apps/server/src/router-hono/standalone.ts'));
   const graph = await traceServerGraph(root, entries, options);
   const host = ts.createCompilerHost(options);
   const getSourceFile = host.getSourceFile.bind(host);
@@ -51,7 +53,7 @@ export const generateServerI18n = async (root = repoRoot) => {
   const uses = extractTranslationUses(program, graph.files);
   assertBoundedTranslationUses(uses, [
     {
-      file: path.join(root, 'apps/server/src/services/taskLifecycle/index.ts'),
+      file: path.join(sourceRoot, 'apps/server/src/services/taskLifecycle/index.ts'),
       namespace: 'runtimeError',
       reason: 'Provider error codes arrive at runtime; retain the dedicated runtime error catalog.',
     },
@@ -62,7 +64,9 @@ export const generateServerI18n = async (root = repoRoot) => {
   const defaults: Record<string, Record<string, string>> = {};
   for (const ns of namespaces)
     defaults[ns] = (
-      await import(pathToFileURL(path.join(repoRoot, `packages/locales/src/default/${ns}.ts`)).href)
+      await import(
+        pathToFileURL(path.join(sourceRoot, `packages/locales/src/default/${ns}.ts`)).href
+      )
     ).default;
   const patterns = Object.fromEntries(
     namespaces.map((ns) => [
@@ -78,7 +82,7 @@ export const generateServerI18n = async (root = repoRoot) => {
         );
     }
   const resources: Record<string, Record<string, Record<string, string>>> = {};
-  const languages = (await readdir(path.join(repoRoot, 'locales'), { withFileTypes: true }))
+  const languages = (await readdir(path.join(sourceRoot, 'locales'), { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
@@ -89,7 +93,7 @@ export const generateServerI18n = async (root = repoRoot) => {
       if (language !== 'en-US') {
         try {
           values = JSON.parse(
-            await readFile(path.join(repoRoot, `locales/${language}/${ns}.json`), 'utf8'),
+            await readFile(path.join(sourceRoot, `locales/${language}/${ns}.json`), 'utf8'),
           );
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
