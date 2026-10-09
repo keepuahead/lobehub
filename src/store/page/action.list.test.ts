@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentSourceType, type LobeDocument } from '@/types/document';
 
-import { PAGE_LIST_KEY } from '../../projection';
-import { usePageStore } from '../../store';
+import { pageActions } from './action';
+import { PAGE_LIST_KEY } from './projection';
+import { usePageStore } from './store';
 
 vi.mock('@/libs/swr', () => ({
   mutate: vi.fn(),
@@ -83,12 +84,12 @@ const list = () => usePageStore.getState().pageListMap[PAGE_LIST_KEY];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  usePageStore.getState().reset();
+  pageActions.reset();
 });
 
-describe('ListAction — useFetchDocuments', () => {
+describe('pageActions — useFetchDocuments', () => {
   it('registers the one list entry and fetches the head page with the page filters', async () => {
-    renderHook(() => usePageStore.getState().useFetchDocuments());
+    renderHook(() => pageActions.useFetchDocuments());
 
     const [call] = await syncCalls('pageList');
     expect(call.key[0]).toBe('replica:sync');
@@ -120,7 +121,7 @@ describe('ListAction — useFetchDocuments', () => {
   });
 
   it('drops rows whose file type is not part of the pages list', async () => {
-    renderHook(() => usePageStore.getState().useFetchDocuments());
+    renderHook(() => pageActions.useFetchDocuments());
     const [call] = await syncCalls('pageList');
 
     vi.mocked(documentService.queryDocuments).mockResolvedValue({
@@ -134,9 +135,44 @@ describe('ListAction — useFetchDocuments', () => {
   });
 });
 
-describe('ListAction — useFetchPageDetail', () => {
+describe('pageActions — preHydrate', () => {
+  it('seeds the list from the persisted row before anything mounts', async () => {
+    const { pageListResource } = await import('./projection');
+    const get = vi.spyOn(pageListResource.storage!, 'get').mockResolvedValue({
+      data: {
+        currentPage: 0,
+        hasMore: true,
+        items: [lobeDoc('docs_a'), lobeDoc('docs_b')],
+        pageSize: 20,
+        total: 51,
+      },
+      updatedAt: 1,
+    });
+
+    await expect(pageActions.preHydrate()).resolves.toBe(true);
+
+    expect(get).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: `${PAGE_LIST_KEY}?{"pageSize":20}` }),
+    );
+    expect(list()?.items.map((doc) => doc.id)).toEqual(['docs_a', 'docs_b']);
+    expect(usePageStore.getState().pageListReplica.entries[PAGE_LIST_KEY]?.source).toBe('storage');
+    get.mockRestore();
+  });
+
+  it('leaves the list empty when nothing is persisted', async () => {
+    const { pageListResource } = await import('./projection');
+    const get = vi.spyOn(pageListResource.storage!, 'get').mockResolvedValue(undefined);
+
+    await expect(pageActions.preHydrate()).resolves.toBe(false);
+
+    expect(list()).toBeUndefined();
+    get.mockRestore();
+  });
+});
+
+describe('pageActions — useFetchPageDetail', () => {
   it('registers a by-id sync keyed by the page id', async () => {
-    renderHook(() => usePageStore.getState().useFetchPageDetail('docs_a'));
+    renderHook(() => pageActions.useFetchPageDetail('docs_a'));
 
     const [call] = await syncCalls('pageDetail');
     expect(call.key[1]).toBe('pageDetail');
@@ -144,13 +180,13 @@ describe('ListAction — useFetchPageDetail', () => {
   });
 
   it('does not register anything without a page id', async () => {
-    renderHook(() => usePageStore.getState().useFetchPageDetail(undefined));
+    renderHook(() => pageActions.useFetchPageDetail(undefined));
 
     expect(await syncCalls('pageDetail')).toHaveLength(0);
   });
 });
 
-describe('ListAction — loadMoreDocuments', () => {
+describe('pageActions — loadMoreDocuments', () => {
   it('pages forward with the next offset and appends the rows', async () => {
     usePageStore.setState({
       pageListMap: {
@@ -168,7 +204,7 @@ describe('ListAction — loadMoreDocuments', () => {
       total: 2,
     });
 
-    await usePageStore.getState().loadMoreDocuments();
+    await pageActions.loadMoreDocuments();
 
     expect(documentService.queryDocuments).toHaveBeenCalledWith(
       expect.objectContaining({ current: 1, pageSize: 20 }),
@@ -195,7 +231,7 @@ describe('ListAction — loadMoreDocuments', () => {
       total: 3,
     });
 
-    await usePageStore.getState().loadMoreDocuments();
+    await pageActions.loadMoreDocuments();
 
     expect(list()?.items.map((doc) => doc.id)).toEqual(['docs_a', 'docs_b']);
   });
@@ -213,13 +249,13 @@ describe('ListAction — loadMoreDocuments', () => {
       },
     });
 
-    await usePageStore.getState().loadMoreDocuments();
+    await pageActions.loadMoreDocuments();
 
     expect(documentService.queryDocuments).not.toHaveBeenCalled();
   });
 });
 
-describe('ListAction — upsertDocument', () => {
+describe('pageActions — upsertDocument', () => {
   it('mirrors a page document into the by-id projection and the loaded row', () => {
     usePageStore.setState({
       pageListMap: {
@@ -233,7 +269,7 @@ describe('ListAction — upsertDocument', () => {
       },
     });
 
-    usePageStore.getState().upsertDocument(row('docs_a', { title: 'New title' }));
+    pageActions.upsertDocument(row('docs_a', { title: 'New title' }));
 
     expect(usePageStore.getState().pageDetailMap['docs_a'].title).toBe('New title');
     expect(list()?.items[0].title).toBe('New title');
@@ -252,19 +288,19 @@ describe('ListAction — upsertDocument', () => {
       },
     });
 
-    usePageStore.getState().upsertDocument(row('deep_link'));
+    pageActions.upsertDocument(row('deep_link'));
 
     expect(usePageStore.getState().pageDetailMap['deep_link'].id).toBe('deep_link');
     expect(list()?.items).toEqual([]);
   });
 });
 
-describe('ListAction — refresh', () => {
+describe('pageActions — refresh', () => {
   it('revalidates the list entry through the scoped matcher', async () => {
     const { mutate } = await import('@/libs/swr');
     const { cacheScope } = await import('@/libs/replica');
 
-    await usePageStore.getState().refreshDocuments();
+    await pageActions.refreshDocuments();
 
     const matchers = vi
       .mocked(mutate)
@@ -283,7 +319,7 @@ describe('ListAction — refresh', () => {
     const { mutate } = await import('@/libs/swr');
     vi.mocked(documentService.publishDocumentToWorkspace).mockResolvedValue({ documentIds: [] });
 
-    const result = await usePageStore.getState().publishPageToWorkspace('docs_a');
+    const result = await pageActions.publishPageToWorkspace('docs_a');
 
     expect(result).toEqual({ documentIds: [] });
     expect(mutate).toHaveBeenCalled();

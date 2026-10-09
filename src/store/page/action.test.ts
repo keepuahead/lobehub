@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentSourceType, type LobeDocument } from '@/types/document';
 
-import { PAGE_LIST_KEY, TEMP_PAGE_ID_PREFIX } from '../../projection';
-import { usePageStore } from '../../store';
+import { pageActions } from './action';
+import { PAGE_LIST_KEY, TEMP_PAGE_ID_PREFIX } from './projection';
+import { usePageStore } from './store';
 
 vi.mock('@/libs/swr', () => ({
   mutate: vi.fn(),
@@ -83,10 +84,10 @@ const seedList = (docs: LobeDocument[]) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  usePageStore.getState().reset();
+  pageActions.reset();
 });
 
-describe('CrudAction — createNewPage', () => {
+describe('pageActions — createNewPage', () => {
   it('shows an optimistic row, then swaps in the server row and navigates to it', async () => {
     const navigate = vi.fn();
     usePageStore.setState({ navigate });
@@ -94,7 +95,7 @@ describe('CrudAction — createNewPage', () => {
       row('docnew1', { title: 'My page', visibility: 'private' }),
     );
 
-    const id = await usePageStore.getState().createNewPage('My page', 'private');
+    const id = await pageActions.createNewPage('My page', 'private');
 
     expect(id).toBe('docnew1');
     // The optimistic row (client-minted id) is gone, the real row is in place.
@@ -114,7 +115,7 @@ describe('CrudAction — createNewPage', () => {
       }),
     );
 
-    const pending = usePageStore.getState().createNewPage('Pending page');
+    const pending = pageActions.createNewPage('Pending page');
     // Yield so the optimistic dispatch has run.
     await Promise.resolve();
 
@@ -134,7 +135,7 @@ describe('CrudAction — createNewPage', () => {
     usePageStore.setState({ navigate });
     vi.mocked(documentService.createDocument).mockRejectedValue(new Error('boom'));
 
-    await expect(usePageStore.getState().createNewPage('My page')).rejects.toThrow('boom');
+    await expect(pageActions.createNewPage('My page')).rejects.toThrow('boom');
 
     expect(items()).toEqual([]);
     expect(usePageStore.getState().selectedPageId).toBeNull();
@@ -143,12 +144,12 @@ describe('CrudAction — createNewPage', () => {
   });
 });
 
-describe('CrudAction — removePage', () => {
+describe('pageActions — removePage', () => {
   it('drops the row optimistically and restores it when the delete fails', async () => {
     seedList([lobeDoc('docs_a'), lobeDoc('docs_b')]);
     vi.mocked(documentService.deleteDocument).mockRejectedValue(new Error('nope'));
 
-    await expect(usePageStore.getState().removePage('docs_a')).rejects.toThrow('nope');
+    await expect(pageActions.removePage('docs_a')).rejects.toThrow('nope');
 
     expect(items().map((doc) => doc.id)).toEqual(['docs_a', 'docs_b']);
   });
@@ -157,7 +158,7 @@ describe('CrudAction — removePage', () => {
     seedList([lobeDoc('docs_a'), lobeDoc('docs_b')]);
     vi.mocked(documentService.deleteDocument).mockResolvedValue(undefined);
 
-    await usePageStore.getState().removePage('docs_a');
+    await pageActions.removePage('docs_a');
 
     expect(documentService.deleteDocument).toHaveBeenCalledWith('docs_a');
     expect(items().map((doc) => doc.id)).toEqual(['docs_b']);
@@ -169,20 +170,20 @@ describe('CrudAction — removePage', () => {
     usePageStore.setState({ navigate, selectedPageId: 'docs_a' });
     vi.mocked(documentService.deleteDocument).mockResolvedValue(undefined);
 
-    await usePageStore.getState().removePage('docs_a');
+    await pageActions.removePage('docs_a');
 
     expect(usePageStore.getState().selectedPageId).toBeNull();
     expect(navigate).toHaveBeenCalledWith('/page');
   });
 });
 
-describe('CrudAction — updatePageOptimistically', () => {
+describe('pageActions — updatePageOptimistically', () => {
   it('patches the title and emoji across the list and the by-id copy', async () => {
     seedList([lobeDoc('docs_a', { title: 'Old' })]);
     usePageStore.setState({ pageDetailMap: { docs_a: lobeDoc('docs_a', { title: 'Old' }) } });
     vi.mocked(documentService.updateDocument).mockResolvedValue({} as never);
 
-    await usePageStore.getState().updatePageOptimistically('docs_a', {
+    await pageActions.updatePageOptimistically('docs_a', {
       emoji: '🚀',
       title: 'Renamed',
     });
@@ -199,7 +200,7 @@ describe('CrudAction — updatePageOptimistically', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const before = usePageStore.getState().pageListMap;
 
-    await usePageStore.getState().updatePageOptimistically('missing', { title: 'Renamed' });
+    await pageActions.updatePageOptimistically('missing', { title: 'Renamed' });
 
     expect(documentService.updateDocument).not.toHaveBeenCalled();
     expect(usePageStore.getState().pageListMap).toBe(before);
@@ -207,24 +208,24 @@ describe('CrudAction — updatePageOptimistically', () => {
   });
 });
 
-describe('CrudAction — duplicatePage', () => {
+describe('pageActions — duplicatePage', () => {
   it('inserts the copy at the head of the list', async () => {
     seedList([lobeDoc('docs_a')]);
     vi.mocked(documentService.getDocumentById).mockResolvedValue(row('docs_a'));
     vi.mocked(documentService.createDocument).mockResolvedValue(row('docs_copy'));
 
-    const newPage = await usePageStore.getState().duplicatePage('docs_a');
+    const newPage = await pageActions.duplicatePage('docs_a');
 
     expect(newPage.id).toBe('docs_copy');
     expect(items().map((doc) => doc.id)).toEqual(['docs_copy', 'docs_a']);
   });
 });
 
-describe('CrudAction — renamePage', () => {
+describe('pageActions — renamePage', () => {
   it('clears the in-place rename marker even when the title did not exist', async () => {
     usePageStore.setState({ renamingPageId: 'docs_a' });
 
-    await usePageStore.getState().renamePage('docs_a', 'Renamed');
+    await pageActions.renamePage('docs_a', 'Renamed');
 
     expect(usePageStore.getState().renamingPageId).toBeNull();
   });

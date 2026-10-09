@@ -21,7 +21,7 @@ import AsyncBoundary from '@/components/AsyncBoundary';
 import SkeletonList from '@/features/NavPanel/components/SkeletonList';
 import PageEmpty from '@/features/PageEmpty';
 import { usePermission } from '@/hooks/usePermission';
-import { pageSelectors, usePageStore } from '@/store/page';
+import { pageActions, pageSelectors, usePageStore } from '@/store/page';
 
 import AddButton from '../Header/AddButton';
 import Actions from './Actions';
@@ -49,12 +49,11 @@ const Body = memo(() => {
   // Drive the list's replica sync; keep `isValidating` so the accordion header
   // can show a subtle in-flight indicator (mirrors the Private Agent pattern in
   // `home/_layout/Body/Private`).
-  const useFetchDocuments = usePageStore((s) => s.useFetchDocuments);
   // The sync hook only returns flags — the rows live in the store. Use the list
   // entry itself as the settled signal: it is `undefined` until IndexedDB
   // hydration or the first server page lands, so a failed load surfaces error +
   // Retry instead of a permanent skeleton.
-  const { error, isValidating, revalidate } = useFetchDocuments();
+  const { error, isValidating, revalidate } = pageActions.useFetchDocuments();
   const isPageListInit = usePageStore(pageSelectors.isPageListInit);
 
   const filteredDocumentsCount = usePageStore(pageSelectors.filteredDocumentsCount);
@@ -62,10 +61,7 @@ const Body = memo(() => {
   const workspaceCount = usePageStore(pageSelectors.workspaceFilteredDocumentsCount);
   const searchKeywords = usePageStore((s) => s.searchKeywords);
   const dropdownMenu = useDropdownMenu();
-  const [allPagesDrawerOpen, closeAllPagesDrawer] = usePageStore((s) => [
-    s.allPagesDrawerOpen,
-    s.closeAllPagesDrawer,
-  ]);
+  const allPagesDrawerOpen = usePageStore((s) => s.allPagesDrawerOpen);
 
   const activeWorkspaceId = useActiveWorkspaceId();
   const searchActive = Boolean(searchKeywords.trim());
@@ -73,7 +69,6 @@ const Body = memo(() => {
   // Empty-bucket call-to-action: a single "New Page" row that creates directly
   // into the right visibility. Mirrors the Home sidebar's "创建助理" affordance
   // — the bucket is empty but still actionable.
-  const createNewPage = usePageStore((s) => s.createNewPage);
   const { allowed: canCreate } = usePermission('create_content');
   const untitledLabel = t('pageList.untitled');
   const newPageLabel = t('addPage');
@@ -88,7 +83,7 @@ const Body = memo(() => {
       paddingInline={4}
       style={canCreate ? { height: 36 } : { cursor: 'not-allowed', height: 36, opacity: 0.5 }}
       variant={'borderless'}
-      onClick={() => canCreate && createNewPage(untitledLabel, visibility)}
+      onClick={() => canCreate && pageActions.createNewPage(untitledLabel, visibility)}
     >
       <Center flex={'none'} height={28} width={28}>
         <Icon icon={PlusIcon} size={'small'} />
@@ -223,7 +218,7 @@ const Body = memo(() => {
           })}
         </AccordionRoot>
       )}
-      <AllPagesDrawer open={allPagesDrawerOpen} onClose={closeAllPagesDrawer} />
+      <AllPagesDrawer open={allPagesDrawerOpen} onClose={pageActions.closeAllPagesDrawer} />
     </Flexbox>
   );
 });
