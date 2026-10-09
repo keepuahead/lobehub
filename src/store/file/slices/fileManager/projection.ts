@@ -16,8 +16,8 @@ export const DEFAULT_FILE_LIST_PAGE_SIZE = 50;
 
 /**
  * Params of one knowledge-item list page: the server-side filters plus the page
- * size. `offset` is NOT here — it is the replica's paging cursor, derived from
- * the page index the engine asks for.
+ * size. The window start (`offset`) is NOT here — it is the replica's paging
+ * cursor, which the fetcher reads off this resource.
  */
 export interface FileListParams extends Omit<QueryFileListParams, 'limit' | 'offset'> {
   pageSize: number;
@@ -39,6 +39,12 @@ export type FileListMeta = Omit<FileListData, 'items'>;
  *
  * Filters are the query identity: a projection taken under other filters never
  * paints, and an un-loaded list never reads as an empty one.
+ *
+ * Cursor mode, with the raw window start as the cursor: the endpoint pages by
+ * row offset, reports `hasMore` instead of a total, and filters rows out *after*
+ * paging (folders in the Inbox) — so a page can be short and its visible count
+ * is not a position. Carrying the offset keeps "is there more" exactly the
+ * server's answer, instead of a count derived from mixed units.
  */
 export const fileListResource = definePagedReplica<
   FileListParams,
@@ -51,7 +57,7 @@ export const fileListResource = definePagedReplica<
   paging: {
     direction: 'forward',
     getId: (item) => item.id,
-    mode: 'offset',
+    mode: 'cursor',
     // A reload repaints what the first network page would show, never a stale tail.
     persist: { pages: 1 },
   },

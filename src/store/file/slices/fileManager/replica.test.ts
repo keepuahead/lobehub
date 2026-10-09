@@ -264,6 +264,40 @@ describe('fileManager replicas', () => {
     expect(useFileStore.getState().fileListMeta?.hasMore).toBe(false);
   });
 
+  it('reaches exhaustion when a filtered page is shorter than the window', async () => {
+    // The endpoint pages raw rows and drops Inbox folders afterwards, so a page
+    // can be shorter than `pageSize` while raw rows remain — and the last page
+    // can be shorter still. Both pages here carry fewer rows than the window.
+    const visible = (start: number, count: number) =>
+      Array.from({ length: count }, (_, i) => file(`v-${start + i}`));
+    vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockImplementation(
+      async (params: any) =>
+        ((params?.offset ?? 0) === 0
+          ? { hasMore: true, items: visible(0, 40) }
+          : { hasMore: false, items: visible(40, 5) }) as any,
+    );
+
+    renderHook(
+      () => useFileStore((s) => s.useFetchKnowledgeItems)({ category: 'all', limit: 50 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(useFileStore.getState().fileList).toHaveLength(40));
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(true);
+
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+    expect(useFileStore.getState().fileList).toHaveLength(45);
+    expect(useFileStore.getState().fileListMeta?.hasMore).toBe(false);
+
+    // The server ended the list, so another attempt must not issue a request.
+    const calls = vi.mocked(lambdaClient.file.getKnowledgeItems.query).mock.calls.length;
+    await act(async () => {
+      await useFileStore.getState().loadMoreKnowledgeItems();
+    });
+    expect(vi.mocked(lambdaClient.file.getKnowledgeItems.query).mock.calls.length).toBe(calls);
+  });
+
   describe('confirmed missing detail', () => {
     it('drops the persisted projection on NOT_FOUND so a reload cannot paint the stale file', async () => {
       // A previous visit persisted this file's detail.
