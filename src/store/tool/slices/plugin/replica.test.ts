@@ -109,11 +109,48 @@ describe('installed plugins replica', () => {
     await waitFor(() =>
       expect(useToolStore.getState().installedPlugins.map((p) => p.identifier)).toEqual(['p1']),
     );
+    // The view keeps whatever the server returned…
+    expect(useToolStore.getState().installedPlugins[0].settings).toEqual({ setting1: 'server' });
+    // …while the persisted copy is the display projection, without the settings.
     await waitFor(async () =>
       expect(
         (await installedPluginsResource.storage!.get({ queryKey: STORAGE_KEY, scope }))?.data,
-      ).toEqual([plugin('p1', { setting1: 'server' })]),
+      ).toEqual([{ identifier: 'p1', type: 'plugin' }]),
     );
+  });
+
+  it('never persists plugin settings or credentials', async () => {
+    const secret = 'sk-live-secret-value';
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([
+      {
+        customParams: {
+          mcp: {
+            auth: { accessToken: secret, clientSecret: secret, token: secret, type: 'oauth2' },
+            env: { TOKEN: secret },
+            headers: { Authorization: `Bearer ${secret}` },
+            type: 'http',
+            url: 'https://mcp.example.com',
+          },
+        },
+        identifier: 'mcp-1',
+        settings: { apiKey: secret },
+        type: 'customPlugin',
+      } as unknown as LobeTool,
+    ]);
+
+    renderHook(() => useToolStore((s) => s.useFetchInstalledPlugins)(true), { wrapper });
+    await waitFor(() => expect(useToolStore.getState().installedPlugins).toHaveLength(1));
+
+    // The view shows the full server record (credentials included, in memory)…
+    expect(useToolStore.getState().installedPlugins[0].customParams).toBeTruthy();
+
+    // …but nothing credential-bearing ever reaches storage.
+    const persisted = (
+      await installedPluginsResource.storage!.get({ queryKey: STORAGE_KEY, scope })
+    )?.data;
+
+    expect(persisted).toEqual([{ identifier: 'mcp-1', type: 'customPlugin' }]);
+    expect(JSON.stringify(persisted)).not.toContain(secret);
   });
 
   it('drops the previous identity’s plugins before the next one paints', async () => {
