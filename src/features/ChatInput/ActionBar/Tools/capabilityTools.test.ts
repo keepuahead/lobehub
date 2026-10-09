@@ -17,6 +17,11 @@ describe('capabilityTools', () => {
     it('reports a disabled capability as Disabled', () => {
       expect(resolveCapabilityMode(false)).toBe('disabled');
     });
+
+    it('reports a pinned capability as Pinned, whether or not it is enabled', () => {
+      expect(resolveCapabilityMode(true, true)).toBe('pinned');
+      expect(resolveCapabilityMode(false, true)).toBe('pinned');
+    });
   });
 
   describe('isCapabilityTool', () => {
@@ -31,7 +36,7 @@ describe('capabilityTools', () => {
   });
 
   describe('resolveCapabilityConfigPatch', () => {
-    it('turns memory off through chatConfig, not the plugin list', () => {
+    it('turns memory off through chatConfig while keeping it on for Auto', () => {
       expect(resolveCapabilityConfigPatch(MemoryManifest.identifier, 'disabled')).toEqual({
         memory: { enabled: false },
       });
@@ -49,15 +54,18 @@ describe('capabilityTools', () => {
       });
     });
 
-    it('returns no patch for a tool that is not a capability', () => {
-      expect(resolveCapabilityConfigPatch('some-mcp-plugin', 'disabled')).toBeUndefined();
+    it('keeps the capability on when it is Pinned, like Auto', () => {
+      expect(resolveCapabilityConfigPatch(MemoryManifest.identifier, 'pinned')).toEqual({
+        memory: { enabled: true },
+      });
+      expect(resolveCapabilityConfigPatch(WebBrowsingManifest.identifier, 'pinned')).toEqual({
+        searchMode: 'auto',
+      });
     });
 
-    it('ignores Pinned, which a capability cannot express', () => {
-      expect(resolveCapabilityConfigPatch(MemoryManifest.identifier, 'pinned')).toBeUndefined();
-      expect(
-        resolveCapabilityConfigPatch(WebBrowsingManifest.identifier, 'pinned'),
-      ).toBeUndefined();
+    it('returns no patch for a tool that is not a capability', () => {
+      expect(resolveCapabilityConfigPatch('some-mcp-plugin', 'disabled')).toBeUndefined();
+      expect(resolveCapabilityConfigPatch('some-mcp-plugin', 'pinned')).toBeUndefined();
     });
   });
 });

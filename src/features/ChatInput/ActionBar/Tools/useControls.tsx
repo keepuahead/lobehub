@@ -81,6 +81,12 @@ const officialTag = (
 
 type SkillPolicyMode = AgentPluginMode;
 
+// Capability rows offer the same three states as any other skill row. A model whose
+// built-in search can never be turned off has no Disabled state to offer — the write
+// would be overridden by the runtime — so its search row keeps Pinned/Auto only.
+const CAPABILITY_MODES: SkillPolicyMode[] = ['pinned', 'auto', 'disabled'];
+const CAPABILITY_MODES_WITHOUT_DISABLE: SkillPolicyMode[] = ['pinned', 'auto'];
+
 interface SkillDeleteConfig {
   displayName: string;
   onDelete: () => Promise<void> | void;
@@ -113,7 +119,8 @@ interface SkillPolicyMenuOptions {
   /**
    * Capability settings rendered under the activation options (e.g. the memory
    * effort level), so a capability row keeps its tuning after leaving the "+"
-   * menu.
+   * menu. The block owns the separator above itself and renders nothing when it
+   * has nothing to show, so the panel never keeps a divider over empty space.
    */
   panelExtra?: ReactNode;
   /**
@@ -562,10 +569,9 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   // A model whose built-in search can never be turned off has no Disabled state to
   // offer — the action would write a config the runtime keeps overriding.
   const isSearchCapabilityEnabled = isModelBuiltinSearchInternal || searchMode !== 'off';
-  const searchCapabilityModes = useMemo<SkillPolicyMode[]>(
-    () => (isModelBuiltinSearchInternal ? ['auto'] : ['auto', 'disabled']),
-    [isModelBuiltinSearchInternal],
-  );
+  const searchCapabilityModes = isModelBuiltinSearchInternal
+    ? CAPABILITY_MODES_WITHOUT_DISABLE
+    : CAPABILITY_MODES;
   const disabledCapabilityIds = useMemo(() => {
     const ids = new Set<string>();
     if (!isMemoryCapabilityEnabled) ids.add(MemoryManifest.identifier);
@@ -577,13 +583,21 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
     async (id: string, mode: SkillPolicyMode) => {
       if (!canEdit) return;
 
-      // Capability rows do not live in `agents.plugins`: their Auto/Disable actions
-      // write the chatConfig the engine reads (see `capabilityTools`), so the row and
-      // the actual tool set can never disagree. Pinned is not offered for them, hence
-      // a missing patch is simply nothing to apply.
+      // A capability has two homes. chatConfig carries the on/off state the engine
+      // reads (`resolveToolRules`), so the row, the injection and the wiring can never
+      // disagree; `agents.plugins` carries the explicit Pinned/Disabled choice, which
+      // is what puts the row in the Pinned or Disabled group.
       if (isCapabilityTool(id)) {
+        const currentMode: SkillPolicyMode = checkedSet.has(id)
+          ? 'pinned'
+          : disabledIdSet.has(id)
+            ? 'disabled'
+            : 'auto';
+        if (currentMode === mode) return;
+
         const patch = resolveCapabilityConfigPatch(id, mode);
         if (patch) await updateAgentChatConfig(patch);
+        await setPluginMode(id, mode);
         return;
       }
 
@@ -740,7 +754,6 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <span className={cx(styles.policyText)}>{t('tools.builtins.uninstall')}</span>
             </button>
           )}
-          {panelExtra && <div className={cx(styles.deleteDivider)} />}
           {panelExtra}
         </div>
       );
@@ -1261,11 +1274,10 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   );
 
   // Memory / web browsing rows. Both are builtin tools the engine turns on from
-  // chatConfig, so their activation policy is derived from — and written back to —
-  // that same config instead of `agents.plugins`: Auto keeps the engine default,
-  // Disable turns the capability off and moves the row to the Disabled group. Their
-  // own settings travel with the row (`panelExtra`), because the "+" menu no longer
-  // hosts them.
+  // chatConfig, so their on/off state is derived from — and written back to — that
+  // same config, while the optional pin is recorded in `agents.plugins` like every
+  // other skill: they get the full Pinned/Auto/Disable policy. Their own settings
+  // travel with the row (`panelExtra`), because the "+" menu no longer hosts them.
   const capabilityItems: SkillMenuItem[] = useMemo(
     () =>
       [
@@ -1273,7 +1285,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
           enabled: isMemoryCapabilityEnabled,
           manifest: MemoryManifest,
           panelExtra: <MemoryEffortControl />,
-          supportedModes: ['auto', 'disabled'] as SkillPolicyMode[],
+          supportedModes: CAPABILITY_MODES,
         },
         {
           enabled: isSearchCapabilityEnabled,
@@ -1287,13 +1299,14 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         const title = t(`tools.builtins.${identifier}.title` as any, { defaultValue: identifier });
 
         return createManagedSkillItem({
+          extraTag: officialTag,
           icon: avatar ? (
             <Avatar avatar={avatar} shape={'square'} size={SKILL_ICON_SIZE} />
           ) : (
             <Icon icon={SkillsIcon} size={SKILL_ICON_SIZE} />
           ),
           id: identifier,
-          modeOverride: resolveCapabilityMode(enabled),
+          modeOverride: resolveCapabilityMode(enabled, checkedSet.has(identifier)),
           panelExtra,
           popoverContent: (
             <ToolItemDetailPopover
@@ -1318,6 +1331,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         });
       }),
     [
+      checkedSet,
       createManagedSkillItem,
       isMemoryCapabilityEnabled,
       isSearchCapabilityEnabled,
@@ -1685,20 +1699,30 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
     );
   };
   const allPinnedItems = allSkillItems.filter((item) => checkedSet.has(String(item.key)));
-  // Capability rows keep their activation state in chatConfig rather than in
-  // `plugins`, so they are partitioned from that state and lead the Auto group, where
-  // the two most fundamental capabilities stay easy to find.
+  // Capability rows split on the same two states as every other row: Pinned (the
+  // explicit pin, stored in `plugins`) and the on/off half that lives in chatConfig.
+  const capabilityPinnedItems = capabilityItems.filter((item) => checkedSet.has(String(item.key)));
   const capabilityAutoItems = capabilityItems.filter(
-    (item) => !disabledCapabilityIds.has(String(item.key)),
+    (item) => !checkedSet.has(String(item.key)) && !disabledCapabilityIds.has(String(item.key)),
   );
-  const capabilityDisabledItems = capabilityItems.filter((item) =>
-    disabledCapabilityIds.has(String(item.key)),
+  const capabilityDisabledItems = capabilityItems.filter(
+    (item) => !checkedSet.has(String(item.key)) && disabledCapabilityIds.has(String(item.key)),
   );
+  // LobeHub's own Agent Skills (Artifacts, …) — the rows the capability rows follow.
+  const builtinAgentSkillIds = useMemo(
+    () => new Set(installedBuiltinSkills.map((skill) => skill.identifier)),
+    [installedBuiltinSkills],
+  );
+  const activeSkillItems = allSkillItems.filter(
+    (item) => !checkedSet.has(String(item.key)) && !disabledIdSet.has(String(item.key)),
+  );
+  const isAgentSkillItem = (item: SkillMenuItem) => builtinAgentSkillIds.has(String(item.key));
+  // Capability rows sit after LobeHub's Agent Skills and before the remaining
+  // integrations, so the group still opens with the skills the user installed.
   const allAutoItems = [
+    ...activeSkillItems.filter((item) => isAgentSkillItem(item)),
     ...capabilityAutoItems,
-    ...allSkillItems.filter(
-      (item) => !checkedSet.has(String(item.key)) && !disabledIdSet.has(String(item.key)),
-    ),
+    ...activeSkillItems.filter((item) => !isAgentSkillItem(item)),
   ];
   const allDisabledItems = [
     ...capabilityDisabledItems,
@@ -1706,9 +1730,14 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   ];
   const fixedPinnedItems = fixedItems.filter((item) => !disabledIdSet.has(String(item.key)));
   const fixedDisabledItems = fixedItems.filter((item) => disabledIdSet.has(String(item.key)));
-  // Enabled builtin tools lead the pinned section. All disabled tools and skills live in
-  // their own section so "Auto" remains semantically accurate.
-  const pinnedItems = filterBySearch([...fixedPinnedItems, ...allPinnedItems]);
+  // Fixed tools lead the pinned section, then pinned capabilities, then every pinned
+  // skill. All disabled tools and skills live in their own section so "Auto" remains
+  // semantically accurate.
+  const pinnedItems = filterBySearch([
+    ...fixedPinnedItems,
+    ...capabilityPinnedItems,
+    ...allPinnedItems,
+  ]);
   const autoItems = filterBySearch(allAutoItems);
   const disabledItems = filterBySearch([...fixedDisabledItems, ...allDisabledItems]);
 
@@ -1834,7 +1863,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
             children: pinnedOpen ? pinnedItems : [],
             key: 'pinned',
             label: renderActivationGroupLabel({
-              count: fixedPinnedItems.length + allPinnedItems.length,
+              count: fixedPinnedItems.length + capabilityPinnedItems.length + allPinnedItems.length,
               icon: <Icon icon={Pin} size={14} />,
               open: pinnedOpen,
               title: t('tools.activation.pinned'),
@@ -2229,6 +2258,6 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
     marketFooter,
     marketHeader,
     marketItems,
-    pinnedCount: allPinnedItems.length + fixedPinnedItems.length,
+    pinnedCount: allPinnedItems.length + fixedPinnedItems.length + capabilityPinnedItems.length,
   };
 };

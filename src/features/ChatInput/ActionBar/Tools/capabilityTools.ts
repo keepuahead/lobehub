@@ -9,42 +9,47 @@ import { type LobeAgentChatConfig } from '@/types/agent';
  * rules (`resolveToolRules`) enable them from chatConfig — `memory.enabled` for
  * memory, `searchMode` for web browsing — instead of from `agents.plugins`.
  *
- * The Tools popover still gives them an Auto/Disable policy like every other row,
- * so that policy is translated into a chatConfig patch here. Keeping the single
- * source of truth means the row, the memory injection and the search wiring can
- * never disagree about whether the capability is on.
+ * The Tools popover still gives them the same Pinned/Auto/Disable policy as every
+ * other row, so the on/off half of that policy is translated into a chatConfig
+ * patch here. Keeping a single source of truth for on/off means the row, the
+ * memory injection and the search wiring can never disagree about whether the
+ * capability is on. The optional pin is recorded in `agents.plugins` like every
+ * other skill — chatConfig only carries on/off — so Pinned and Auto share a patch.
  */
 const CAPABILITY_CONFIG_PATCHES: Record<
   string,
-  { auto: Partial<LobeAgentChatConfig>; disabled: Partial<LobeAgentChatConfig> }
+  { off: Partial<LobeAgentChatConfig>; on: Partial<LobeAgentChatConfig> }
 > = {
   [MemoryManifest.identifier]: {
-    auto: { memory: { enabled: true } },
-    disabled: { memory: { enabled: false } },
+    off: { memory: { enabled: false } },
+    on: { memory: { enabled: true } },
   },
   [WebBrowsingManifest.identifier]: {
-    auto: { searchMode: 'auto' },
-    disabled: { searchMode: 'off' },
+    off: { searchMode: 'off' },
+    on: { searchMode: 'auto' },
   },
 };
 
 /**
- * Activation label a capability row shows: the engine default when the capability
- * is on, Disabled when it is off. These two are neither pinned nor plugin-managed,
- * so the state comes from chatConfig rather than from the plugin list.
+ * Activation label a capability row shows. On/off comes from chatConfig rather than
+ * from the plugin list, while `pinned` additionally records the explicit pin in
+ * `agents.plugins` — that is what moves the row into the Pinned group.
  */
-export const resolveCapabilityMode = (enabled: boolean): AgentPluginMode =>
-  enabled ? 'auto' : 'disabled';
+export const resolveCapabilityMode = (enabled: boolean, pinned = false): AgentPluginMode => {
+  if (pinned) return 'pinned';
 
-/** Whether `identifier`'s activation lives in chatConfig rather than `agents.plugins`. */
+  return enabled ? 'auto' : 'disabled';
+};
+
+/** Whether `identifier`'s activation is backed by chatConfig rather than only `agents.plugins`. */
 export const isCapabilityTool = (identifier: string): boolean =>
   identifier in CAPABILITY_CONFIG_PATCHES;
 
 /**
  * chatConfig patch that applies `mode` to a capability tool, or `undefined` when the
  * identifier is not a capability tool (callers then fall back to the plugin policy).
- * `pinned` has no meaning for a capability — it is either on (Auto) or off
- * (Disabled) — so it is a no-op rather than a silent enable.
+ * Pinned and Auto both mean "on" — the difference is only where the explicit choice
+ * is recorded — while Disabled means "off".
  */
 export const resolveCapabilityConfigPatch = (
   identifier: string,
@@ -52,8 +57,6 @@ export const resolveCapabilityConfigPatch = (
 ): Partial<LobeAgentChatConfig> | undefined => {
   const patches = CAPABILITY_CONFIG_PATCHES[identifier];
   if (!patches) return undefined;
-  if (mode === 'auto') return patches.auto;
-  if (mode === 'disabled') return patches.disabled;
 
-  return undefined;
+  return mode === 'disabled' ? patches.off : patches.on;
 };
