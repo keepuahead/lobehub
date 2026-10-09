@@ -174,7 +174,7 @@ const ProjectDashboard = memo<ProjectDashboardProps>(({ detail, projectId }) => 
               variant={'inline'}
               onRetry={() => void goalSWR.mutate()}
             />
-          ) : goalSWR.isLoading && goalSWR.data === undefined ? (
+          ) : goalSWR.isLoading ? (
             <ArticleSkeleton rows={4} />
           ) : goals.length === 0 ? (
             <Block padding={24} variant={'outlined'}>
