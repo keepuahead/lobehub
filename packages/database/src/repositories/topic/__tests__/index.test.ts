@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../../core/getTestDB';
 import { TopicModel } from '../../../models/topic';
-import { files, messages, messagesFiles, topics, users } from '../../../schemas';
+import { files, messageGroups, messages, messagesFiles, topics, users } from '../../../schemas';
 import { TopicRepository } from '../index';
 
 const serverDB = await getTestDB();
@@ -123,6 +123,71 @@ describe('TopicRepository', () => {
       expect(source).toHaveLength(9);
       /** @example The edit boundary preserves its scoped source and copied context. */
       expect(source.find((m) => m.id === 'br-u1')?.content).toBe('typo prompt');
+    });
+
+    /** @example A retained nested message keeps its group ancestors; unrelated groups stay behind. */
+    it('keeps the ancestor closure of referenced message groups', async () => {
+      // ROOT CAUSE:
+      // Pruning groups without directly attached messages deleted empty parents.
+      // Their cascading foreign keys then deleted retained child groups/messages.
+      const source = await topicModel.create({ title: 'nested groups' });
+      await serverDB.insert(messageGroups).values([
+        { id: 'nested-root', topicId: source.id, type: 'compression', userId },
+        {
+          id: 'nested-child',
+          parentGroupId: 'nested-root',
+          topicId: source.id,
+          type: 'parallel',
+          userId,
+        },
+        { id: 'unrelated-group', topicId: source.id, type: 'compression', userId },
+      ]);
+      await serverDB.insert(messages).values([
+        {
+          id: 'nested-history',
+          content: 'retained history',
+          messageGroupId: 'nested-child',
+          role: 'assistant',
+          topicId: source.id,
+          userId,
+        },
+        {
+          id: 'nested-edit',
+          content: 'original',
+          parentId: 'nested-history',
+          role: 'user',
+          topicId: source.id,
+          userId,
+        },
+      ]);
+      const result = await topicRepo.branchAtMessage(source.id, 'nested-edit', {
+        content: 'edited',
+      });
+      const copied = await serverDB
+        .select()
+        .from(messages)
+        .where(eq(messages.topicId, result!.topic.id));
+      /** @example Both the edited boundary and grouped ancestor survive the pruning transaction. */
+      expect(copied.map((row) => row.content).sort()).toEqual(['edited', 'retained history']);
+      const groups = await serverDB
+        .select()
+        .from(messageGroups)
+        .where(eq(messageGroups.topicId, result!.topic.id));
+      /** @example The empty root is retained, while the unrelated group is removed. */
+      expect(groups).toHaveLength(2);
+      const child = groups.find((group) => group.type === 'parallel')!;
+      /** @example The copied child refers to its new root and the retained message refers to that child. */
+      expect(child.parentGroupId).toBe(groups.find((group) => group.type === 'compression')!.id);
+      /** @example Copying does not leave message references pointing into the source group tree. */
+      expect(copied.find((row) => row.content === 'retained history')?.messageGroupId).toBe(
+        child.id,
+      );
+      const originals = await serverDB
+        .select()
+        .from(messageGroups)
+        .where(eq(messageGroups.topicId, source.id));
+      /** @example Source groups are never pruned as a side effect of edit/resend. */
+      expect(originals).toHaveLength(3);
     });
 
     /** @example An out-of-topic parent must never copy another user's message into this scope. */
