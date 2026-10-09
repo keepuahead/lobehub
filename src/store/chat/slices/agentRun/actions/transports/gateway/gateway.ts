@@ -1369,7 +1369,10 @@ export class GatewayActionImpl {
       }
     }
 
-    if (!isCreateNewTopic && (cancelledAfterPersistence || !result.autoStarted)) {
+    if (
+      !isCreateNewTopic &&
+      (cancelledAfterPersistence || (!result.autoStarted && result.success !== false))
+    ) {
       try {
         // A rejected dispatch has no stream to replace the optimistic loading row.
         const messages = await messageService.getMessages(resolvedMessageContext);
@@ -1494,6 +1497,20 @@ export class GatewayActionImpl {
         });
       }
       if (parentOperationId) this.#get().completeOperation(parentOperationId);
+      return result;
+    }
+
+    if (result.success === false) {
+      // Native branch validation can settle the run before any gateway token
+      // exists. Read its persisted error directly instead of waiting for a
+      // stream that may never authenticate or replay that terminal event.
+      try {
+        const messages = await messageService.getMessages(resolvedMessageContext);
+        this.#get().replaceMessages(messages, { context: resolvedMessageContext });
+      } finally {
+        if (parentOperationId) this.#get().completeOperation(parentOperationId);
+        onComplete?.();
+      }
       return result;
     }
 
