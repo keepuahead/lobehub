@@ -352,16 +352,23 @@ describe('DocumentHistoryModel.list cursor', () => {
       savedAt,
     });
 
-    const [lowerId, higherId] = [first.id, second.id].sort();
+    // Derive the cursor from the server's own ordering, the way a paging client
+    // does. Sorting the ids in JS is not the same order: `id` is a case-mixed
+    // nanoid compared under the column's `en_US` collation, which orders a
+    // case-only difference the opposite way from UTF-16 code units (JS:
+    // 'A' < 'a'; en_US: 'a' < 'A'). A JS-sorted cursor therefore skips the tie
+    // row whenever the ids first differ by case.
+    const [newest] = await historyModel.list({ documentId });
+    const otherId = [first.id, second.id].find((id) => id !== newest!.id);
 
     const rows = await historyModel.list({
-      beforeId: higherId,
+      beforeId: newest!.id,
       beforeSavedAt: savedAt,
       documentId,
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.id).toBe(lowerId);
+    expect(rows[0]?.id).toBe(otherId);
   });
 
   it('should ignore beforeId when there is no savedAt anchor', async () => {
