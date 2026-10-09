@@ -27,6 +27,7 @@ import { uploadFileListReducer } from '@/store/file/reducers/uploadFileList';
 import { type StoreSetter } from '@/store/types';
 import { type FileListItem, type QueryFileListParams } from '@/types/files';
 import { type ResourceItem } from '@/types/resource';
+import { isTrpcErrorCode } from '@/utils/trpcError';
 import { unzipFile } from '@/utils/unzipFile';
 
 import { type FileStore, useFileStore } from '../../store';
@@ -152,12 +153,15 @@ export class FileManageActionImpl {
     this.#fileDetail = createReplicaSlice(fileDetailResource, {
       actionPrefix: 'fileDetail',
       entity: fileDetailEntity,
-      fetcher: async (id) => ({ file: (await serverFileService.getKnowledgeItem(id)) ?? null }),
+      fetcher: async (id) => ({ file: await this.#fetchFileDetail(id) }),
       get,
       set,
       stateKey: 'fileDetailReplica',
-      // A "not found" answer is a page state, not a row — never persist it.
-      toPersisted: (data) => (data.file ? data : undefined),
+      // A "not found" answer is a page state, not a row: the view keeps it so
+      // consumers stop rendering, but the prior persisted projection must go.
+      // `null` drops any stored row, so a reload cannot paint a file the server
+      // has already confirmed missing.
+      toPersisted: (data) => (data.file ? data : null),
       view: recordLens<FileStore, FileDetailValue>('fileDetailMap'),
     });
     this.#folderBreadcrumb = createReplicaSlice(folderBreadcrumbResource, {
@@ -188,6 +192,22 @@ export class FileManageActionImpl {
 
   #resolveChunkTargetIds = async (ids: string[]): Promise<string[]> =>
     Promise.all(ids.map((id) => this.#resolveChunkTargetId(id)));
+
+  /**
+   * One knowledge item, with the server's "not found" mapped to a confirmed
+   * absence (`{ file: null }`) instead of a rejection. `getKnowledgeItem` throws
+   * `NOT_FOUND` for a deleted or inaccessible `file_*` id, which would otherwise
+   * leave the hydrated projection in place and surface only a revalidation
+   * error — consumers ignore that error and keep rendering the stale file.
+   */
+  #fetchFileDetail = async (id: string): Promise<FileListItem | null> => {
+    try {
+      return (await serverFileService.getKnowledgeItem(id)) ?? null;
+    } catch (error) {
+      if (isTrpcErrorCode(error, 'NOT_FOUND')) return null;
+      throw error;
+    }
+  };
 
   /** One page of the knowledge-item list; `cursor` is the page index (0 = head). */
   #fetchFileListPage = async (

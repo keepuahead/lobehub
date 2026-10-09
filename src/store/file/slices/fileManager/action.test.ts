@@ -1190,6 +1190,28 @@ describe('FileManagerActions', () => {
       });
       expect(useStore.getState().fileDetailMap['file-missing']).toEqual({ file: null });
     });
+
+    it('treats a NOT_FOUND from the file endpoint as a confirmed absence, not an error', async () => {
+      const { result } = renderHook(() => useStore());
+
+      // `getFileItemById` throws NOT_FOUND for a deleted / inaccessible `file_*`.
+      vi.mocked(lambdaClient.file.getFileItemById.query).mockRejectedValue(
+        Object.assign(new Error('File not found'), { data: { code: 'NOT_FOUND' } }),
+      );
+
+      const { result: itemResult } = renderHook(
+        () => result.current.useFetchKnowledgeItem('file-deleted'),
+        { wrapper: withSWR },
+      );
+
+      await waitFor(() => {
+        expect(itemResult.current.data).toBeUndefined();
+        expect(itemResult.current.isLoading).toBe(false);
+      });
+      // Not an error state: the response folded a "not found" page value.
+      expect(itemResult.current.error).toBeUndefined();
+      expect(useStore.getState().fileDetailMap['file-deleted']).toEqual({ file: null });
+    });
   });
 
   describe('useFetchKnowledgeItems', () => {

@@ -193,6 +193,37 @@ describe('fileManager replicas', () => {
     );
   });
 
+  describe('confirmed missing detail', () => {
+    it('drops the persisted projection on NOT_FOUND so a reload cannot paint the stale file', async () => {
+      // A previous visit persisted this file's detail.
+      await fileDetailResource.storage!.set(
+        { queryKey: 'file-1', scope },
+        { data: { file: file('file-1', 'Stale') }, updatedAt: 1 },
+      );
+      // The server now answers NOT_FOUND (deleted or inaccessible).
+      vi.mocked(lambdaClient.file.getFileItemById.query).mockRejectedValue(
+        Object.assign(new Error('File not found'), { data: { code: 'NOT_FOUND' } }),
+      );
+
+      const { result } = renderHook(() => useFileStore((s) => s.useFetchKnowledgeItem)('file-1'), {
+        wrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.data).toBeUndefined();
+        expect(result.current.isLoading).toBe(false);
+      });
+      // The view carries the confirmed absence…
+      expect(useFileStore.getState().fileDetailMap['file-1']).toEqual({ file: null });
+      // …and the stale persisted projection is gone: a reload hydrates nothing.
+      await waitFor(async () => {
+        expect(
+          await fileDetailResource.storage!.get({ queryKey: 'file-1', scope }),
+        ).toBeUndefined();
+      });
+    });
+  });
+
   describe('linked entity mutations', () => {
     const seed = async () => {
       vi.mocked(lambdaClient.file.getKnowledgeItems.query).mockResolvedValue({
