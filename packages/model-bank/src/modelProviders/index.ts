@@ -187,6 +187,7 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   NvidiaProvider,
   TogetherAIProvider,
   FireworksAIProvider,
+  FreeAIapikeyProvider,
   GroqProvider,
   PerplexityProvider,
   ModelScopeProvider,
