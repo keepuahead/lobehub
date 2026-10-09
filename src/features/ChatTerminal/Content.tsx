@@ -22,14 +22,14 @@ import {
   SquareTerminalIcon,
   XIcon,
 } from 'lucide-react';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
-import { deviceSelectors, useDeviceStore } from '@/store/device';
+import { canHostTerminal, deviceSelectors, useDeviceStore } from '@/store/device';
 import { useElectronStore } from '@/store/electron';
 import { useGlobalStore } from '@/store/global';
 
@@ -128,6 +128,10 @@ const Content = memo(() => {
   const setTerminalDevice = useChatTerminalStore((s) => s.setTerminalDevice);
 
   const devices = useDeviceStore(deviceSelectors.deviceList);
+  // Only devices that can actually open a shell. An offline row, or one whose
+  // live connections are all desktop ones, answers a terminal RPC with a
+  // refusal — offering it would fail the session the moment it is claimed.
+  const targets = useMemo(() => devices.filter(canHostTerminal), [devices]);
   // Desktop can always run a shell here; the web build needs a device.
   const canSpawn = isDesktop || !!targetDeviceId;
 
@@ -136,11 +140,12 @@ const Content = memo(() => {
   const prevTabCountRef = useRef(0);
 
   // The web build has no local shell, so a topic must name a device before the
-  // first terminal can open. Claim the first one until the user picks another.
+  // first terminal can open. Claim the first usable one until the user picks
+  // another.
   useEffect(() => {
-    if (isDesktop || targetDeviceId || devices.length === 0) return;
-    setTerminalDevice(topicKey, devices[0].deviceId);
-  }, [devices, setTerminalDevice, targetDeviceId, topicKey]);
+    if (isDesktop || targetDeviceId || targets.length === 0) return;
+    setTerminalDevice(topicKey, targets[0].deviceId);
+  }, [targets, setTerminalDevice, targetDeviceId, topicKey]);
 
   // Open a first shell automatically when this topic has none yet and we know
   // where it would run. Runs on open / topic switch / target arrival only — NOT
@@ -185,7 +190,7 @@ const Content = memo(() => {
 
   const targetOptions = [
     ...(isDesktop ? [{ label: t('terminalPanel.targetLocal'), value: LOCAL_TARGET }] : []),
-    ...devices.map((device) => ({
+    ...targets.map((device) => ({
       label: device.friendlyName || device.hostname || device.deviceId,
       value: device.deviceId,
     })),

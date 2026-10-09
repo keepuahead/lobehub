@@ -17,6 +17,16 @@ const log = debug('lobe-desktop:chat-terminal');
  */
 export const TERMINAL_POLL_INTERVAL_MS = 300;
 
+/**
+ * Longest a failed read waits before the next attempt.
+ *
+ * A device that dropped off the network comes back on its own, so a read that
+ * failed for a transport reason is retried rather than ending the session — but
+ * a disconnected panel must not keep asking at poll speed. Consecutive failures
+ * double the delay up to this ceiling.
+ */
+export const TERMINAL_RETRY_MAX_MS = 5000;
+
 /** Device RPC payloads carry bytes as base64; PTY output is not always valid UTF-8. */
 const encodeBase64 = (text: string): string => {
   const bytes = new TextEncoder().encode(text);
@@ -51,6 +61,8 @@ export class DeviceTerminalSession {
   private cursor = 0;
   private disposed = false;
   private exited = false;
+  /** Consecutive failed reads, which is what widens the retry delay. */
+  private failures = 0;
   private timer?: ReturnType<typeof setTimeout>;
 
   /**
@@ -181,13 +193,21 @@ export class DeviceTerminalSession {
 
         if (!result.chunk) break;
       }
+      this.failures = 0;
     } catch (error) {
-      // A single failed read is usually a dropped request, not a dead shell;
-      // keep polling so the panel recovers on its own.
-      log('readTerminal %s failed: %O', this.info.id, error);
+      // A single failed read is usually a dropped request, not a dead shell, so
+      // keep polling — but on a widening delay: a device that is off the network
+      // cannot be read from, and asking every 300ms would turn a disconnected
+      // panel into a request flood. A device that outlived its session does not
+      // land here at all: it answers such a read with `exited`.
+      this.failures += 1;
+      log('readTerminal %s failed (%d in a row): %O', this.info.id, this.failures, error);
     }
 
     if (this.disposed || this.exited) return;
-    this.timer = setTimeout(() => void this.poll(), TERMINAL_POLL_INTERVAL_MS);
+    const delay = this.failures
+      ? Math.min(TERMINAL_POLL_INTERVAL_MS * 2 ** this.failures, TERMINAL_RETRY_MAX_MS)
+      : TERMINAL_POLL_INTERVAL_MS;
+    this.timer = setTimeout(() => void this.poll(), delay);
   }
 }

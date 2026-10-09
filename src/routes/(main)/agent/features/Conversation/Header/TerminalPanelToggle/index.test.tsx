@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalPanelToggle from './index';
 
 const mocks = vi.hoisted(() => ({
-  deviceCount: 0,
+  hasTerminalTarget: false,
   isDesktop: true,
   showTerminalPanel: false,
   toggleTerminalPanel: vi.fn(),
@@ -33,10 +33,12 @@ vi.mock('@/const/version', () => ({
 
 vi.mock('@/store/device', () => ({
   deviceSelectors: {
-    deviceList: (s: { devices: unknown[] }) => s.devices,
+    // The real selector decides this from the device list; the header consumes
+    // the derived boolean, so the mock supplies it directly.
+    hasTerminalTarget: (s: { hasTerminalTarget: boolean }) => s.hasTerminalTarget,
   },
-  useDeviceStore: (selector: (state: { devices: unknown[] }) => unknown) =>
-    selector({ devices: Array.from({ length: mocks.deviceCount }) }),
+  useDeviceStore: (selector: (state: { hasTerminalTarget: boolean }) => unknown) =>
+    selector({ hasTerminalTarget: mocks.hasTerminalTarget }),
 }));
 
 vi.mock('@/store/global', () => ({
@@ -71,7 +73,7 @@ vi.mock('@/store/user/selectors', () => ({
 
 describe('TerminalPanelToggle', () => {
   beforeEach(() => {
-    mocks.deviceCount = 0;
+    mocks.hasTerminalTarget = false;
     mocks.isDesktop = true;
     mocks.showTerminalPanel = false;
     mocks.toggleTerminalPanel.mockReset();
@@ -94,7 +96,7 @@ describe('TerminalPanelToggle', () => {
     expect(actionIconPropsSpy).toHaveBeenCalledWith(expect.objectContaining({ active: true }));
   });
 
-  it('stays hidden on the web while no device is connected', () => {
+  it('stays hidden on the web while no device can host a shell', () => {
     mocks.isDesktop = false;
 
     render(<TerminalPanelToggle />);
@@ -102,9 +104,9 @@ describe('TerminalPanelToggle', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('appears on the web once a device is connected', () => {
+  it('appears on the web once a device can host a shell', () => {
     mocks.isDesktop = false;
-    mocks.deviceCount = 1;
+    mocks.hasTerminalTarget = true;
 
     render(<TerminalPanelToggle />);
 

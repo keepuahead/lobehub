@@ -166,10 +166,27 @@ describe('TerminalSessionManager', () => {
     expect(manager.close({ id: info.id })).toEqual({ closed: false });
   });
 
-  it('refuses reads for a session it does not know', () => {
-    expect(() => manager.read({ cursor: 0, id: 'term_missing' })).toThrow(
-      /Unknown terminal session/,
-    );
+  it('answers a read for a session it no longer holds as an ended shell', async () => {
+    const warn = vi.fn();
+    const reaped = new TerminalSessionManager({ logger: { warn } });
+    try {
+      const info = await reaped.create({ cols: 80, rows: 24 });
+      reaped.close({ id: info.id });
+
+      // A client polling an id this host no longer holds — daemon restarted, or
+      // the LRU cap evicted it — must not read as a transport failure, or it
+      // would retry the missing session forever. It reads as "the shell is gone".
+      expect(reaped.read({ cursor: 0, id: info.id })).toEqual({
+        chunk: '',
+        exited: true,
+        nextCursor: 0,
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(info.id));
+      // Writing to it is still an error: that is a caller bug, not an exit.
+      expect(() => reaped.write({ data: '', id: info.id })).toThrow(/Unknown terminal session/);
+    } finally {
+      reaped.dispose();
+    }
   });
 
   it('forwards resize and ignores degenerate dimensions', async () => {

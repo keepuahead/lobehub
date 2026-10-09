@@ -166,7 +166,18 @@ export class TerminalSessionManager {
   }
 
   read(params: ReadTerminalParams): ReadTerminalResult {
-    const session = this.require(params.id);
+    const session = this.sessions.get(params.id);
+    if (!session) {
+      // A session this client no longer holds: the daemon restarted, the idle
+      // sweep reaped it, or the LRU cap evicted it. That is not a transport
+      // failure and the caller cannot bring it back, so answer the same way an
+      // exited shell is answered — the reader closes its pane instead of
+      // polling an id that will never be known here again. Reported rather than
+      // thrown because throwing leaves every caller to recognise one message
+      // string to tell "gone" apart from "the device is unreachable".
+      this.options.logger?.warn(`terminal: read for unknown session ${params.id}`);
+      return { chunk: '', exited: true, nextCursor: params.cursor };
+    }
     session.lastActiveAt = Date.now();
 
     // A caller that fell behind the ring buffer is clamped forward rather than

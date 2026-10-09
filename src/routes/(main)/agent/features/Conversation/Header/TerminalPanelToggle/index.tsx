@@ -23,10 +23,10 @@ const TerminalPanelToggle = memo(() => {
   const hotkey = useUserStore(settingsSelectors.getHotkeyById(HotkeyEnum.ToggleTerminalPanel));
 
   // On the web the panel has no local shell to fall back on: it renders only
-  // while a device is connected, so the toggle would be a dead button without
-  // one. The device list is fetched by the panel itself, which is mounted
-  // alongside this header.
-  const hasDevice = useDeviceStore((s) => deviceSelectors.deviceList(s).length > 0);
+  // while a device that can host one is connected, so the toggle would be a
+  // dead button without one. The device list is fetched by the panel itself,
+  // which is mounted alongside this header.
+  const hasDevice = useDeviceStore(deviceSelectors.hasTerminalTarget);
 
   if (!isDesktop && !hasDevice) return null;
 

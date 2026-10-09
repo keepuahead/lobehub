@@ -36,7 +36,7 @@ const ChatTerminalPanel = memo(() => {
   // Asked unconditionally (hooks cannot be skipped) but only meaningful on the
   // web, where the device list is what decides whether the panel can exist.
   useDeviceStore((s) => s.useFetchDevices)(!isDesktop);
-  const hasDevice = useDeviceStore((s) => deviceSelectors.deviceList(s).length > 0);
+  const hasDevice = useDeviceStore(deviceSelectors.hasTerminalTarget);
 
   // Same condition the panel itself opens under, so the hotkey can never toggle
   // a panel that has nothing to run on.
