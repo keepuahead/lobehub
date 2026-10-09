@@ -670,7 +670,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
 
       const content = (
         <div
-          className={cx(styles.policyPanel, panelExtra && styles.policyPanelWide)}
+          className={cx(styles.policyPanel, Boolean(panelExtra) && styles.policyPanelWide)}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.stopPropagation()}
         >
