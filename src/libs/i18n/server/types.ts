@@ -2,7 +2,14 @@ import type { NS } from '@/locales/resources';
 
 export type ServerNamespace = Extract<
   NS,
-  'auth' | 'chat' | 'error' | 'heterogeneousError' | 'home' | 'metadata' | 'runtimeError'
+  | 'auth'
+  | 'chat'
+  | 'error'
+  | 'heterogeneousError'
+  | 'home'
+  | 'metadata'
+  | 'notification'
+  | 'runtimeError'
 >;
 
 export type TranslationParams = Record<string, string>;

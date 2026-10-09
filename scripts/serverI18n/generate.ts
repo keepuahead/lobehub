@@ -51,7 +51,25 @@ export const generateServerI18n = async (root = repoRoot, sourceRoot = repoRoot)
     clientBoundaries.has(file) ? undefined : getSourceFile(file, ...args);
   const program = ts.createProgram(graph.files, { ...options, noEmit: true }, host);
   const uses = extractTranslationUses(program, graph.files);
+  let configurationText: string | undefined;
+  try {
+    configurationText = await readFile(path.join(root, 'server-i18n.config.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const configuration = configurationText
+    ? (JSON.parse(configurationText) as {
+        dynamicKeys?: { file: string; namespace: string; reason: string }[];
+      })
+    : {};
+  const applicationAllowlist = await Promise.all(
+    (configuration.dynamicKeys ?? []).map(async (entry) => {
+      if (!entry.reason?.trim()) throw new Error('Dynamic translation keys require a reason');
+      return { ...entry, file: await realpath(path.resolve(root, entry.file)) };
+    }),
+  );
   assertBoundedTranslationUses(uses, [
+    ...applicationAllowlist,
     {
       file: path.join(sourceRoot, 'apps/server/src/services/taskLifecycle/index.ts'),
       namespace: 'runtimeError',

@@ -56,6 +56,28 @@ it('extracts wrapped server error codes using the source repository allowlist', 
         patterns: ['.*'],
       }),
     );
+
+    await writeFile(
+      path.join(root, 'src/copy.ts'),
+      'declare const t: ((key: string) => string) & { __serverNamespace?: "home" }; export const copy = (key: string) => t(key);',
+    );
+    await expect(generateServerI18n(root, sourceRoot)).rejects.toThrow(
+      'unbounded dynamic translation key',
+    );
+    await writeFile(
+      path.join(root, 'server-i18n.config.json'),
+      JSON.stringify({
+        dynamicKeys: [{ file: 'src/copy.ts', namespace: 'home', reason: 'External key domain' }],
+      }),
+    );
+    expect((await generateServerI18n(root, sourceRoot)).namespaces.home).toBe(2);
+    await writeFile(
+      path.join(root, 'server-i18n.config.json'),
+      JSON.stringify({
+        dynamicKeys: [{ file: 'src/missing.ts', namespace: 'home', reason: 'Stale registration' }],
+      }),
+    );
+    await expect(generateServerI18n(root, sourceRoot)).rejects.toThrow('ENOENT');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

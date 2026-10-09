@@ -20,7 +20,13 @@ describe('server translations', () => {
     const copy = createServerTranslator(resources, 'home', 'fr-FR', 'en-US');
     expect(copy.t('title')).toBe('Titre');
     expect(copy.t('body', { name: '$&' })).toBe('Hello $&, $&');
+    expect(copy.t('body', { name: '{{other}}', other: 'Replaced' })).toBe(
+      'Hello {{other}}, {{other}}',
+    );
     expect(copy.find('missing')).toBeUndefined();
+    const localOnly = createServerTranslator(resources, 'home', 'fr-FR', 'fr-FR');
+    expect(localOnly.find('body')).toBeUndefined();
+    expect(localOnly.find('title')).toBe('Titre');
     expect(copy.t('missing')).toBe('missing');
     expect(copy.find('constructor')).toBeUndefined();
     expect(createServerTranslator(resources, 'home', 'zz', 'en-US').t('title')).toBe('Title');

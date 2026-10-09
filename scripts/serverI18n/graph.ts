@@ -120,10 +120,29 @@ export const traceServerGraph = async (
         )
       )
         throw new Error(`Server imports unprojected locale resources: ${file} -> ${target}`);
-      if (target.endsWith('.d.ts') && !target.includes('/node_modules/'))
-        throw new Error(
-          `Cannot trace workspace runtime through a declaration file: ${file} -> ${target}; expose the runtime source to the extractor`,
+      if (target.endsWith('.d.ts') && !target.includes('/node_modules/')) {
+        const declaration = ts.createSourceFile(
+          target,
+          await readFile(target, 'utf8'),
+          ts.ScriptTarget.Latest,
+          true,
         );
+        // Generated text assets have no executable imports or translation calls.
+        const isTextAsset =
+          !target.includes('/packages/') &&
+          declaration.statements.length > 0 &&
+          declaration.statements.every(
+            (statement) =>
+              ts.isVariableStatement(statement) &&
+              statement.declarationList.declarations.every(
+                (item) => item.type?.kind === ts.SyntaxKind.StringKeyword && !item.initializer,
+              ),
+          );
+        if (!isTextAsset)
+          throw new Error(
+            `Cannot trace workspace runtime through a declaration file: ${file} -> ${target}; expose the runtime source to the extractor`,
+          );
+      }
       if (
         target.includes('/node_modules/') ||
         target.endsWith('.d.ts') ||

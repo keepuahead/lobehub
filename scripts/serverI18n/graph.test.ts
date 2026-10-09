@@ -94,3 +94,22 @@ it('stops at client boundaries and follows literal lazy server imports', async (
   expect(graph.clientBoundaries.map((file) => path.basename(file))).toEqual(['client.ts']);
   expect(graph.files.map((file) => path.basename(file)).sort()).toEqual(['entry.ts', 'server.ts']);
 });
+
+it('accepts app-local declarations for assets generated later in the build', async () => {
+  const root = await fixture({
+    'entry.ts': 'export const page = () => import("./src/app/htmlTemplate");',
+    'src/app/htmlTemplate.d.ts': 'export declare const htmlTemplate: string;',
+  });
+  const graph = await traceServerGraph(root, [path.join(root, 'entry.ts')], {});
+  expect(graph.files.map((file) => path.basename(file))).toEqual(['entry.ts']);
+});
+
+it('rejects app-local runtime declarations that could hide translation calls', async () => {
+  const root = await fixture({
+    'entry.ts': 'export { render } from "./src/render";',
+    'src/render.d.ts': 'export declare function render(): string;',
+  });
+  await expect(traceServerGraph(root, [path.join(root, 'entry.ts')], {})).rejects.toThrow(
+    'Cannot trace workspace runtime',
+  );
+});

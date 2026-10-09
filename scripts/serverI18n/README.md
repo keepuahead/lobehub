@@ -17,8 +17,9 @@ does not install these hooks. Also exclude the embedded `locales/` directory and
 
 Use `getServerTranslations(namespace, locale)` from `@/libs/i18n/serverTranslation`.
 It returns `t`, which falls back to the key, and `find`, which returns `undefined`
-when neither the requested language nor English has a value. Both interpolate
-parameters and use English as the language fallback. The async `translation`
+when neither the requested language nor English has a value. Callers with their own
+missing-key fallback can pass `{ fallbackToDefault: false }` as the third argument. Both interpolate
+parameters; English fallback is enabled by default. The async `translation`
 wrapper remains available for existing callers.
 
 The extractor follows runtime imports from Next entry points and the standalone
@@ -29,7 +30,9 @@ their namespace remains visible to the compiler.
 - Literal keys and finite unions retain exactly their matching keys.
 - Templates such as `response.${code}` retain every key matching that pattern.
 - An unrestricted string requires a file/namespace allowlist entry in
-  `generate.ts`, with a reason. The runtime error-code lookup is registered there.
+  `generate.ts`, with a reason. Wrapping applications can register their own calls
+  in `server-i18n.config.json`: `dynamicKeys` is an array of `{ file, namespace,
+  reason }` entries, with paths relative to the application root. The runtime error-code lookup is registered there.
 - Opaque keys, erased translator types, unresolved local imports, and direct
   imports of unprojected translations fail generation.
 

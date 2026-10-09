@@ -18,9 +18,8 @@ export const createServerTranslator = <N extends ServerNamespace>(
     };
     const value = lookup(locale) || lookup(defaultLocale);
     if (!value) return undefined;
-    return Object.entries(options).reduce(
-      (text, [name, replacement]) => text.replaceAll(`{{${name}}}`, () => replacement),
-      value,
+    return value.replaceAll(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) =>
+      Object.hasOwn(options, name) ? options[name] : placeholder,
     );
   };
   return { find, locale, t: (key, options) => find(key, options) ?? key };
