@@ -17,14 +17,7 @@ import {
   ShapesIcon,
   SquarePlay,
 } from 'lucide-react';
-import {
-  createElement,
-  isValidElement,
-  lazy,
-  type ReactElement,
-  type ReactNode,
-  Suspense,
-} from 'react';
+import { createElement, isValidElement, type ReactElement, type ReactNode, Suspense } from 'react';
 import type { RouteObject } from 'react-router';
 
 import {
@@ -36,6 +29,7 @@ import BrandTextLoading from '@/components/Loading/BrandTextLoading';
 import AppsSkeleton from '@/components/Skeleton/Apps';
 import CommunityHomeSkeleton from '@/components/Skeleton/CommunityHome';
 import CommunityListSkeleton from '@/components/Skeleton/CommunityList';
+import AgentConversationLayoutSkeleton from '@/components/Skeleton/Conversation/AgentLayout';
 import ConversationLayoutSkeleton from '@/components/Skeleton/Conversation/Layout';
 import ConversationSegmentSkeleton from '@/components/Skeleton/Conversation/Segment';
 import { delayed } from '@/components/Skeleton/Delayed';
@@ -43,6 +37,9 @@ import GenerationSkeleton from '@/components/Skeleton/Generation';
 import MemorySkeleton from '@/components/Skeleton/Memory';
 import ResourceHomeSkeleton from '@/components/Skeleton/ResourceHome';
 import RouteSegmentSkeleton from '@/components/Skeleton/RouteSegment';
+import ProviderSettingsSkeleton, {
+  ProviderDetailSkeleton,
+} from '@/components/Skeleton/Settings/Provider';
 import { createSurfaceSkeleton } from '@/components/Skeleton/Surface';
 import { acceptanceRouteMeta } from '@/features/Acceptance/routeMeta';
 import { agentDocumentRouteMeta } from '@/features/AgentDocumentPage/routeMeta';
@@ -60,9 +57,9 @@ import { workspaceHomeRouteMeta } from '@/features/Workspace/routeMeta';
 import WorkspaceProviderRedirect from '@/features/WorkspaceSetting/ProviderRedirect';
 import {
   agentChannelRouteMeta,
+  agentChatDesktopRouteMeta,
   agentPermissionRouteMeta,
   agentProfileRouteMeta,
-  agentRouteMeta,
   agentSelfLearningRouteMeta,
   agentShareRouteMeta,
   agentStatisticsRouteMeta,
@@ -76,16 +73,34 @@ import {
 import AppShellSkeleton, { APP_SHELL_FALLBACK_ID } from '@/spa/BootShell/AppShellSkeleton';
 import { loadRouteWithBuiltinToolSurfaces } from '@/spa/initialize/toolSurfaces';
 import { agentChatTopicListLoader } from '@/spa/router/agentChatTopicListLoader';
-import { NoRouteSkeleton, routeMeta, type RouteSkeletonProps } from '@/spa/router/routeMeta';
+import {
+  NoRouteSkeleton,
+  routeMeta,
+  type RouteSkeleton,
+  type RouteSkeletonProps,
+} from '@/spa/router/routeMeta';
+import { registerRoutePreloadLoader } from '@/spa/router/routePreloadRegistry';
 import { SettingsTabs } from '@/store/global/initialState';
-import { dynamicElement, dynamicLayout, ErrorBoundary, redirectElement } from '@/utils/router';
+import {
+  createPreloadableComponent,
+  dynamicElement,
+  dynamicLayout,
+  ErrorBoundary,
+  redirectElement,
+} from '@/utils/router';
 
-const LazyResourceCategorySkeleton = lazy(() => import('@/features/ResourceHome/Skeleton'));
+const resourceCategorySkeleton = createPreloadableComponent<RouteSkeletonProps>(
+  () => import('@/features/ResourceHome/Skeleton'),
+);
+registerRoutePreloadLoader('resource', resourceCategorySkeleton.preload);
 
-export const ResourceCategorySkeleton = (props: RouteSkeletonProps) => (
-  <Suspense fallback={null}>
-    <LazyResourceCategorySkeleton {...props} />
-  </Suspense>
+export const ResourceCategorySkeleton: RouteSkeleton = Object.assign(
+  (props: RouteSkeletonProps) => (
+    <Suspense fallback={null}>
+      <resourceCategorySkeleton.Component {...props} />
+    </Suspense>
+  ),
+  { preload: resourceCategorySkeleton.preload },
 );
 
 const agentChatElement = dynamicElement(
@@ -149,13 +164,13 @@ export const sharedMainAreaChildren: RouteObject[] = [
             children: [
               {
                 element: agentChatElement,
-                handle: { meta: agentRouteMeta },
+                handle: { meta: agentChatDesktopRouteMeta },
                 index: true,
                 loader: agentChatTopicListLoader,
               },
               {
                 element: agentChatElement,
-                handle: { meta: agentRouteMeta },
+                handle: { meta: agentChatDesktopRouteMeta },
                 loader: agentChatTopicListLoader,
                 path: ':topicId',
               },
@@ -163,7 +178,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
             element: dynamicLayout(
               () => import('@/routes/(main)/agent/(chat)/_layout'),
               'Desktop > Chat > ChatLayout',
-              { fallback: delayed(<ConversationLayoutSkeleton />), preloadId: 'agent' },
+              { fallback: delayed(<AgentConversationLayoutSkeleton />), preloadId: 'agent' },
             ),
           },
           {
@@ -1194,6 +1209,8 @@ const createMainAreaChildrenDefinition = (options: MainAreaRouteOptions = {}): R
             element: dynamicElement(
               () => import('@/routes/(main)/settings/provider').then((m) => m.ProviderDetailPage),
               'Desktop > Settings > Provider > Detail',
+              // Renders inside the provider layout, so only the detail body is pending.
+              { fallback: delayed(<ProviderDetailSkeleton />) },
             ),
             handle: {
               meta: routeMeta({ icon: Settings, titleKey: 'navigation.provider' }),
@@ -1206,7 +1223,11 @@ const createMainAreaChildrenDefinition = (options: MainAreaRouteOptions = {}): R
           'Desktop > Settings > Provider > Layout',
         ),
         handle: {
-          meta: routeMeta({ icon: Settings, titleKey: 'navigation.provider' }),
+          meta: routeMeta({
+            icon: Settings,
+            Skeleton: ProviderSettingsSkeleton,
+            titleKey: 'navigation.provider',
+          }),
         },
         path: 'provider',
       },
