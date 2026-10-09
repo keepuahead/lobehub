@@ -12,6 +12,7 @@ import { goalKeys } from '@/libs/swr/keys';
 import { type GoalListItem, goalService } from '@/services/goal';
 import { type MetricSeriesWithPoints, metricService } from '@/services/metric';
 import type { StoreSetter } from '@/store/types';
+import { isTrpcErrorCode } from '@/utils/trpcError';
 
 import { goalStatusesForFilter } from './goalListFilter';
 import { useGoalStore } from './index';
@@ -247,7 +248,11 @@ export class GoalActionImpl {
     // caller was rendering, the home rail, and persisted rows of lists that are
     // not loaded: a list the user navigated away from must not repaint it.
     this.#goalListRows.remove(goalId);
+    // The graph and the metric series are their own per-goal replicas: the
+    // deleted id is never fetched again, so a persisted row left behind is an
+    // orphan that only consumes local storage. Drop both with the lists.
     this.#goalGraph.remove(goalId);
+    this.#goalMetricSeries.remove(goalId);
     const scope = scopeId ?? agentId;
     if (scope) await this.refreshGoals(scope);
   };
@@ -369,6 +374,17 @@ export class GoalActionImpl {
     // Freshness while a graph is polling is the point; the first frame paints
     // the persisted snapshot, so nothing has to wait for the network.
     const sync = this.#goalGraph.useSync(goalId || null, {
+      // A goal deleted by another client answers NOT_FOUND on every read, and a
+      // cached snapshot is enough for the page to keep painting the gone goal —
+      // and, while it still reads as advancing, to keep polling the missing
+      // endpoint. NOT_FOUND is definitive, so drop the goal's cached rows (the
+      // snapshot and its metric series) and let the page settle on its 404; any
+      // transient failure keeps the persisted snapshot on screen.
+      onError: (error) => {
+        if (!goalId || !isTrpcErrorCode(error, 'NOT_FOUND')) return;
+        this.#goalGraph.remove(goalId);
+        this.#goalMetricSeries.remove(goalId);
+      },
       refreshInterval: shouldPoll ? GOAL_GRAPH_POLL_INTERVAL : 0,
       revalidateOnFocus: true,
     });

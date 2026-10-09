@@ -72,6 +72,8 @@ const ALL_STORAGE_KEY = goalListResource.storageKey({ agentId: AGENT_KEY, filter
 const REVIEW_STORAGE_KEY = goalListResource.storageKey({ agentId: AGENT_KEY, filter: 'review' });
 const GRAPH_STORAGE_KEY = goalGraphResource.storageKey('goal-1');
 const SERIES_STORAGE_KEY = goalMetricSeriesResource.storageKey('goal-1');
+const GRAPH_G1_STORAGE_KEY = goalGraphResource.storageKey('g1');
+const SERIES_G1_STORAGE_KEY = goalMetricSeriesResource.storageKey('g1');
 const HOME_SCOPE = 'home-scope';
 const HOME_STORAGE_KEY = homeGoalListResource.storageKey({ scope: HOME_SCOPE });
 
@@ -80,6 +82,8 @@ const ALL_QUERY_KEYS = [
   REVIEW_STORAGE_KEY,
   GRAPH_STORAGE_KEY,
   SERIES_STORAGE_KEY,
+  GRAPH_G1_STORAGE_KEY,
+  SERIES_G1_STORAGE_KEY,
   HOME_STORAGE_KEY,
 ];
 
@@ -204,6 +208,73 @@ describe('goal store replicas', () => {
     await waitFor(() => expect(view.result.current).toEqual(series));
   });
 
+  it('evicts a goal deleted elsewhere: a NOT_FOUND graph read drops the snapshot and its series', async () => {
+    let rejectGraph: (error: unknown) => void = () => {};
+    vi.mocked(goalService.getGraph).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectGraph = reject;
+      }) as never,
+    );
+    vi.mocked(metricService.listSeriesWithPoints).mockImplementation(pending);
+
+    await goalGraphResource.storage!.set(
+      { queryKey: GRAPH_G1_STORAGE_KEY, scope: scopeRef.current },
+      { data: graph('g1'), updatedAt: 1 },
+    );
+    await goalMetricSeriesResource.storage!.set(
+      { queryKey: SERIES_G1_STORAGE_KEY, scope: scopeRef.current },
+      { data: [{ key: 'stars', points: [{ value: 1 }] }] as never, updatedAt: 1 },
+    );
+
+    renderHook(() => useGoalStore((s) => s.useFetchGoalGraph)('g1'), { wrapper });
+    const view = renderHook(() => useGoalStore((s) => s.goalGraphById.g1));
+
+    // The first frame is the persisted snapshot of the now-deleted goal...
+    await waitFor(() => expect(view.result.current?.goal.id).toBe('g1'));
+
+    // ...and the deleted-elsewhere answer is definitive, so it is evicted.
+    await act(async () => {
+      rejectGraph({ data: { code: 'NOT_FOUND' } });
+    });
+
+    await waitFor(() => expect(useGoalStore.getState().goalGraphById.g1).toBeUndefined());
+    await waitFor(() => expect(useGoalStore.getState().goalMetricSeriesById.g1).toBeUndefined());
+    await waitFor(async () =>
+      expect(
+        await goalGraphResource.storage!.get({
+          queryKey: GRAPH_G1_STORAGE_KEY,
+          scope: scopeRef.current,
+        }),
+      ).toBeUndefined(),
+    );
+  });
+
+  it('keeps the persisted snapshot when the graph read fails transiently', async () => {
+    let rejectGraph: (error: unknown) => void = () => {};
+    vi.mocked(goalService.getGraph).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectGraph = reject;
+      }) as never,
+    );
+    vi.mocked(metricService.listSeriesWithPoints).mockImplementation(pending);
+
+    await goalGraphResource.storage!.set(
+      { queryKey: GRAPH_G1_STORAGE_KEY, scope: scopeRef.current },
+      { data: graph('g1'), updatedAt: 1 },
+    );
+
+    renderHook(() => useGoalStore((s) => s.useFetchGoalGraph)('g1'), { wrapper });
+    const view = renderHook(() => useGoalStore((s) => s.goalGraphById.g1));
+    await waitFor(() => expect(view.result.current?.goal.id).toBe('g1'));
+
+    await act(async () => {
+      rejectGraph(new Error('network down'));
+    });
+    // A transient failure is not a delete: the persisted snapshot stays.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useGoalStore.getState().goalGraphById.g1).toBeDefined();
+  });
+
   it('paints the home roll-up from storage, scoped to the workspace it belongs to', async () => {
     await homeGoalListResource.storage!.set(
       { queryKey: HOME_STORAGE_KEY, scope: scopeRef.current },
@@ -237,12 +308,16 @@ describe('goal store replicas', () => {
     const seed = async () => {
       vi.mocked(goalService.list).mockResolvedValue(listPage([goal('g1'), goal('g2')], 2) as never);
       vi.mocked(goalService.getGraph).mockResolvedValue(graph('g1') as never);
+      vi.mocked(metricService.listSeriesWithPoints).mockResolvedValue([
+        { key: 'stars', points: [{ value: 1 }] },
+      ] as never);
       renderHook(
         () => {
           useGoalStore((s) => s.useFetchGoals)(AGENT_KEY);
           useGoalStore((s) => s.useFetchGoals)(AGENT_KEY, undefined, 'review');
           useGoalStore((s) => s.useFetchHomeGoals)(true, HOME_SCOPE);
           useGoalStore((s) => s.useFetchGoalGraph)('g1');
+          useGoalStore((s) => s.useFetchGoalMetricSeries)('g1');
         },
         { wrapper },
       );
@@ -250,10 +325,11 @@ describe('goal store replicas', () => {
         expect(useGoalStore.getState().goalListByAgentId[AGENT_KEY]?.goals).toHaveLength(2);
         expect(useGoalStore.getState().homeGoalsByScope[HOME_SCOPE]?.goals).toHaveLength(2);
         expect(useGoalStore.getState().goalGraphById.g1).toBeDefined();
+        expect(useGoalStore.getState().goalMetricSeriesById.g1).toBeDefined();
       });
     };
 
-    it('removes the goal from every loaded list, the home roll-up, and its graph', async () => {
+    it('removes the goal from every loaded list, the home roll-up, its graph and its metric series', async () => {
       await seed();
       vi.mocked(goalService.delete).mockResolvedValue(undefined as never);
       // Keep the follow-up list refresh in flight: the fan-out has to stand on
@@ -264,6 +340,7 @@ describe('goal store replicas', () => {
 
       await waitFor(() => {
         expect(useGoalStore.getState().goalGraphById.g1).toBeUndefined();
+        expect(useGoalStore.getState().goalMetricSeriesById.g1).toBeUndefined();
         expect(
           useGoalStore.getState().homeGoalsByScope[HOME_SCOPE]?.goals.map((item) => item.goal.id),
         ).toEqual(['g2']);
@@ -275,6 +352,24 @@ describe('goal store replicas', () => {
       expect(
         useGoalStore.getState().goalListByAgentId[REVIEW_KEY]?.goals.map((item) => item.goal.id),
       ).toEqual(['g2']);
+      // The deleted id is never fetched again, so its persisted per-goal rows
+      // must not be left orphaned in IndexedDB.
+      await waitFor(async () =>
+        expect(
+          await goalMetricSeriesResource.storage!.get({
+            queryKey: SERIES_G1_STORAGE_KEY,
+            scope: scopeRef.current,
+          }),
+        ).toBeUndefined(),
+      );
+      await waitFor(async () =>
+        expect(
+          await goalGraphResource.storage!.get({
+            queryKey: GRAPH_G1_STORAGE_KEY,
+            scope: scopeRef.current,
+          }),
+        ).toBeUndefined(),
+      );
       expect(goalService.delete).toHaveBeenCalledWith('g1');
       void deletion;
     });
