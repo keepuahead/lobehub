@@ -15,6 +15,7 @@ const routeParamsMock = vi.hoisted(() => ({ aid: 'agent-1' as string | undefined
 const agentStoreStateMock = vi.hoisted(() => ({ activeAgentId: 'agent-1' as string | undefined }));
 const activeWorkspaceSlugMock = vi.hoisted(() => ({ value: 'lobehub' as string | null }));
 
+const startTopicMock = vi.hoisted(() => vi.fn());
 const directoryRows = vi.hoisted(
   () =>
     [] as Array<{
@@ -23,21 +24,40 @@ const directoryRows = vi.hoisted(
       projectSlug: string;
       projectId: string;
       projectAvatar: string;
+      deviceId?: string;
+      path?: string;
     }>,
 );
 vi.mock('@/store/projectWorkingDirectory', () => ({
   useProjectDirectoryStore: (selector: (state: unknown) => unknown) =>
-    selector({ useFetchDirectories: () => ({ hasData: true }) }),
+    selector({
+      startTopic: startTopicMock,
+      useFetchDirectories: () => ({ error: undefined, hasData: true }),
+    }),
   useProjectDirectories: () => directoryRows,
 }));
 vi.mock('@/features/Workspace/useWorkspaceAwareNavigate', () => ({
   useWorkspaceAwareNavigate: () => routerPushMock,
 }));
 
-vi.mock('@/features/Projects/WorkingDirectories/AgentDirectoryActions', () => ({
-  AgentDirectoryActions: ({ onLegacyStart }: { onLegacyStart: () => Promise<void> }) => (
-    <button aria-label="actions.addNewTopicInProject:project" onClick={onLegacyStart} />
-  ),
+vi.mock('@/hooks/useEffectiveAgencyConfig', () => ({
+  useEffectiveAgencyConfig: () => ({
+    agencyConfig: { boundDeviceId: 'device-1' },
+    workspaceScoped: false,
+  }),
+}));
+
+vi.mock('@/store/electron', () => ({
+  useElectronStore: (selector: (state: unknown) => unknown) =>
+    selector({ gatewayDeviceInfo: { deviceId: 'device-1' } }),
+}));
+
+vi.mock('@/helpers/agentWorkingDirectory', () => ({
+  resolveTargetDeviceId: () => 'device-1',
+}));
+
+vi.mock('@/features/Projects/WorkingDirectories/BindDirectoryModal', () => ({
+  openBindDirectoryModal: vi.fn(),
 }));
 
 const openProjectTopicModalMock = vi.hoisted(() => vi.fn());
@@ -129,6 +149,7 @@ describe('Project topic group item', () => {
   beforeEach(() => {
     directoryRows.length = 0;
     commitAgentDefaultMock.mockReset();
+    startTopicMock.mockReset();
     switchTopicMock.mockReset();
     routerPushMock.mockReset();
     routeParamsMock.aid = 'agent-1';
@@ -136,7 +157,19 @@ describe('Project topic group item', () => {
     activeWorkspaceSlugMock.value = 'lobehub';
   });
 
-  it('navigates to a new chat topic after committing the project directory', async () => {
+  it('opens the new-topic composer for the project directory without creating a topic', async () => {
+    // The group "+" must not persist anything: it opens the composer, and the
+    // topic is created once the user sends the first message. Regression for
+    // the straight-to-server start that dropped an empty "untitled" topic into
+    // the project on the click itself.
+    directoryRows.push({
+      deviceId: 'device-1',
+      id: 'binding-1',
+      path: '/Users/me/project',
+      projectId: 'prj-1',
+      projectName: 'LobeHub',
+      projectSlug: 'lobehub',
+    });
     commitAgentDefaultMock.mockResolvedValue(undefined);
 
     render(
@@ -152,12 +185,13 @@ describe('Project topic group item', () => {
       </AccordionRoot>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'actions.addNewTopicInProject:project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'directories.start' }));
 
     expect(commitAgentDefaultMock).toHaveBeenCalledWith('/Users/me/project');
     await expect.poll(() => routerPushMock.mock.calls.length).toBe(1);
     expect(switchTopicMock).toHaveBeenCalledWith(null, { skipRefreshMessage: true });
     expect(routerPushMock).toHaveBeenCalledWith('/agent/agent-1');
+    expect(startTopicMock).not.toHaveBeenCalled();
   });
 
   it('preserves the detected route prefix when adding a project topic without an active workspace slug', async () => {
@@ -177,7 +211,7 @@ describe('Project topic group item', () => {
       </AccordionRoot>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'actions.addNewTopicInProject:project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'directories.start' }));
 
     await expect.poll(() => routerPushMock.mock.calls.length).toBe(1);
     expect(routerPushMock).toHaveBeenCalledWith('/lobehub/agent/agent-1');
@@ -200,7 +234,7 @@ describe('Project topic group item', () => {
       </AccordionRoot>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'actions.addNewTopicInProject:project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'directories.start' }));
 
     expect(commitAgentDefaultMock).toHaveBeenCalledWith('/Users/me/project');
   });
@@ -431,9 +465,13 @@ it('opens the plain new-topic composer when a merged project group spans multipl
   expect(routerPushMock).toHaveBeenCalledWith('/agent/agent-1');
 });
 
-it('keeps the direct start action when a merged project group has a single directory', () => {
+it('keeps the legacy directory start when a project group has a single directory', async () => {
   directoryRows.length = 0;
   openProjectTopicModalMock.mockClear();
+  commitAgentDefaultMock.mockClear();
+  commitAgentDefaultMock.mockResolvedValue(undefined);
+  startTopicMock.mockClear();
+  routerPushMock.mockClear();
   directoryRows.push({
     id: 'binding-single',
     projectName: 'Single Project',
@@ -463,6 +501,10 @@ it('keeps the direct start action when a merged project group has a single direc
       />
     </AccordionRoot>,
   );
-  expect(screen.queryByRole('button', { name: 'directories.start' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'directories.start' }));
+
+  await expect.poll(() => commitAgentDefaultMock.mock.calls.length).toBe(1);
+  expect(commitAgentDefaultMock).toHaveBeenCalledWith('/repo');
+  expect(startTopicMock).not.toHaveBeenCalled();
   expect(openProjectTopicModalMock).not.toHaveBeenCalled();
 });
