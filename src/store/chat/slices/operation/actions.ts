@@ -10,6 +10,7 @@ import { getHomeStoreState } from '@/store/home';
 import { type StoreSetter } from '@/store/types';
 import { setNamespace } from '@/utils/storeDebug';
 
+import { operationSelectors } from './selectors';
 import {
   type AfterCompletionCallback,
   AI_RUNTIME_OPERATION_TYPES,
@@ -46,6 +47,32 @@ export class OperationActionsImpl {
     this.#set = set;
     this.#get = get;
   }
+
+  /**
+   * Abandons unclaimed automatic recovery when a conversation changes branches.
+   *
+   * Use when:
+   * - Either conversation surface selects another persisted reply.
+   *
+   * Expects:
+   * - The full message context, including thread and share scopes.
+   *
+   * Returns:
+   * - No value; unrelated conversations and explicit Retry remain unchanged.
+   *
+   * Call stack:
+   *
+   * switchMessageBranch (conversation or chat store)
+   *   -> {@link OperationActionsImpl.revokeHeteroAutoRetry}
+   *     -> {@link OperationActionsImpl.updateOperationMetadata}
+   */
+  revokeHeteroAutoRetry = (context: MessageMapKeyInput): void => {
+    for (const operation of operationSelectors.getOperationsByContext(context)(this.#get())) {
+      if (operation.metadata.heteroAutoRetryAvailable) {
+        this.updateOperationMetadata(operation.id, { heteroAutoRetryAvailable: false });
+      }
+    }
+  };
 
   internal_getConversationContext = (reference?: {
     context?: MessageMapKeyInput;
