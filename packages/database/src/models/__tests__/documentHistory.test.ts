@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
@@ -339,20 +339,31 @@ describe('DocumentHistoryModel.list cursor', () => {
     const documentId = await createTestDocument(documentModel, fileModel, 'Initial content');
     const savedAt = new Date('2026-04-11T00:00:05.000Z');
 
-    const first = await historyModel.create({
+    await historyModel.create({
       documentId,
       editorData: { tag: 'tie-a' },
       saveSource: 'manual',
       savedAt,
     });
-    const second = await historyModel.create({
+    await historyModel.create({
       documentId,
       editorData: { tag: 'tie-b' },
       saveSource: 'manual',
       savedAt,
     });
 
-    const [lowerId, higherId] = [first.id, second.id].sort();
+    // `list` compares the cursor id with Postgres' collation, so order the pair
+    // the same way instead of trusting JS `sort()`. The two disagree on
+    // mixed-case nanoid ids (en_US collation keeps `a` next to `A`, UTF-16
+    // code-unit order does not), and a cursor picked by JS can then page past
+    // both rows and return nothing.
+    const ordered = await serverDB
+      .select({ id: documentHistories.id })
+      .from(documentHistories)
+      .where(eq(documentHistories.documentId, documentId))
+      .orderBy(asc(documentHistories.id));
+
+    const [lowerId, higherId] = ordered.map((row) => row.id);
 
     const rows = await historyModel.list({
       beforeId: higherId,
