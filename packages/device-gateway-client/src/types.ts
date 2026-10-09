@@ -278,6 +278,8 @@ export interface AgentRunRequestMessage {
   jwt: string;
   operationId: string;
   prompt: string;
+  /** Complete vision input reserved for a fresh-session recovery attempt. */
+  resumeFallbackImageList?: Array<{ id?: string; url: string }>;
   /**
    * Full system context used only when native resume fails and the device CLI
    * retries with a fresh session. Optional for compatibility with older

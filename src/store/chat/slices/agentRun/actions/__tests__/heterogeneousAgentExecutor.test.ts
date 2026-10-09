@@ -2301,6 +2301,7 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
           ],
         },
       });
+      mockGetMessages.mockResolvedValue(store.dbMessagesMap['main_agent-1_topic-1']);
       const get = vi.fn(() => store);
       const params = {
         ...defaultParams,
@@ -2322,6 +2323,50 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
       await executeHeterogeneousAgent(get, { ...params, resumeSessionId: 'codex-thread-existing' });
 
       expect(mockSendPrompt.mock.calls[1][0].systemContext).toBeUndefined();
+    });
+
+    /** @example Compressed UI rows cannot cut the persisted edit ancestry. */
+    it('reads grouped ancestors before a fresh local Codex edit', async () => {
+      // ROOT CAUSE:
+      // dbMessagesMap contains display projections; a parent inside a compressed
+      // group is absent there. Hydrating tool bodies cannot restore that row.
+      const raw = [
+        {
+          id: 'u0',
+          role: 'user',
+          content: 'Before the boundary',
+          imageList: [{ id: 'image-0', url: 'https://example.com/image.png' }],
+        },
+        { id: 'a0', parentId: 'u0', role: 'assistant', content: 'Retained answer' },
+        { id: 'u1', parentId: 'a0', role: 'user', content: 'test prompt' },
+      ];
+      mockGetMessages.mockResolvedValue(raw);
+      const store = createMockStore({
+        dbMessagesMap: {
+          'main_agent-1_topic-1': [
+            { id: 'group', role: 'assistantGroup', content: 'Compressed summary' },
+            raw[2],
+            { id: 'ast-initial', parentId: 'u1', role: 'assistant', content: '...' },
+          ],
+        },
+      });
+      await executeHeterogeneousAgent(
+        vi.fn(() => store),
+        {
+          ...defaultParams,
+          heterogeneousProvider: { command: 'codex', type: 'codex' as const },
+        },
+      );
+      /** @example The authorized raw read restores ancestry and image inputs. */
+      expect(mockGetMessages).toHaveBeenCalledWith(
+        expect.objectContaining({ includeGroupedMessages: true, topicId: 'topic-1' }),
+      );
+      expect(mockSendPrompt.mock.calls[0][0].systemContext).toContain('Before the boundary');
+      expect(mockSendPrompt.mock.calls[0][0].systemContext).toContain('Retained answer');
+      expect(mockSendPrompt.mock.calls[0][0].imageList).toContainEqual({
+        id: 'image-0',
+        url: 'https://example.com/image.png',
+      });
     });
 
     it('should not replay history again when the caller already supplies it', async () => {

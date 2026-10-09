@@ -302,6 +302,8 @@ export interface HeteroDispatchInput {
   pinnedHeterogeneousTopicModel?: HeterogeneousTopicPin;
   requestedDeviceId?: string;
   requestTrigger?: RequestTrigger;
+  /** Current input needs durable selections/attachments, or resumes a previously persisted prompt. */
+  requiresPersistedPromptContext?: boolean;
   runAttachments: { imageList?: Array<{ alt: string; id: string; url: string }> };
   /** Ids of the rows THIS turn just persisted (excluded from recovery history). */
   selfMessageIds: Set<string>;
@@ -555,6 +557,7 @@ export const dispatchHeteroAgent = async (
   let conversationHistory: ConversationHistoryEntry[] | undefined;
   let persistedPromptContext: string | undefined;
   let persistedImages: Array<{ id: string; url: string }> = [];
+  let currentImages: Array<{ id: string; url: string }> = [];
   // A copied edit topic needs durable context even though native resume is disabled.
   // Ordinary regeneration and native Fork keep their explicitly selected history.
   if (
@@ -568,9 +571,17 @@ export const dispatchHeteroAgent = async (
       // creator-facing default would hand the agent an empty history.
       const fileService = new FileService(deps.db, deps.userId, deps.workspaceId);
       const recentMsgs = await deps.messageModel.query(
-        { topicId, pageSize: 200 },
+        {
+          groupId: appContext?.groupId ?? undefined,
+          pageSize: 200,
+          skipWorks: true,
+          threadId: appContext?.threadId ?? undefined,
+          topicId,
+        },
         {
           allowShareVisitor: true,
+          // Native parent IDs can lead into compressed or parallel message groups.
+          includeGroupedMessages: true,
           // Database rows carry storage keys; a device CLI needs freshly signed URLs.
           // MessageModel still enforces attachment ownership before invoking this callback.
           postProcessUrl: (path) => fileService.getFullFileUrl(path),
@@ -586,14 +597,15 @@ export const dispatchHeteroAgent = async (
       const replay = buildHeterogeneousConversationContext(recentMsgs, promptMessageId);
       if (replay.history.length > 0) conversationHistory = replay.history;
       persistedPromptContext = replay.currentContext;
-      // The CLI reuses imageList if native resume fails and starts a fresh session.
-      // Keep the bounded ancestor images for both attempts so that fallback has
-      // the same vision inputs as its recovered conversation text.
+      // A successful native resume already owns the ancestor images. Only the
+      // fresh-session fallback receives those again, alongside recovered text.
       persistedImages = replay.imageList;
+      currentImages = recentMsgs.find((message) => message.id === promptMessageId)?.imageList ?? [];
     } catch (err) {
       log('execAgent: failed to load conversation history for hetero context: %O', err);
-      if (heteroType === 'codex') {
-        // A fresh edited run cannot safely execute without its persisted context.
+      if (heteroType === 'codex' && (!resumeSessionId || input.requiresPersistedPromptContext)) {
+        // Fresh edited runs and current selections cannot execute without persisted context.
+        // Plain native continuations already own history and can skip optional replay.
         // Settle the already-created operation through the existing failure path
         // and retain the user message so the UI can retry after recovery.
         const message = 'Failed to load conversation context';
@@ -680,12 +692,18 @@ export const dispatchHeteroAgent = async (
   // message's imageList into `sendPrompt`. Reuses the shared resolution above
   // so bot/IM and SPA gateway attachments are handled identically.
   const images = new Map(
-    [...persistedImages, ...(runAttachments.imageList ?? [])].map((image) => [
-      image.id,
-      { id: image.id, url: image.url },
-    ]),
+    [
+      ...(resumeSessionId ? currentImages : persistedImages),
+      ...(runAttachments.imageList ?? []),
+    ].map((image) => [image.id, { id: image.id, url: image.url }]),
   );
   const heteroImageList = images.size > 0 ? [...images.values()] : undefined;
+  // Complete recovery inputs remain separate from the native continuation's images.
+  const fallbackImages = new Map(
+    [...persistedImages, ...images.values()].map((image) => [image.id, image]),
+  );
+  const resumeFallbackImageList =
+    resumeSessionId && fallbackImages.size > 0 ? [...fallbackImages.values()] : undefined;
   const heteroExecArgs = isLocalHeterogeneousType(heteroType)
     ? buildHeteroExecArgs(
         heterogeneousProvider?.type === heteroType
@@ -711,6 +729,7 @@ export const dispatchHeteroAgent = async (
     // context, and Claude Code's own `/goal` command would otherwise take it.
     prompt: stripGoalCommand(prompt),
     repos: topicRepos,
+    resumeFallbackImageList,
     resumeFallbackSystemContext,
     resumeSessionId,
     systemContext,

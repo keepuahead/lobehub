@@ -1889,6 +1889,8 @@ export class DeviceGateway {
     prompt: string;
     /** Explicit history boundary; a device must ignore native resume when present. */
     freshSession?: { historyBoundaryMessageId: string };
+    /** Complete vision input reserved for a fresh-session recovery attempt. */
+    resumeFallbackImageList?: Array<{ id?: string; url: string }>;
     resumeFallbackSystemContext?: string;
     resumeSessionId?: string;
     systemContext?: string;

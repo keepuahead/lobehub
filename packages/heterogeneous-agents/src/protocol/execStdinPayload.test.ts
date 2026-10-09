@@ -57,6 +57,36 @@ describe('buildHeteroExecStdinPayload', () => {
     expect(parsed.content[0].text).not.toContain('<previous_conversation>');
   });
 
+  /** @example A successful native resume sees only new images; fresh recovery sees both. */
+  it('keeps historical images exclusively in the fresh recovery prompt', () => {
+    // ROOT CAUSE:
+    // Sharing imageList across both attempts repeated native history on every turn.
+    // Distinct fallback images preserve recovery without changing a successful resume.
+    const current = { id: 'current', url: 'https://x/current.png' };
+    const old = { id: 'old', url: 'https://x/old.png' };
+    const payload = JSON.parse(
+      buildHeteroExecStdinPayload({
+        imageList: [current],
+        isNewSession: false,
+        prompt: 'continue',
+        resumeFallbackImageList: [old, current],
+        resumeFallbackSystemContext: 'history',
+      }),
+    );
+    /** @example The native session already owns the old image. */
+    expect(payload.content).toEqual([
+      { text: 'continue', type: 'text' },
+      { source: { ...current, type: 'url' }, type: 'image' },
+    ]);
+    /** @example Fresh recovery restores the original vision inputs as actual image blocks. */
+    expect(
+      payload.resumeFallback.filter((block: { type: string }) => block.type === 'image'),
+    ).toEqual([
+      { source: { ...old, type: 'url' }, type: 'image' },
+      { source: { ...current, type: 'url' }, type: 'image' },
+    ]);
+  });
+
   it('introduces the LobeHub CLI when the run opens a new session', () => {
     const payload = buildHeteroExecStdinPayload({ isNewSession: true, prompt: 'hello' });
 

@@ -140,6 +140,7 @@ describe('spawnHeteroAgentRun', () => {
       agentType: 'codex',
       freshSession: { historyBoundaryMessageId: 'user-A' },
       resumeSessionId: 'native-after-C',
+      resumeFallbackImageList: [{ id: 'later-image', url: 'https://files.test/LATER-C.png' }],
       resumeFallbackSystemContext: 'LATER-C',
       systemContext: 'Selected EARLY-ORCHID history',
     });
@@ -280,6 +281,7 @@ describe('spawnHeteroAgentRun', () => {
     const ackPromise = spawnHeteroAgentRun({
       ...baseParams,
       prompt: 'continue',
+      resumeFallbackImageList: [{ id: 'old-image', url: 'https://example.test/old.png' }],
       resumeFallbackSystemContext: 'workspace rules\n\nprevious conversation',
       resumeSessionId: 'session-1',
       systemContext: 'workspace rules',
@@ -300,6 +302,10 @@ describe('spawnHeteroAgentRun', () => {
           // session, which has to be told again.
           { text: lobeHubCliGuide, type: 'text' },
           { text: 'continue', type: 'text' },
+          {
+            source: { id: 'old-image', type: 'url', url: 'https://example.test/old.png' },
+            type: 'image',
+          },
         ],
       }),
     );

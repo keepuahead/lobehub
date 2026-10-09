@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../../core/getTestDB';
+import { MessageModel } from '../../../models/message';
 import { TopicModel } from '../../../models/topic';
 import { files, messageGroups, messages, messagesFiles, topics, users } from '../../../schemas';
 import { TopicRepository } from '../index';
@@ -123,6 +124,85 @@ describe('TopicRepository', () => {
       expect(source).toHaveLength(9);
       /** @example The edit boundary preserves its scoped source and copied context. */
       expect(source.find((m) => m.id === 'br-u1')?.content).toBe('typo prompt');
+    });
+
+    /** @example A grouped ancestor retains raw IDs and signed images for device replay. */
+    it('loads raw grouped history for a copied edit boundary', async () => {
+      // ROOT CAUSE:
+      // The UI query replaced grouped messages with synthetic group nodes, so replay could
+      // not follow parent IDs into a group. Raw replay must retain both rows and their files.
+      const source = await topicModel.create({ title: 'grouped replay' });
+      await serverDB.insert(messageGroups).values({
+        id: 'replay-group',
+        type: 'compression',
+        topicId: source.id,
+        userId,
+      });
+      await serverDB.insert(messages).values([
+        {
+          id: 'replay-user',
+          role: 'user',
+          content: 'image question',
+          messageGroupId: 'replay-group',
+          topicId: source.id,
+          userId,
+        },
+        {
+          id: 'replay-answer',
+          role: 'assistant',
+          content: 'image answer',
+          parentId: 'replay-user',
+          messageGroupId: 'replay-group',
+          topicId: source.id,
+          userId,
+        },
+        {
+          id: 'replay-edit',
+          role: 'user',
+          content: 'original',
+          parentId: 'replay-answer',
+          topicId: source.id,
+          userId,
+        },
+      ]);
+      await serverDB.insert(files).values({
+        id: 'replay-image',
+        fileType: 'image/png',
+        name: 'image.png',
+        size: 1,
+        url: 'stored/image.png',
+        userId,
+      });
+      await serverDB
+        .insert(messagesFiles)
+        .values({ fileId: 'replay-image', messageId: 'replay-user', userId });
+      const copied = await topicRepo.branchAtMessage(source.id, 'replay-edit', {
+        content: 'edited',
+      });
+      const model = new MessageModel(serverDB, userId);
+      const history = await model.query(
+        { topicId: copied.topic.id },
+        {
+          includeGroupedMessages: true,
+          postProcessUrl: async (path) => `https://signed.example/${path}`,
+        },
+      );
+      /** @example The native parent chain contains the two grouped ancestors and edited boundary. */
+      expect(history.map((message) => message.content).sort()).toEqual([
+        'edited',
+        'image answer',
+        'image question',
+      ]);
+      /** @example Device image URLs still use the authorized file postprocessor. */
+      expect(history.find((message) => message.content === 'image question')?.imageList).toEqual([
+        expect.objectContaining({
+          id: 'replay-image',
+          url: 'https://signed.example/stored/image.png',
+        }),
+      ]);
+      const uiHistory = await model.query({ topicId: copied.topic.id });
+      /** @example Normal UI callers retain the grouped projection. */
+      expect(uiHistory.some((message) => message.content === 'image question')).toBe(false);
     });
 
     /** @example A retained nested message keeps its group ancestors; unrelated groups stay behind. */

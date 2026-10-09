@@ -1075,10 +1075,12 @@ describe('GatewayConnectionCtr', () => {
       );
     });
 
+    /** @example Desktop device dispatch preserves the complete fresh-session image context. */
     it('forwards cwd and primary/fallback context from the request to spawnLhHeteroExec', async () => {
       const client = await connectAndOpen();
       client.simulateAgentRunRequest('claude-code', 'op-ctx', 'hi', 'mock-jwt', {
         cwd: '/Users/alice/repo',
+        resumeFallbackImageList: [{ id: 'old-image', url: 'https://example.test/red.png' }],
         resumeFallbackSystemContext: 'RECOVERY CONTEXT',
         systemContext: 'WORKSPACE CONTEXT',
       });
@@ -1087,6 +1089,7 @@ describe('GatewayConnectionCtr', () => {
       expect(mockHeterogeneousAgentCtr.spawnLhHeteroExec).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: '/Users/alice/repo',
+          resumeFallbackImageList: [{ id: 'old-image', url: 'https://example.test/red.png' }],
           resumeFallbackSystemContext: 'RECOVERY CONTEXT',
           systemContext: 'WORKSPACE CONTEXT',
         }),

@@ -7,6 +7,7 @@ import {
   messageStateSelectors,
   useConversationStore,
 } from '@/features/Conversation/store';
+import type { CodexMessageEdit } from '@/features/Conversation/store/slices/generation/action';
 import { useCanEditCodexMessage } from '@/hooks/useCanEditCodexMessage';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
@@ -79,6 +80,10 @@ export const useEditConfirmation = ({
   });
 
   const submitting = useRef(false);
+  // Keep the unsent destination with this editor so a failed preparation can
+  // retry without creating another topic. Closing the editor ends that attempt.
+  const pendingEdit = useRef<CodexMessageEdit | undefined>(undefined);
+  if (!editing) pendingEdit.current = undefined;
   const onConfirm = useCallback(
     async (content: string, editorData?: Record<string, unknown>) => {
       if (!canEdit) return;
@@ -95,11 +100,14 @@ export const useEditConfirmation = ({
         }
         submitting.current = true;
         try {
-          await regenerateUserMessage(id, {
+          const edit = pendingEdit.current ?? { content };
+          Object.assign(edit, {
             content,
             editorData,
             onAccepted: () => onEditingChange(false),
           });
+          pendingEdit.current = edit;
+          await regenerateUserMessage(id, edit);
         } catch (error) {
           toast.error(error instanceof Error ? error.message : String(error));
           throw error;

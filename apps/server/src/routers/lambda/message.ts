@@ -453,6 +453,8 @@ export const messageRouter = router({
         // set, so already-deployed clients (no `file` descriptor) never receive
         // a `file` summary that would crash their works UI. New clients set it.
         includeFileWorks: z.boolean().optional(),
+        /** Authorized native replay needs raw ancestors hidden by display groups. */
+        includeGroupedMessages: z.boolean().optional(),
         pageSize: z.number().optional(),
         /**
          * Hand back render-facing tool view models instead of the stored
@@ -470,7 +472,7 @@ export const messageRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
-      const { topicShareId, ...queryParams } = input;
+      const { includeGroupedMessages, topicShareId, ...queryParams } = input;
 
       // Public access via topicShareId
       if (topicShareId) {
@@ -529,6 +531,7 @@ export const messageRouter = router({
       const fileService = new FileService(ctx.serverDB, ctx.userId, wsId);
 
       const messages = await messageModel.query(queryParams, {
+        includeGroupedMessages,
         postProcessUrl: (path, file) => fileService.getFileAccessUrl({ id: file.id, url: path }),
       });
 

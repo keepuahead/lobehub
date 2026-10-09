@@ -4267,6 +4267,8 @@ export default class HeterogeneousAgentCtr {
     jwt: string;
     operationId: string;
     prompt: string;
+    /** Ancestor images used only if native resume starts a fresh session. */
+    resumeFallbackImageList?: HeteroExecImageRef[];
     resumeFallbackSystemContext?: string;
     resumeSessionId?: string;
     serverUrl: string;
@@ -4291,6 +4293,7 @@ export default class HeterogeneousAgentCtr {
       operationId,
       onChildSpawned,
       prompt,
+      resumeFallbackImageList,
       resumeFallbackSystemContext,
       resumeSessionId,
       serverUrl,
@@ -4340,6 +4343,7 @@ export default class HeterogeneousAgentCtr {
       imageList,
       isNewSession: !resumeSessionId,
       prompt,
+      resumeFallbackImageList,
       resumeFallbackSystemContext,
       systemContext,
     });

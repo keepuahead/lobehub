@@ -251,6 +251,12 @@ export interface QueryMessagesOptions {
    */
   includeFileWorks?: boolean;
   /**
+   * Return grouped messages with their original IDs for native conversation replay.
+   * Normal UI callers keep synthetic group nodes; ownership and attachment checks are unchanged.
+   * @default false
+   */
+  includeGroupedMessages?: boolean;
+  /**
    * Number of messages per page
    */
   pageSize?: number;
@@ -1262,6 +1268,8 @@ export class MessageModel {
        * share-scoped read path ({@link MessageModel.queryForVisitor}) sets it.
        */
       allowShareVisitor?: boolean;
+      /** See {@link QueryMessagesOptions.includeGroupedMessages}. */
+      includeGroupedMessages?: boolean;
       postProcessUrl?: (
         path: string | null,
         file: { fileType: string; id?: string | null },
@@ -1346,6 +1354,7 @@ export class MessageModel {
         before,
         current,
         includeFileWorks,
+        includeGroupedMessages: options.includeGroupedMessages,
         pageSize,
         postProcessUrl: options.postProcessUrl,
         skipWorks,
@@ -1376,6 +1385,7 @@ export class MessageModel {
         before,
         current,
         includeFileWorks,
+        includeGroupedMessages: options.includeGroupedMessages,
         pageSize,
         postProcessUrl: options.postProcessUrl,
         skipWorks,
@@ -1410,6 +1420,7 @@ export class MessageModel {
       before,
       current,
       includeFileWorks,
+      includeGroupedMessages: options.includeGroupedMessages,
       pageSize,
       postProcessUrl: options.postProcessUrl,
       skipWorks,
@@ -1594,6 +1605,7 @@ export class MessageModel {
       before,
       current = 0,
       includeFileWorks,
+      includeGroupedMessages = false,
       pageSize = 1000,
       postProcessUrl,
       skipWorks,
@@ -1693,7 +1705,7 @@ export class MessageModel {
             and(
               scope,
               // Filter out messages that belong to MessageGroups
-              isNull(messages.messageGroupId),
+              includeGroupedMessages ? undefined : isNull(messages.messageGroupId),
               where,
               beforeCondition,
             ),
@@ -1737,23 +1749,30 @@ export class MessageModel {
     // offset-exact: rows dropped from one page reappear at the TOP of the next
     // `before` page (its cursor is the trimmed page's oldest kept row), so the
     // round-cursor walk loses nothing by construction.
-    if (topicId && (current === 0 || before) && result.length >= pageSize) {
+    if (
+      !includeGroupedMessages &&
+      topicId &&
+      (current === 0 || before) &&
+      result.length >= pageSize
+    ) {
       const firstRoundStart = result.findIndex((message) => message.role === 'user');
       if (firstRoundStart > 0) result.splice(0, firstRoundStart);
     }
 
     const messageIds = result.map((message) => message.id as string);
 
-    const messageGroupNodesPromise = this.queryMessageGroupNodesForPage({
-      allowShareVisitor: allowShareVisitor || this.includeShareVisitor,
-      current,
-      hasBeforeCursor: !!before,
-      postProcessUrl,
-      result,
-      timing,
-      topicId,
-      window: groupNodeWindow,
-    });
+    const messageGroupNodesPromise = includeGroupedMessages
+      ? Promise.resolve([])
+      : this.queryMessageGroupNodesForPage({
+          allowShareVisitor: allowShareVisitor || this.includeShareVisitor,
+          current,
+          hasBeforeCursor: !!before,
+          postProcessUrl,
+          result,
+          timing,
+          topicId,
+          window: groupNodeWindow,
+        });
 
     const taskMessageIds = result
       .filter((message) => message.role === 'task')

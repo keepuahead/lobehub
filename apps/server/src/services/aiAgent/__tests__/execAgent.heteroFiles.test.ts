@@ -1812,11 +1812,17 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
         imageList: [{ id: 'red', url: 'https://files.test/red.png' }],
       },
       { id: 'answer', role: 'assistant', parentId: 'old', content: 'Remembered' },
-      { id: 'edited', role: 'user', parentId: 'answer', content: 'Edited question' },
+      {
+        id: 'edited',
+        role: 'user',
+        parentId: 'answer',
+        content: 'Edited question',
+        imageList: [{ id: 'blue', url: 'https://files.test/blue.png' }],
+      },
     ]);
     // ROOT CAUSE:
-    // The CLI's resume-to-fresh retry reuses imageList. Dropping ancestor images
-    // for the first native attempt also removed them from its fresh fallback.
+    // Sharing imageList repeated ancestor vision input on successful resumes.
+    // A separate fallback list preserves recovery without duplicating native history.
     await service.execAgent({
       agentId: 'agent-1',
       appContext: { topicId: 'topic-1' },
@@ -1827,7 +1833,11 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     /** @example Fallback text and actual vision input travel together to the same CLI. */
     expect(mockDispatchAgentRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        imageList: [{ id: 'red', url: 'https://files.test/red.png' }],
+        imageList: [{ id: 'blue', url: 'https://files.test/blue.png' }],
+        resumeFallbackImageList: [
+          { id: 'red', url: 'https://files.test/red.png' },
+          { id: 'blue', url: 'https://files.test/blue.png' },
+        ],
         resumeFallbackSystemContext: 'device recovery context',
         resumeSessionId: 'unavailable-native-session',
       }),
@@ -2904,5 +2914,232 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
       await vi.waitFor(() => expect(errorBubbleUpdates()).toHaveLength(1));
       expect(completeOperationSpy).toHaveBeenCalled();
     });
+  });
+
+  /** @example Current Edit replay remains compatible with device lifecycle boundaries. */
+  it('dispatches only the edited boundary ancestry and its persisted attachments', async () => {
+    // The composed server validates the persisted parent before reading its context.
+    mockMessageFindById.mockResolvedValue({
+      content: 'Edited question',
+      id: 'edited',
+      role: 'user',
+      topicId: 'topic-1',
+    });
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockMessageQuery.mockResolvedValue([
+      {
+        id: 'old-user',
+        role: 'user',
+        content: 'Remember this image',
+        imageList: [{ id: 'red-circle', alt: 'red circle', url: 'https://files.test/red.png' }],
+      },
+      {
+        id: 'old-assistant',
+        parentId: 'old-user',
+        role: 'assistant',
+        content: '',
+        tools: [{ id: 'call-1', apiName: 'shell', arguments: '{}', identifier: 'codex' }],
+      },
+      {
+        id: 'old-tool',
+        parentId: 'old-assistant',
+        role: 'tool',
+        tool_call_id: 'call-1',
+        content: 'DEVICE-TOOL-647',
+      },
+      {
+        id: 'edited',
+        parentId: 'old-tool',
+        role: 'user',
+        content: 'Edited question',
+        imageList: [{ id: 'blue-square', alt: 'blue square', url: 'https://files.test/blue.png' }],
+        metadata: {
+          contextSelections: [{ id: 'selected', source: 'text', content: 'DEVICE-SELECTION-647' }],
+        },
+      },
+      { id: 'later', parentId: 'edited', role: 'assistant', content: 'AFTER-BOUNDARY-647' },
+    ]);
+    // ROOT CAUSE:
+    // The gateway re-run carried only the text. Its recovery loader filtered out
+    // tool rows and replayed the edited prompt and later attempts as old history.
+    // Persisted attachment/context lookup and the same ancestry builder as local
+    // editing make the device path survive a refresh and first-run failure.
+    await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      parentMessageId: 'edited',
+      prompt: 'Edited question',
+      resume: true,
+    });
+    /** @example The device receives both historical and current images for actual vision input. */
+    expect(mockDispatchAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId: 'device-1',
+        imageList: [
+          { id: 'red-circle', url: 'https://files.test/red.png' },
+          { id: 'blue-square', url: 'https://files.test/blue.png' },
+        ],
+      }),
+    );
+    const queryOptions = mockMessageQuery.mock.calls.at(-1)?.[1];
+    /** @example Native replay can follow IDs inside compressed history. */
+    expect(queryOptions.includeGroupedMessages).toBe(true);
+    /** @example Device replay resolves persisted storage keys with the authorized file service. */
+    expect(await queryOptions.postProcessUrl('persisted-red.png')).toBe(
+      'https://files.test/signed/persisted-red.png',
+    );
+    /** @example The attachment resolver receives the original persisted key. */
+    expect(mockGetFullFileUrl).toHaveBeenCalledWith('persisted-red.png');
+    const context = mockBuildRemoteDeviceHeteroContext.mock.calls[0][0];
+    /** @example Current selected text is passed independently of the user's edited prompt. */
+    expect(context.agentSystemContext).toContain('DEVICE-SELECTION-647');
+    const history = JSON.stringify(context.conversationHistory);
+    /** @example Historical shell output reaches the fresh native session. */
+    expect(history).toContain('DEVICE-TOOL-647');
+    /** @example The prompt being executed is not duplicated as a historical turn. */
+    expect(history).not.toContain('Edited question');
+    /** @example Later attempts cannot leak across the chosen edit boundary. */
+    expect(history).not.toContain('AFTER-BOUNDARY-647');
+  });
+
+  /** @example Current Edit replay remains compatible with device lifecycle boundaries. */
+  it('reads device replay from the persisted prompt group and thread', async () => {
+    mockMessageFindById.mockResolvedValue({
+      content: 'Use my selection',
+      id: 'scoped-prompt',
+      role: 'user',
+      topicId: 'topic-1',
+      groupId: 'group-1',
+      threadId: 'thread-1',
+    });
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    // ROOT CAUSE:
+    // Omitted group/thread scopes query NULL rows, excluding the persisted prompt.
+    // The ancestry builder then returns empty context without throwing.
+    // Use the same scopes as turn setup so fresh device runs retain their context.
+    mockMessageQuery.mockImplementation(async (params) =>
+      params.groupId === 'group-1' && params.threadId === 'thread-1'
+        ? [
+            { id: 'scoped-tool', role: 'tool', content: 'SCOPED-TOOL-647' },
+            {
+              id: 'scoped-prompt',
+              parentId: 'scoped-tool',
+              role: 'user',
+              content: 'Use my selection',
+              metadata: {
+                contextSelections: [
+                  { id: 'selection', source: 'text', content: 'SCOPED-SELECTION-647' },
+                ],
+              },
+            },
+          ]
+        : [],
+    );
+    await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { groupId: 'group-1', threadId: 'thread-1', topicId: 'topic-1' },
+      parentMessageId: 'scoped-prompt',
+      prompt: 'Use my selection',
+      resume: true,
+    });
+    const context = mockBuildRemoteDeviceHeteroContext.mock.calls[0][0];
+    /** @example The scoped selection reaches device runtime independently of the prompt. */
+    expect(context.agentSystemContext).toContain('SCOPED-SELECTION-647');
+    /** @example The selected ancestry retains the scoped historical tool result. */
+    expect(JSON.stringify(context.conversationHistory)).toContain('SCOPED-TOOL-647');
+  });
+
+  /** @example Current Edit replay remains compatible with device lifecycle boundaries. */
+  it('continues a context-free native Codex turn if recovery history is unavailable', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockMessageQuery.mockRejectedValueOnce(new Error('Old attachment signing unavailable'));
+    // ROOT CAUSE:
+    // Provider-wide fail-closed handling made optional replay a prerequisite for
+    // plain native continuations, although their CLI session already owns history.
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Continue',
+    });
+    /** @example The existing native session can execute without serialized recovery history. */
+    expect(result.success).toBe(true);
+    /** @example Recovery is absent rather than presented as an empty authoritative history. */
+    expect(mockDispatchAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeSessionId: 'native-session-existing',
+        resumeFallbackSystemContext: undefined,
+      }),
+    );
+  });
+
+  /** @example Current Edit replay remains compatible with device lifecycle boundaries. */
+  it('fails safely when a native continuation cannot load its new selected context', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockMessageQuery.mockRejectedValueOnce(new Error('Selected context unavailable'));
+    const complete = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Use selection',
+      pageSelections: [{ id: 'page-selected', pageId: 'page-1', content: 'new selection' }],
+    });
+    /** @example The missing current selection must not silently disappear. */
+    expect(result.success).toBe(false);
+    /** @example No CLI starts with incomplete current input. */
+    expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    complete.mockRestore();
+  });
+
+  /** @example Current Edit replay remains compatible with device lifecycle boundaries. */
+  it('fails safely when a native continuation cannot load its raw document', async () => {
+    Object.assign(heteroAgentConfig.agencyConfig, {
+      boundDeviceId: 'device-1',
+      executionTarget: 'device',
+      heterogeneousProvider: { type: 'codex' },
+    });
+    mockGetHeterogeneousResumeSessionId.mockResolvedValue('native-session-existing');
+    mockIngestAttachment.mockResolvedValue({
+      fileId: 'raw-document',
+      isImage: false,
+      isVideo: false,
+      resolvedUrl: 'https://files.test/document.txt',
+    });
+    mockMessageQuery.mockRejectedValueOnce(new Error('Current document unavailable'));
+    const complete = vi
+      .spyOn(CompletionLifecycle.prototype, 'completeOperation')
+      .mockResolvedValue(undefined);
+    // ROOT CAUSE:
+    // The request has raw files but no fileIds; only resolved attachments identify the new document.
+    const result = await service.execAgent({
+      agentId: 'agent-1',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Read the attachment',
+      files: [{ mimeType: 'text/plain', name: 'document.txt', url: 'https://im/document.txt' }],
+    });
+    /** @example A missing current document never silently becomes a text-only run. */
+    expect(result.success).toBe(false);
+    /** @example The device is not dispatched with incomplete input. */
+    expect(mockDispatchAgentRun).not.toHaveBeenCalled();
+    complete.mockRestore();
   });
 });

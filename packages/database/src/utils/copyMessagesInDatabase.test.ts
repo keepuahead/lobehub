@@ -460,6 +460,51 @@ describe('copyMessagesInDatabase', () => {
 
 /** @example Copied edit history keeps assistant tool calls linked to separate result rows. */
 describe('copied tool result identity', () => {
+  /** @example A legacy tool row can own its call even when it has a conversation parent. */
+  it('keeps a same-row tool call linked when its parent owns a different call', async () => {
+    // ROOT CAUSE:
+    // Choosing every tool row's parent as its call owner broke legacy same-row tools/plugins.
+    // Only a copied parent containing the matching call can supply the new call-ID seed.
+    await serverDB.insert(messages).values([
+      {
+        id: 'legacy-parent',
+        role: 'assistant',
+        content: '',
+        tools: [{ id: 'other-call' }],
+        topicId: sourceTopicId,
+        userId,
+      },
+      {
+        id: 'legacy-result',
+        role: 'tool',
+        content: 'legacy output',
+        parentId: 'legacy-parent',
+        tools: [{ id: 'legacy-call' }],
+        topicId: sourceTopicId,
+        userId,
+      },
+    ]);
+    await serverDB
+      .insert(messagePlugins)
+      .values({ id: 'legacy-result', toolCallId: 'legacy-call', userId });
+    await runCopy([
+      ['legacy-parent', 'copied-legacy-parent'],
+      ['legacy-result', 'copied-legacy-result'],
+    ]);
+    const [result] = await serverDB
+      .select()
+      .from(messages)
+      .where(eq(messages.id, 'copied-legacy-result'));
+    const [plugin] = await serverDB
+      .select()
+      .from(messagePlugins)
+      .where(eq(messagePlugins.id, result.id));
+    /** @example The copied plugin links to the same copied message's tool call. */
+    expect(result.tools?.[0]).toMatchObject({ id: plugin.toolCallId });
+    /** @example Copying still gives the call an independent identity. */
+    expect(plugin.toolCallId).not.toBe('legacy-call');
+  });
+
   /** @example Real tool results are separate messages, not plugins on the assistant row. */
   it('remaps both ends of a tool call and its result message together', async () => {
     await serverDB.insert(messages).values([

@@ -41,6 +41,8 @@ export interface SandboxRunParams {
   prompt: string;
   /** GitHub repos to clone before running the agent (e.g. ['owner/repo', ...]). */
   repos?: string[];
+  /** Complete image inputs used only when native resume falls back to a fresh session. */
+  resumeFallbackImageList?: HeteroExecImageRef[];
   /** Full system context used only by the automatic retry without native resume. */
   resumeFallbackSystemContext?: string;
   resumeSessionId?: string;
@@ -210,6 +212,7 @@ export async function spawnHeteroSandbox(params: SandboxRunParams): Promise<void
     imageList: params.imageList,
     isNewSession: !resumeSessionId,
     prompt,
+    resumeFallbackImageList: params.resumeFallbackImageList,
     resumeFallbackSystemContext: params.resumeFallbackSystemContext,
     systemContext: params.systemContext,
   });

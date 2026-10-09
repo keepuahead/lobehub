@@ -112,6 +112,32 @@ describe('message edit confirmation', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  /** @example The open editor owns one pending destination across failed Send attempts. */
+  it('retains the edit preparation when the draft is amended after failure', async () => {
+    const { result, resend } = setup();
+    resend.mockImplementationOnce(async (_id, edit) => {
+      edit!.preparedTopic = {
+        content: edit!.content,
+        messageId: 'copied-user',
+        topicId: 'copied-topic',
+        sourceMessageId: 'u1',
+        sourceTopicId: 'topic',
+      };
+      throw new Error('destination unavailable');
+    });
+    await expect(result.current.onConfirm('first draft')).rejects.toThrow(
+      'destination unavailable',
+    );
+    const firstEdit = resend.mock.calls[0][1];
+    await act(() => result.current.onConfirm('amended draft'));
+    /** @example A second Send preserves the unsent destination and uses the latest text. */
+    expect(resend.mock.calls[1][1]).toBe(firstEdit);
+    expect(resend.mock.calls[1][1]).toMatchObject({
+      content: 'amended draft',
+      preparedTopic: { topicId: 'copied-topic' },
+    });
+  });
+
   /** @example Other heterogeneous agents keep their existing save-only historical edit behavior. */
   it('preserves ordinary historical message editing', async () => {
     const { result, resend, save } = setup('claude-code');

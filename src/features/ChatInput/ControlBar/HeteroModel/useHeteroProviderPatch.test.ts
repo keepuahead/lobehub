@@ -41,6 +41,7 @@ describe('useHeteroProviderPatch', () => {
       effort: undefined,
       model: 'topic-model',
       provider: 'cursor',
+      speed: undefined,
     });
     expect(state.agent.updateAgentConfigById).not.toHaveBeenCalled();
   });
@@ -60,11 +61,33 @@ describe('useHeteroProviderPatch', () => {
       effort: 'default',
       model: 'topic-model',
       provider: 'codex',
+      speed: undefined,
     });
     expect(state.agent.updateAgentConfigById).not.toHaveBeenCalled();
   });
 
-  it('keeps the remaining dimensions global when selecting a topic effort', async () => {
+  /** @example Standard changes the active topic without overwriting an Agent's Fast default. */
+  it('pins a Standard speed selection to the active topic', async () => {
+    const { result } = renderHook(() =>
+      useHeteroProviderPatch({
+        agentId: 'agent-a',
+        enabled: true,
+        provider: { speed: 'fast', type: 'codex' },
+      }),
+    );
+    // ROOT CAUSE:
+    // The runtime honored the topic speed pin, but the picker changed only the Agent default.
+    await act(() => result.current({ speed: 'default' }));
+    /** @example The current topic receives the explicit Standard pin. */
+    expect(state.chat.updateTopicHeteroPin).toHaveBeenCalledWith(
+      'topic-a',
+      expect.objectContaining({ speed: 'default' }),
+    );
+    /** @example Other topics retain their Agent default. */
+    expect(state.agent.updateAgentConfigById).not.toHaveBeenCalled();
+  });
+
+  it('pins effort and speed together without changing the Agent default', async () => {
     const { result } = renderHook(() =>
       useHeteroProviderPatch({
         agentId: 'agent-a',
@@ -79,12 +102,9 @@ describe('useHeteroProviderPatch', () => {
       effort: 'medium',
       model: undefined,
       provider: 'codex',
+      speed: 'fast',
     });
-    expect(state.agent.updateAgentConfigById).toHaveBeenCalledWith('agent-a', {
-      agencyConfig: {
-        heterogeneousProvider: { args: undefined, speed: 'fast' },
-      },
-    });
+    expect(state.agent.updateAgentConfigById).not.toHaveBeenCalled();
   });
 
   it('writes the effort to the Agent default when there is no active topic', async () => {

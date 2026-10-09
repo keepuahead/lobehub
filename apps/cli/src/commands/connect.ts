@@ -1022,6 +1022,7 @@ function bindGatewayClientHandlers(
             jwt: request.jwt,
             operationId: request.operationId,
             prompt: request.prompt,
+            resumeFallbackImageList: request.resumeFallbackImageList,
             resumeFallbackSystemContext: request.resumeFallbackSystemContext,
             resumeSessionId: request.resumeSessionId,
             serverUrl: getServerUrl(),

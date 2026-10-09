@@ -2753,14 +2753,28 @@ export const executeHeterogeneousAgent = async (
     // The native-resume path still uses its adapter-specific transcript hydration below.
     const freshHistory =
       !resumeSessionId && !replayTranscript && heterogeneousProvider.type !== 'amp';
-    const sourceMessages = getCurrentFrontendMessages();
+    const frontendMessages = getCurrentFrontendMessages();
+    // Display groups omit real ancestor IDs. Read authorized raw rows for a
+    // fresh Codex run instead of treating the render projection as its history.
+    const sourceMessages =
+      freshHistory && heterogeneousProvider.type === 'codex' && context.topicId
+        ? await messageService.getMessages({
+            agentId: context.agentId,
+            groupId: context.groupId,
+            includeGroupedMessages: true,
+            threadId: context.threadId,
+            topicId: context.topicId,
+          })
+        : frontendMessages;
     const restored = freshHistory
       ? await hydrateProjectedToolMessages(sourceMessages, messageService.getToolResultPayloads)
       : { messages: sourceMessages, missing: [] };
     if (restored.missing.length > 0) throw new Error('Could not restore the previous tool results');
     const durableContext = buildHeterogeneousConversationContext(
       restored.messages,
-      sourceMessages.find((row) => row.id === assistantMessageId)?.parentId ?? undefined,
+      frontendMessages.find((row) => row.id === assistantMessageId)?.parentId ??
+        sourceMessages.find((row) => row.id === assistantMessageId)?.parentId ??
+        undefined,
     );
     const systemContext = buildLocalHeterogeneousSystemContext({
       // `/goal` reaches a hetero agent as instructions, not a tool: it creates

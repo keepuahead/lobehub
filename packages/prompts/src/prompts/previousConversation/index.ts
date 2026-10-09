@@ -4,7 +4,7 @@ export * from './fromMessages';
 export interface ConversationHistoryEntry {
   /** Dialogue text or the completed tool result. */
   content: string;
-  /** Persisted selection and attachment context, separate from dialogue truncation. */
+  /** Persisted selections, attachments and tool calls, separate from dialogue truncation. */
   context?: string;
   /** Original role, retained so tool output is never presented as a user instruction. */
   role: 'assistant' | 'tool' | 'user';
